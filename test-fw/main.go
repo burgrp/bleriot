@@ -37,7 +37,7 @@ func main() {
 
 	for {
 
-		err := i2c.Write(0x71, []uint8{0x02})
+		err := i2c.Write(0x71, []uint8{0x0F})
 		if err != nil {
 			println("Write error: ", err.Error())
 		}
@@ -94,24 +94,9 @@ func (i2c *PyI2CMaster) writeByte(b uint8) error {
 		sr1 := i2c.peri.SR1.Get()
 		_ = i2c.peri.SR2.Get()
 
-		if sr1&py32.I2C_SR1_PECERR != 0 {
-			return ErrPEC
-		}
-
-		if sr1&py32.I2C_SR1_OVR != 0 {
-			return ErrOverrun
-		}
-
-		if sr1&py32.I2C_SR1_AF != 0 {
-			return ErrNoAck
-		}
-
-		if sr1&py32.I2C_SR1_ARLO != 0 {
-			return ErrArlo
-		}
-
-		if sr1&py32.I2C_SR1_BERR != 0 {
-			return ErrBERR
+		err := checkSR1Errors(i2c.peri)
+		if err != nil {
+			return err
 		}
 
 		if sr1&py32.I2C_SR1_TXE != 0 {
@@ -130,10 +115,6 @@ func (i2c *PyI2CMaster) writeByte(b uint8) error {
 
 func (i2c *PyI2CMaster) Stop() {
 	i2c.peri.CR1.SetBits(py32.I2C_CR1_STOP)
-	// for i2c.peri.SR1.HasBits(py32.I2C_SR1_TXE) {
-	// 	runtime.Gosched()
-	// }
-	time.Sleep(10 * time.Millisecond)
 }
 
 func (i2c *PyI2CMaster) Write(address uint8, data []uint8) error {
@@ -160,6 +141,34 @@ func (i2c *PyI2CMaster) Write(address uint8, data []uint8) error {
 	return nil
 }
 
+func checkSR1Errors(peri *py32.I2C_Type) error {
+	sr1 := peri.SR1.Get()
+
+	peri.SR1.ClearBits(py32.I2C_SR1_PECERR | py32.I2C_SR1_OVR | py32.I2C_SR1_AF | py32.I2C_SR1_ARLO | py32.I2C_SR1_BERR)
+
+	if sr1&py32.I2C_SR1_PECERR != 0 {
+		return ErrPEC
+	}
+
+	if sr1&py32.I2C_SR1_OVR != 0 {
+		return ErrOverrun
+	}
+
+	if sr1&py32.I2C_SR1_AF != 0 {
+		return ErrNoAck
+	}
+
+	if sr1&py32.I2C_SR1_ARLO != 0 {
+		return ErrArlo
+	}
+
+	if sr1&py32.I2C_SR1_BERR != 0 {
+		return ErrBERR
+	}
+
+	return nil
+}
+
 func (i2c *PyI2CMaster) Read(address uint8, data *[]uint8) (int, error) {
 
 	i2c.peri.CR1.SetBits(py32.I2C_CR1_START)
@@ -177,29 +186,14 @@ func (i2c *PyI2CMaster) Read(address uint8, data *[]uint8) (int, error) {
 		sr1 := i2c.peri.SR1.Get()
 		_ = i2c.peri.SR2.Get()
 
-		if sr1&py32.I2C_SR1_PECERR != 0 {
-			return read, ErrPEC
-		}
-
-		if sr1&py32.I2C_SR1_OVR != 0 {
-			return read, ErrOverrun
-		}
-
-		if sr1&py32.I2C_SR1_AF != 0 {
-			return read, ErrNoAck
-		}
-
-		if sr1&py32.I2C_SR1_ARLO != 0 {
-			return read, ErrArlo
-		}
-
-		if sr1&py32.I2C_SR1_BERR != 0 {
-			return read, ErrBERR
-		}
-
 		if sr1&py32.I2C_SR1_RXNE != 0 {
 			(*data)[i] = uint8(i2c.peri.DR.Get())
 			read++
+		}
+
+		err := checkSR1Errors(i2c.peri)
+		if err != nil {
+			return read, err
 		}
 
 		runtime.Gosched()
