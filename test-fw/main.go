@@ -33,23 +33,21 @@ func main() {
 
 	i2c := NewPyI2CMaster(py32.I2C, 24_000_000, 100_000)
 
-	// data := make([]uint8, 2)
-
-	wr := []uint8{0x02}
+	data := make([]uint8, 2)
 
 	for {
 
-		err := i2c.Write(0x71, &wr)
+		err := i2c.Write(0x71, []uint8{0x02})
 		if err != nil {
 			println("Write error: ", err.Error())
 		}
 
-		// read, err := i2c.Read(0x71, &data)
-		// if err != nil {
-		// 	println("Read error: ", err.Error())
-		// } else {
-		// 	println("Read: ", read, data[0], data[1])
-		// }
+		read, err := i2c.Read(0x71, &data)
+		if err != nil {
+			println("Read error: ", err.Error())
+		} else {
+			println("Read: ", read, "bytes:", data[0], data[1])
+		}
 
 		i2c.Stop()
 
@@ -60,9 +58,6 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// println("This is the end...")
-	// for {
-	// }
 }
 
 type PyI2CMaster struct {
@@ -127,8 +122,6 @@ func (i2c *PyI2CMaster) writeByte(b uint8) error {
 			break
 		}
 
-		println(hex32(sr1))
-
 		runtime.Gosched()
 	}
 
@@ -143,7 +136,7 @@ func (i2c *PyI2CMaster) Stop() {
 	time.Sleep(10 * time.Millisecond)
 }
 
-func (i2c *PyI2CMaster) Write(address uint8, data *[]uint8) error {
+func (i2c *PyI2CMaster) Write(address uint8, data []uint8) error {
 
 	i2c.peri.CR1.SetBits(py32.I2C_CR1_START)
 	for !i2c.peri.SR1.HasBits(py32.I2C_SR1_SB) {
@@ -155,7 +148,7 @@ func (i2c *PyI2CMaster) Write(address uint8, data *[]uint8) error {
 		return err
 	}
 
-	for _, b := range *data {
+	for _, b := range data {
 
 		err := i2c.writeByte(b)
 		if err != nil {
@@ -174,21 +167,15 @@ func (i2c *PyI2CMaster) Read(address uint8, data *[]uint8) (int, error) {
 		runtime.Gosched()
 	}
 
-	println("read addr")
-
 	err := i2c.writeByte(address<<1 | 1)
 	if err != nil {
 		return 0, err
 	}
 
-	println("reading....")
-
 	read := 0
 	for i := range *data {
 		sr1 := i2c.peri.SR1.Get()
 		_ = i2c.peri.SR2.Get()
-
-		println(hex32(sr1))
 
 		if sr1&py32.I2C_SR1_PECERR != 0 {
 			return read, ErrPEC
@@ -211,7 +198,6 @@ func (i2c *PyI2CMaster) Read(address uint8, data *[]uint8) (int, error) {
 		}
 
 		if sr1&py32.I2C_SR1_RXNE != 0 {
-			println("we have a byte!")
 			(*data)[i] = uint8(i2c.peri.DR.Get())
 			read++
 		}
@@ -219,21 +205,19 @@ func (i2c *PyI2CMaster) Read(address uint8, data *[]uint8) (int, error) {
 		runtime.Gosched()
 	}
 
-	println("end of read")
-
 	return read, nil
 }
 
-func hex32(v uint32) string {
-	digits := "0123456789ABCDEF"
-	return "0x" + string([]byte{
-		digits[v>>28&0xf],
-		digits[v>>24&0xf],
-		digits[v>>20&0xf],
-		digits[v>>16&0xf],
-		digits[v>>12&0xf],
-		digits[v>>8&0xf],
-		digits[v>>4&0xf],
-		digits[v&0xf],
-	})
-}
+// func hex32(v uint32) string {
+// 	digits := "0123456789ABCDEF"
+// 	return "0x" + string([]byte{
+// 		digits[v>>28&0xf],
+// 		digits[v>>24&0xf],
+// 		digits[v>>20&0xf],
+// 		digits[v>>16&0xf],
+// 		digits[v>>12&0xf],
+// 		digits[v>>8&0xf],
+// 		digits[v>>4&0xf],
+// 		digits[v&0xf],
+// 	})
+// }
