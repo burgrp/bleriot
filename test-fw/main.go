@@ -37,10 +37,13 @@ func main() {
 
 		err := i2c.start(0x71)
 		if err != nil {
-			println("Error: ", err.Error())
+			println("Start error: ", err.Error())
 		}
 
-		i2c.stop()
+		err = i2c.write(0x55, true)
+		if err != nil {
+			println("Write error: ", err.Error())
+		}
 
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -60,37 +63,59 @@ func NewPyI2CMaster(peri *py32.I2C_Type) *PyI2CMaster {
 
 	peri.SetCCR_F_S(1000)
 	peri.SetTRISE(10)
+	py32.I2C.SetCR1_PE(1)
 
 	return &PyI2CMaster{peri: peri}
 }
 
 func (i2c *PyI2CMaster) start(address uint8) error {
-	py32.I2C.SetCR1_PE(1)
 
 	py32.I2C.CR1.SetBits(py32.I2C_CR1_START)
 	for !py32.I2C.SR1.HasBits(py32.I2C_SR1_SB) {
 		runtime.Gosched()
 	}
 
-	py32.I2C.DR.Set(uint32(0x71 << 1))
+	py32.I2C.DR.Set(uint32(address << 1))
 
 	for {
 		sr1 := py32.I2C.SR1.Get()
 		_ = py32.I2C.SR2.Get()
 
-		// println("SR1: ", hex32(sr1))
-		// println("SR2: ", hex32(sr2))
-
-		if (sr1 & py32.I2C_SR1_AF) != 0 {
+		if sr1&py32.I2C_SR1_AF != 0 {
 			return ErrNoAck
 		}
 
-		if (sr1 & py32.I2C_SR1_TXE) != 0 {
+		if sr1&py32.I2C_SR1_TXE != 0 {
 			break
 		}
 
-		// time.Sleep(10 * time.Millisecond)
+		runtime.Gosched()
+	}
 
+	return nil
+}
+
+func (i2c *PyI2CMaster) write(b uint8, last bool) error {
+
+	i2c.peri.DR.Set(uint32(b))
+
+	for {
+		sr1 := py32.I2C.SR1.Get()
+		_ = py32.I2C.SR2.Get()
+
+		if sr1&py32.I2C_SR1_AF != 0 {
+			return ErrNoAck
+		}
+
+		if sr1&py32.I2C_SR1_TXE != 0 {
+			break
+		}
+
+		runtime.Gosched()
+	}
+
+	if last {
+		py32.I2C.CR1.SetBits(py32.I2C_CR1_STOP)
 	}
 
 	return nil
@@ -108,11 +133,4 @@ func hex32(v uint32) string {
 		digits[v>>4&0xf],
 		digits[v&0xf],
 	})
-}
-
-func (i2c *PyI2CMaster) stop() {
-	println("stop")
-	py32.I2C.CR1.SetBits(py32.I2C_CR1_STOP)
-	time.Sleep(10 * time.Millisecond)
-	py32.I2C.SetCR1_PE(0)
 }
