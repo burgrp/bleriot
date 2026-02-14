@@ -35,12 +35,7 @@ func main() {
 
 	for {
 
-		err := i2c.start(0x71)
-		if err != nil {
-			println("Start error: ", err.Error())
-		}
-
-		err = i2c.write(0x55, true)
+		err := i2c.write(0x71, []uint8{0x55, 0xF0}, true)
 		if err != nil {
 			println("Write error: ", err.Error())
 		}
@@ -68,14 +63,8 @@ func NewPyI2CMaster(peri *py32.I2C_Type) *PyI2CMaster {
 	return &PyI2CMaster{peri: peri}
 }
 
-func (i2c *PyI2CMaster) start(address uint8) error {
-
-	py32.I2C.CR1.SetBits(py32.I2C_CR1_START)
-	for !py32.I2C.SR1.HasBits(py32.I2C_SR1_SB) {
-		runtime.Gosched()
-	}
-
-	py32.I2C.DR.Set(uint32(address << 1))
+func (i2c *PyI2CMaster) writeByte(b uint8) error {
+	i2c.peri.DR.Set(uint32(b))
 
 	for {
 		sr1 := py32.I2C.SR1.Get()
@@ -95,27 +84,29 @@ func (i2c *PyI2CMaster) start(address uint8) error {
 	return nil
 }
 
-func (i2c *PyI2CMaster) write(b uint8, last bool) error {
+func (i2c *PyI2CMaster) write(address uint8, data []uint8, stop bool) error {
 
-	i2c.peri.DR.Set(uint32(b))
-
-	for {
-		sr1 := py32.I2C.SR1.Get()
-		_ = py32.I2C.SR2.Get()
-
-		if sr1&py32.I2C_SR1_AF != 0 {
-			return ErrNoAck
-		}
-
-		if sr1&py32.I2C_SR1_TXE != 0 {
-			break
-		}
-
+	py32.I2C.CR1.SetBits(py32.I2C_CR1_START)
+	for !py32.I2C.SR1.HasBits(py32.I2C_SR1_SB) {
 		runtime.Gosched()
 	}
 
-	if last {
-		py32.I2C.CR1.SetBits(py32.I2C_CR1_STOP)
+	if stop {
+		defer py32.I2C.CR1.SetBits(py32.I2C_CR1_STOP)
+	}
+
+	err := i2c.writeByte(address << 1)
+	if err != nil {
+		return err
+	}
+
+	for _, b := range data {
+
+		err := i2c.writeByte(b)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	return nil
