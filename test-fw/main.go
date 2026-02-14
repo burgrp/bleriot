@@ -31,7 +31,7 @@ func main() {
 
 	py32.RCC.APBENR1.SetBits(py32.RCC_APBENR1_I2CEN)
 
-	i2c := NewPyI2CMaster(py32.I2C)
+	i2c := NewPyI2CMaster(py32.I2C, 24_000_000, 100_000)
 
 	for {
 
@@ -54,10 +54,16 @@ type PyI2CMaster struct {
 
 var ErrNoAck = errors.New("no ACK received")
 
-func NewPyI2CMaster(peri *py32.I2C_Type) *PyI2CMaster {
+func NewPyI2CMaster(peri *py32.I2C_Type, apbClockHz int, i2cClockHz int) *PyI2CMaster {
 
-	peri.SetCCR_F_S(1000)
-	peri.SetTRISE(10)
+	peri.SetCR2_FREQ(uint32(apbClockHz / 1e6))
+	peri.SetCCR(uint32(apbClockHz / (i2cClockHz * 2)))
+
+	apbClockkTns := 1e9 / apbClockHz
+	tRiseMaxNs := 1000 // I2C protocol specification
+	trise := uint32((tRiseMaxNs / apbClockkTns) + 1)
+	peri.SetTRISE(trise)
+
 	py32.I2C.SetCR1_PE(1)
 
 	return &PyI2CMaster{peri: peri}
