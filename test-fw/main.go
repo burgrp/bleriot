@@ -64,7 +64,7 @@ func NewPyI2CMaster(peri *py32.I2C_Type, apbClockHz int, i2cClockHz int) *PyI2CM
 	trise := uint32((tRiseMaxNs / apbClockkTns) + 1)
 	peri.SetTRISE(trise)
 
-	py32.I2C.SetCR1_PE(1)
+	peri.SetCR1_PE(1)
 
 	return &PyI2CMaster{peri: peri}
 }
@@ -73,8 +73,8 @@ func (i2c *PyI2CMaster) writeByte(b uint8) error {
 	i2c.peri.DR.Set(uint32(b))
 
 	for {
-		sr1 := py32.I2C.SR1.Get()
-		_ = py32.I2C.SR2.Get()
+		sr1 := i2c.peri.SR1.Get()
+		_ = i2c.peri.SR2.Get()
 
 		if sr1&py32.I2C_SR1_AF != 0 {
 			return ErrNoAck
@@ -92,13 +92,13 @@ func (i2c *PyI2CMaster) writeByte(b uint8) error {
 
 func (i2c *PyI2CMaster) write(address uint8, data []uint8, stop bool) error {
 
-	py32.I2C.CR1.SetBits(py32.I2C_CR1_START)
-	for !py32.I2C.SR1.HasBits(py32.I2C_SR1_SB) {
+	i2c.peri.CR1.SetBits(py32.I2C_CR1_START)
+	for !i2c.peri.SR1.HasBits(py32.I2C_SR1_SB) {
 		runtime.Gosched()
 	}
 
 	if stop {
-		defer py32.I2C.CR1.SetBits(py32.I2C_CR1_STOP)
+		defer i2c.peri.CR1.SetBits(py32.I2C_CR1_STOP)
 	}
 
 	err := i2c.writeByte(address << 1)
