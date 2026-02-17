@@ -896,53 +896,19 @@ The TRX_TRANS_WAIT_TIME register can change TRX conversion time. When the receiv
 
 Normal TRX conversion time is modified by configuring the TRX_TRANS_WAIT_TIME register.
 
-```
-PTX:  |----TX:PID=0----|--67+TRX_TRANS_WAIT_TIME(µs)--|----RX----|
-      |                                                            |
-      v                                                            v
-      tx_irq(PID=1)                                        ACK received
-
-PRX:  |----RX----|--75+TRX_TRANS_WAIT_TIME(µs)--|----ACK:PID=1----|
-                  |                                                  |
-                  v                                                  v
-          Packet received                                   rx_irq(PID=0)
-```
+![](images/8331.png)
 
 **9.3.3.2 Enhanced Type Receiver Lost Packet Timing**
 
 This describes the timing when PRX end loses the first packet. The 255µs is the ARD default configuration wait time. The 2ms is the wait time configured using the REG_RX_TIMEOUT register default value. PTX transmit-to-receive time 67µs includes closing TX circuit + opening RX circuit + TRX conversion (default configured as 0, using TRX_TRANS_WAIT_TIME register configuration).
 
-```
-PTX:  |--TX:PID=0--|--RX--|--255µs ARD--|--TX:PID=0--|--RX--|--TX:PID=1--|
-      |                         |                           |              |
-      v                         v                           v              v
-      Same as                Timeout                   Same as       tx_irq(PID=1)
-                             above                     above
-
-PRX:  |----X----|----RX----|--2ms--|----ACK:PID=1----|
-                  |                   |
-                  v                   v
-          Packet received     Packet received
-          rx_irq(PID=0)       rx_irq(PID=1)
-```
+![](images/8332.png)
 
 **9.3.3.3 Enhanced Type Transmitter Lost ACK Timing**
 
 This describes the timing when TX end loses the first ACK. The 255µs is the ARD default configuration wait time. The 2ms is the wait time configured using the REG_RX_TIMEOUT register default value. PTX transmit-to-receive 67µs includes closing TX circuit + opening RX circuit + TRX conversion (default configured as 0, using TRX_TRANS_WAIT_TIME register configuration).
 
-```
-PTX:  |--TX:PID=0--|--RX--|--255µs ARD--|--TX:PID=0--|--RX--|--TX:PID=1--|
-      |                         |                           |              |
-      v                         v                           v              v
-      Same as                Timeout                   Same as       tx_irq(PID=1)
-                             above                     above
-
-PRX:  |--RX--|--ACK:PID=1--|--RX--|--ACK:PID=1--|--RX--|
-              |  (lost)             |                    |
-              v                     v                    v
-      Packet received       Packet received      Packet received
-      rx_irq(PID=0)         rx_irq(PID=1)        rx_irq(PID=0)
-```
+![](images/8333.png)
 
 #### 9.3.4 Data Packet PID Identification
 
@@ -950,40 +916,7 @@ Enhanced data packets all include a two-bit PID (data packet identifier) to help
 
 **PID Generation and Detection:**
 
-```d2
-direction: right
-
-# PTX side
-PTXStart: Start {shape: oval}
-PTXPID: PID++ {shape: parallelogram}
-PTXTimeout: Timeout? {shape: diamond}
-PTXNewData: New Data {shape: rectangle}
-PTXEnd: End {shape: oval}
-
-PTXStart -> PTXTimeout
-PTXTimeout -> PTXPID: Yes
-PTXTimeout -> PTXNewData: No
-PTXPID -> PTXEnd
-PTXNewData -> PTXEnd
-
-# PRX side
-PRXStart: Start {shape: oval}
-PRXCheckPID: PID equals previous PID? {shape: diamond}
-PRXCheckCRC: CRC equals previous CRC? {shape: diamond}
-PRXDiscard: Discard {shape: rectangle}
-PRXNewPacket: New Data Packet {shape: rectangle}
-PRXValid: Valid {shape: rectangle}
-PRXEnd: End {shape: oval}
-
-PRXStart -> PRXCheckPID
-PRXCheckPID -> PRXCheckCRC: Yes
-PRXCheckPID -> PRXNewPacket: No
-PRXCheckCRC -> PRXDiscard: Yes
-PRXCheckCRC -> PRXValid: No
-PRXDiscard -> PRXEnd
-PRXNewPacket -> PRXEnd
-PRXValid -> PRXEnd
-```
+![](images/834.png)
 
 After the transmitter retrieves a new packet from FIFO, PID value increments by one. When automatic retransmission occurs, TX_PID sent by TX end does not increase, and TX_PID in ACK returned by RX end also does not increase.
 
@@ -991,14 +924,7 @@ After the transmitter retrieves a new packet from FIFO, PID value increments by 
 
 Multi-channel reception is a function used in RX mode, containing 6 parallel data pipes with unique addresses. A data pipe is a logical channel within a physical RF channel. Each data pipe in PAN211x has an independent physical address (data pipe address).
 
-```
-       TX1 ─┐
-       TX2 ─┤
-       TX3 ─┼──> RX (6 Pipes: Pipe0-Pipe5)
-       TX4 ─┤
-       TX5 ─┤
-       TX6 ─┘
-```
+![](images/84.png)
 
 When PAN211x is configured in RX mode, it can receive data from 6 different data pipes on one communication frequency. Each data pipe has its unique address and can be independently configured. Up to 6 PAN211x configured in TX mode can communicate with one PAN211x configured in RX mode.
 
@@ -1041,15 +967,7 @@ Whitelist filtering is a security filtering mechanism that maintains a device ad
 
 **Bluetooth LE Broadcast Frame Structure:**
 
-```
-+----------+------+--------+--------+------------+------+
-| Preamble | Addr | Header | Length |    PDU     | CRC  |
-| 1 byte   |4bytes| 1 byte | 1 byte |            |3bytes|
-|Whitened  |      |        |        |  AdvA(6B)  |      |
-|          |      |        |        | +AdvD(0-31B)|     |
-+----------+------+--------+--------+------------+------+
-   No Whitened              |<---- Whitened ---->|  CRC
-```
+![](images/851.png)
 
 The 6 bytes of AdvA in the frame can be set as a whitelist for filtering. Matching 0~6 bytes can be selected through the WL_MATCH_MODE register.
 
@@ -1095,6 +1013,11 @@ The 6 bytes of AdvA in the frame can be set as a whitelist for filtering. Matchi
 4. **PLD_START_BYTE = 1, WL_MATCH_MODE = 4:**
    - Compares WL0~WL3 with D1~D4 (4 bytes starting from AdvA byte 1)
 
+![](images/851-00.png)
+![](images/851-01.png)
+![](images/851-02.png)
+![](images/851-03.png)
+
 #### 9.5.2 Length Filtering
 
 Length filtering refers to deciding whether to receive data packets based on data packet length filtering rules when receiving Bluetooth broadcast data packets. This filtering method can effectively avoid processing data packets that do not meet expected length, thereby reducing invalid data processing and improving device response speed and resource utilization efficiency.
@@ -1103,16 +1026,7 @@ Length filtering refers to deciding whether to receive data packets based on dat
 
 PAN211x receives data packet's AdvA (6 bytes) plus valid data (excluding CRC) length sum = PL_LEN (Payload Length)
 
-```
-+----------+------+--------+--------+------------+------+
-| Preamble | Addr | Header | Length |    PDU     | CRC  |
-| 1 byte   |4bytes| 1 byte | 1 byte |            |3bytes|
-|Whitened  |      |        |        |  AdvA(6B)  |      |
-|          |      |        |        | +AdvD(0-31B)|     |
-+----------+------+--------+--------+------------+------+
-   No Whitened              |<---- Whitened ---->|  CRC
-                            |<-- Filtered Length -->|
-```
+![](images/852.png)
 
 **Length filtering conditions configured through BLELEN_MATCH_MODE register:**
 
@@ -1183,27 +1097,7 @@ In SPI write operations:
 - IC latches address bits on the rising edge of SCK
 - IC latches data bits on the rising edge of SCK
 
-```d2
-direction: right
-
-CSN: {
-  shape: rectangle
-  label: "CSN (active low)"
-}
-
-SCK: {
-  shape: rectangle
-  label: "SCK (clock)"
-}
-
-DATA: {
-  shape: rectangle
-  label: "DATA: A6 A5 A4 A3 A2 A1 A0 W=1 Dw7 Dw6 Dw5 Dw4 Dw3 Dw2 Dw1 Dw0"
-}
-
-CSN -> SCK: "Low enables transaction"
-SCK -> DATA: "Address and data latched on rising edges"
-```
+![](images/921.png)
 
 **Timing Sequence:**
 1. CSN goes low to enable the transaction
@@ -1219,27 +1113,7 @@ In SPI read operations:
 - IC controls DATA output on the falling edge of SCK (8th falling edge)
 - Host samples data bits on the rising edge of SCK
 
-```d2
-direction: right
-
-CSN: {
-  shape: rectangle
-  label: "CSN (active low)"
-}
-
-SCK: {
-  shape: rectangle
-  label: "SCK (clock)"
-}
-
-DATA: {
-  shape: rectangle
-  label: "DATA: A6 A5 A4 A3 A2 A1 A0 R=0 Dr7 Dr6 Dr5 Dr4 Dr3 Dr2 Dr1 Dr0"
-}
-
-CSN -> SCK: "Low enables transaction"
-SCK -> DATA: "Address latched, IC controls DATA"
-```
+![](images/922.png)
 
 **Timing Sequence:**
 1. CSN goes low to enable the transaction
@@ -1253,6 +1127,8 @@ SCK -> DATA: "Address latched, IC controls DATA"
 During 3-wire SPI read operations, the DATA pin of PAN211x transitions from input to output state on the 8th falling edge of SCK. The host must switch DATA from output to input before the 8th falling edge of SCK to avoid electrical conflicts.
 
 #### 10.2.3 3-Wire SPI Timing Requirements
+
+![](images/923.png)
 
 The following SPI timing requirements are evaluated with a maximum load of 10pF:
 
@@ -1286,9 +1162,7 @@ When using I2C, ensure that the host pulls the CSN signal high or leaves it floa
 
 I2C write sequence:
 
-```
-S - Dev Addr[6:0] - 0 - A - Reg Addr[6:0] - 0 - A - DATA[7:0] - A - P
-```
+![](images/931.png)
 
 **Timing Sequence:**
 1. **S**: I2C Start Condition
@@ -1306,9 +1180,7 @@ S - Dev Addr[6:0] - 0 - A - Reg Addr[6:0] - 0 - A - DATA[7:0] - A - P
 
 I2C read sequence:
 
-```
-S - Dev Addr[6:0] - 0 - A - Reg Addr[6:0] - 1 - A - RS - Dev Addr[6:0] - 1 - A - DATA[7:0] - N - P
-```
+![](images/932.png)
 
 **Timing Sequence:**
 1. **S**: I2C Start Condition
@@ -1389,13 +1261,8 @@ To enable IRQ time-division multiplexing on the DATA pin:
 After configuration, the DATA pin functions as IRQ interrupt (active low) when the SPI bus is idle.
 
 **Timing:**
-```
-CSN ___________┌───────────────┐_______________
-SCK ___________┌┐┐┐┐┐┐┐┐┐┐┐┐┐┐┐┐_______________
-DATA ──────────[SPI Data]─────────────┐________
-IRQ __________________________________|  IRQ   |_____
-                                    LOW  Clear  HIGH
-```
+
+![](images/961.png)
 
 #### 10.6.2 SDA and IRQ Multiplexing
 
@@ -1411,16 +1278,9 @@ After configuration, the SDA pin functions as IRQ interrupt (active low) when th
 After enabling interrupt multiplexing on the SDA pin, the operation timing no longer complies with standard I2C timing. The host must use software simulation for I2C operations.
 
 **Timing:**
-```
-CSN ___________________________________________
-IRQ ___________________________________________
-SCL ___________┌┐┐┐┐┐┐┐┐┐┐┐┐┐┐┐┐_______________
-SDA ──────────[I2C Data]──────────────┐________
-                                    LOW  Clear
-```
+![](images/962.png)
 
 ---
-
 
 ## 11. Register Map
 
@@ -1862,43 +1722,7 @@ The reference schematic provided is based on the SOP8 package. The SOT23-8 packa
 ### 12.1 Typical Application Circuit
 
 The following schematic shows the typical application circuit for PAN211x:
-
-```
-Component Connections:
-────────────────────────────────────────────────────────────
-
-U1 (PAN2110P0AA - SOP8 Package):
-  Pin 1: CSN       ← R1 (0Ω) ← Host CSN signal
-  Pin 2: SCK/SCL   ← Host SCK/SCL signal
-  Pin 3: VSS       ← Ground
-  Pin 4: XC0       ← Y1 (16MHz or 32MHz crystal, 10pF)
-  Pin 5: XC1       ← Y1 (16MHz or 32MHz crystal, 10pF)
-  Pin 6: MOSI/SDA  ← Host MOSI/SDA/DATA signal
-  Pin 7: ANT       ← RF antenna connection (27Ω matching)
-  Pin 8: VDD       ← Power supply (1.9V - 3.6V)
-
-Power Supply Decoupling:
-  C1: 1µF (or NC)  - VDD to GND
-  C2: 100nF        - VDD to GND (close to IC)
-
-Crystal Oscillator:
-  Y1: 16MHz or 32MHz crystal
-  C3: 10pF         - XC0 to GND
-  C4: 10pF         - XC1 to GND
-
-Antenna Matching:
-  ANT pin requires proper impedance matching
-  Typical matching: 27Ω series resistor or matching network
-
-Optional Components:
-  C7, C8: NC (not connected) - Reserved for future use
-  R1: 0Ω - CSN series resistor (optional, for signal integrity)
-
-Notes:
-  - OSC1, OSC2: Internal oscillator pins (package dependent)
-  - GND1, GND2: Multiple ground pins for better grounding
-  - NC pins: Not connected, leave floating
-```
+![](images/11.png)
 
 ### 12.2 Component Selection Guidelines
 
@@ -1941,6 +1765,7 @@ PAN211x is available in two package options: SOP8 and SOT23-8.
 
 ### 13.1 SOP8 Package
 
+![](images/121.png)
 **Package Type:** SOP8 (Small Outline Package, 8-pin)
 
 **Dimension Table:**
@@ -1969,21 +1794,10 @@ PAN211x is available in two package options: SOP8 and SOT23-8.
 - RoHS compliant
 
 **Pin Numbering:**
-```
-Top View (looking down at package):
-
-     ┌─────────┐
-  1  │●        │  8
-  2  │         │  7
-  3  │         │  6
-  4  │         │  5
-     └─────────┘
-
-Pin 1 indicator: Dot or chamfer marking
-```
 
 ### 13.2 SOT23-8 Package
 
+![](images/122.png)
 **Package Type:** SOT23-8 (Small Outline Transistor, 8-pin)
 
 **Dimension Table:**
@@ -2009,20 +1823,6 @@ Pin 1 indicator: Dot or chamfer marking
 - Lead finish: Tin (Sn) plated
 - Smaller footprint than SOP8
 - RoHS compliant
-
-**Pin Numbering:**
-```
-Top View (looking down at package):
-
-     ┌──────┐
-  1  │●     │  8
-  2  │      │  7
-  3  │      │  6
-  4  │      │  5
-     └──────┘
-
-Pin 1 indicator: Dot marking on top surface
-```
 
 ### 13.3 Package Selection Guide
 
