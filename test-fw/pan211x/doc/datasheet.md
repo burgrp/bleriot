@@ -544,6 +544,8 @@ Both packages share the same pinout.
 
 ## Document Information
 
+This is a translation from the original PDF version:
+
 **Copyright © 2025 Panchip Microelectronics Co., Ltd.**
 
 **Contact Information:**

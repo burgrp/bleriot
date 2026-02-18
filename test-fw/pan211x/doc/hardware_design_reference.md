@@ -113,19 +113,39 @@ The table below shows carrier frequency changes in single carrier mode at 2440MH
 - Frequency point: 2440MHz
 - PCB: FR4 double-sided board
 
-**Crystal Specifications Tested:**
+**Crystal Specifications Tested** — Carrier frequency variation (MHz) with internal capacitor adjustment for different crystal types. Bold row indicates default configuration.
 
-| Package | Load Cap | Freq Tolerance | ESR |
-|---------|----------|----------------|-----|
-| SMD3225 | 8pF, 9pF, 10pF, 12pF, 16pF, 18pF, 20pF | ±10ppm | ≤40-80Ω |
-| DIP_49S | 10pF, 12pF, 20pF | ±20ppm | ≤30Ω |
-| SMD2016 | 8pF | ±10ppm | - |
+| FSYNXO_CAP2 | FSYNXO_CAPSEL | SMD2016<br>8pF, ±10ppm | SMD3225<br>8pF, ±10ppm<br>ESR≤40Ω | SMD3225<br>9pF, ±10ppm<br>ESR≤40Ω | SMD3225<br>10pF, ±10ppm<br>ESR≤50Ω | SMD3225<br>12pF, ±10ppm<br>ESR≤40Ω | SMD3225<br>16pF, ±10ppm<br>ESR≤40Ω | SMD3225<br>18pF, ±10ppm<br>ESR≤40Ω | SMD3225<br>20pF, ±10ppm<br>ESR≤80Ω | DIP-49S<br>10pF, ±20ppm<br>ESR≤30Ω | DIP-49S<br>12pF, ±20ppm<br>ESR≤30Ω | DIP-49S<br>20pF, ±20ppm<br>ESR≤30Ω |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 000000 | 2440.044 | 2440.035 | 2440.120 | 2440.228 | 2440.219 | 2440.303 | 2440.332 | 2440.320 | 2440.306 | 2440.457 | 2440.654 |
+| 0 | 000001 | 2440.040 | 2440.029 | 2440.113 | 2440.221 | 2440.212 | 2440.297 | 2440.326 | 2440.314 | 2440.294 | 2440.444 | 2440.642 |
+| 0 | 000010 | 2440.036 | 2440.022 | 2440.105 | 2440.214 | 2440.205 | 2440.291 | 2440.319 | 2440.308 | 2440.281 | 2440.431 | 2440.631 |
+| 0 | 000100 | 2440.028 | 2440.010 | 2440.092 | 2440.201 | 2440.193 | 2440.279 | 2440.307 | 2440.297 | 2440.257 | 2440.407 | 2440.609 |
+| 0 | 001000 | 2440.014 | 2439.986 | 2440.067 | 2440.177 | 2440.171 | 2440.256 | 2440.285 | 2440.276 | 2440.220 | 2440.361 | 2440.568 |
+| 0 | 010000 | 2439.989 | 2439.944 | 2440.024 | 2440.135 | 2440.129 | 2440.216 | 2440.245 | 2440.239 | 2440.141 | 2440.278 | 2440.492 |
+| **0** | **100000 (default)** | **2439.947** | **2439.876** | **2439.953** | **2440.066** | **2440.066** | **2440.150** | **2440.181** | **2440.176** | **2440.002** | **2440.135** | **2440.362** |
+| 0 | 100001 | 2439.946 | 2439.872 | 2439.949 | 2440.062 | 2440.062 | 2440.148 | 2440.178 | 2440.175 | 2439.995 | 2440.128 | 2440.356 |
+| 0 | 100010 | 2439.943 | 2439.868 | 2439.945 | 2440.058 | 2440.058 | 2440.144 | 2440.174 | 2440.171 | 2439.988 | 2440.120 | 2440.349 |
+| 0 | 100100 | 2439.939 | 2439.861 | 2439.938 | 2440.051 | 2440.050 | 2440.138 | 2440.168 | 2440.165 | 2439.973 | 2440.105 | 2440.335 |
+| 0 | 101000 | 2439.932 | 2439.848 | 2439.924 | 2440.038 | 2440.037 | 2440.125 | 2440.155 | 2440.154 | 2439.946 | 2440.076 | 2440.309 |
+| 0 | 110000 | 2439.917 | 2439.824 | 2439.899 | 2440.013 | 2440.015 | 2440.102 | 2440.133 | 2440.132 | 2439.896 | 2440.023 | 2440.260 |
+| 0 | 111000 | 2439.905 | 2439.802 | 2439.877 | 2439.992 | 2439.994 | 2440.082 | 2440.113 | 2440.113 | 2439.850 | 2439.974 | 2440.215 |
+| 0 | 111100 | 2439.899 | 2439.792 | 2439.866 | 2439.982 | 2439.985 | 2440.072 | 2440.103 | 2440.105 | 2439.828 | 2439.952 | 2440.194 |
+| 0 | 111111 | 2439.895 | 2439.785 | 2439.859 | 2439.975 | 2439.978 | 2440.066 | 2440.097 | 2440.099 | 2439.813 | 2439.936 | 2440.180 |
+| 1 | 000000 | 2439.960 | 2439.896 | 2439.973 | 2440.086 | 2440.083 | 2440.170 | 2440.200 | 2440.195 | 2440.043 | 2440.178 | 2440.402 |
+| 1 | 000100 | 2439.950 | 2439.880 | 2439.956 | 2440.070 | 2440.068 | 2440.155 | 2440.185 | 2440.182 | 2440.011 | 2440.145 | 2440.372 |
+| 1 | 001000 | 2439.942 | 2439.866 | 2439.941 | 2440.055 | 2440.055 | 2440.142 | 2440.172 | 2440.169 | 2439.982 | 2440.114 | 2440.344 |
+| 1 | 010000 | 2439.926 | 2439.839 | 2439.914 | 2440.029 | 2440.030 | 2440.117 | 2440.147 | 2440.146 | 2439.928 | 2440.057 | 2440.292 |
+| 1 | 100000 | 2439.900 | 2439.795 | 2439.868 | 2439.984 | 2439.987 | 2440.075 | 2440.106 | 2440.107 | 2439.833 | 2439.958 | 2440.200 |
+| 1 | 100100 | 2439.895 | 2439.785 | 2439.858 | 2439.975 | 2439.978 | 2440.066 | 2440.097 | 2440.098 | 2439.812 | 2439.935 | 2440.180 |
+| 1 | 101000 | 2439.890 | 2439.776 | 2439.849 | 2439.965 | 2439.969 | 2440.057 | 2440.088 | 2440.091 | 2439.793 | 2439.915 | 2440.161 |
+| 1 | 110000 | 2439.880 | 2439.759 | 2439.832 | 2439.949 | 2439.953 | 2440.041 | 2440.073 | 2440.076 | 2439.756 | 2439.875 | 2440.125 |
+| 1 | 111100 | 2439.867 | 2439.736 | 2439.809 | 2439.926 | 2439.932 | 2440.020 | 2440.052 | 2440.057 | 2439.706 | 2439.822 | 2440.077 |
+| 1 | 111111 | 2439.864 | 2439.731 | 2439.804 | 2439.921 | 2439.928 | 2440.015 | 2440.047 | 2440.052 | 2439.695 | 2439.810 | 2440.066 |
 
 The internal capacitor adjustment provides fine-tuning of ±140kHz around the center frequency. The FSYNXO_CAP2 and FSYNXO_CAPSEL registers control the internal capacitance to adjust the crystal oscillator frequency.
 
 **Default Configuration:** FSYNXO_CAP2=0, FSYNXO_CAPSEL=100000
-
-*For detailed frequency adjustment tables, refer to the full hardware design reference document.*
 
 ---
 
@@ -213,7 +233,7 @@ The final stackup structure should be determined based on the actual product req
 
 ### 2.3 Crystal Layout
 
-![Crystal Layout](images/hdr_crystal_layout_page.png)
+![Crystal Layout](images/hdr_crystal_layout_1.png)
 
 **Figure 3:** Crystal Layout Example
 
@@ -350,31 +370,22 @@ RF matching circuit significantly affects RF performance and requires special at
 
 ### 2.8 PCB Layout Examples
 
-![PCB Layout Examples](images/hdr_pcb_examples_page.png)
+![PCB Layout Examples](images/hdr_pcb_examples_1.png)
 
-The examples show:
-- **Single-sided remote control board** with wire antenna
-- **Single-sided toy car board** with wire antenna
-- **Double-sided module board** with PIFA antenna (Top and Bottom layers)
+Single-sided remote control board with wire antenna
 
-Arrows indicate RF chip location in each design.
 
-#### Single-Sided Wire Antenna Example
+![PCB Layout Examples](images/hdr_pcb_examples_2.png)
 
-Shows single-layer PCB with PAN211x and wire antenna implementation suitable for remote controls and simple applications.
+Single-sided toy car board with wire antenna
 
-#### Double-Sided PIFA Antenna Module Example
+![PCB Layout Examples](images/hdr_pcb_examples_3.png)
 
-**Top Layer:**
-- PAN211x chip placement
-- PIFA antenna structure
-- Component placement
-- RF matching network
+Double-sided module board with PIFA antenna (Top layer)
 
-**Bottom Layer:**
-- Ground plane (solid, not under antenna)
-- Via connections
-- Additional components
+![PCB Layout Examples](images/hdr_pcb_examples_4.png)
+
+Double-sided module board with PIFA antenna (Bottom layer)
 
 ---
 
@@ -411,6 +422,8 @@ Shows single-layer PCB with PAN211x and wire antenna implementation suitable for
 ---
 
 ## Document Information
+
+This is a translation from the original PDF version:
 
 **Copyright © 2025 Panchip Microelectronics Co., Ltd.**
 

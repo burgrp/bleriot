@@ -1945,6 +1945,8 @@ PAN211x is available in two package options: SOP8 and SOT23-8.
 
 ## 16. Document Information
 
+This is a translation from the original PDF version:
+
 **Document Purpose:**
 This reference manual provides comprehensive technical information for engineers implementing drivers and applications for the PAN211x series 2.4GHz transceiver chips. It covers all aspects of operation including RF characteristics, protocol specifications, register programming, and electrical specifications.
 
