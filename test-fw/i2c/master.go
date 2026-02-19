@@ -56,54 +56,50 @@ func (i2c *Master) WaitForBus() {
 	}
 }
 
-func (i2c *Master) Write(address uint8, data []uint8) error {
+func (i2c *Master) Write(address uint8, chunks ...[]uint8) error {
 
 	i2c.peri.CR1.SetBits(py32.I2C_CR1_START)
 	for !i2c.peri.SR1.HasBits(py32.I2C_SR1_SB) {
 		runtime.Gosched()
 	}
 
-	err := i2c.writeByte(address << 1)
-	if err != nil {
+	if err := i2c.writeByte(address << 1); err != nil {
 		return err
 	}
 
-	for _, b := range data {
-
-		err := i2c.writeByte(b)
-		if err != nil {
-			return err
+	for _, chunk := range chunks {
+		for _, b := range chunk {
+			if err := i2c.writeByte(b); err != nil {
+				return err
+			}
 		}
-
 	}
 
 	return nil
 }
 
-func (i2c *Master) Read(address uint8, data *[]uint8) (int, error) {
+func (i2c *Master) Read(address uint8, data []uint8) (int, error) {
 
 	i2c.peri.CR1.SetBits(py32.I2C_CR1_START)
 	for !i2c.peri.SR1.HasBits(py32.I2C_SR1_SB) {
 		runtime.Gosched()
 	}
 
-	err := i2c.writeByte(address<<1 | 1)
-	if err != nil {
+	if err := i2c.writeByte(address<<1 | 1); err != nil {
 		return 0, err
 	}
 
 	read := 0
-	for i := range *data {
+	for i := range data {
 		sr1 := i2c.peri.SR1.Get()
 		_ = i2c.peri.SR2.Get()
 
 		if sr1&py32.I2C_SR1_RXNE != 0 {
-			(*data)[i] = uint8(i2c.peri.DR.Get())
+			data[i] = uint8(i2c.peri.DR.Get())
 			read++
 		}
 
-		err := checkErrors(i2c.peri)
-		if err != nil {
+		if err := checkErrors(i2c.peri); err != nil {
 			return read, err
 		}
 
