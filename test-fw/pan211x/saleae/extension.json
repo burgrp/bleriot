@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0",
+  "apiVersion": "1.0.0",
+  "author": "Paul",
+  "description": "Decodes PAN211x (2.4 GHz transceiver) register reads and writes over I2C",
+  "name": "PAN211x I2C Analyzer",
+  "extensions": {
+    "PAN211x I2C": {
+      "type": "HighLevelAnalyzer",
+      "entryPoint": "HighLevelAnalyzer.Pan211xHla"
+    }
+  }
+}
