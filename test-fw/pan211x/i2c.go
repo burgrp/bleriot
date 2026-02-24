@@ -1,11 +1,16 @@
 package pan211x
 
+// PAN211xAddress is the 7-bit I2C address of the PAN211x chip.
+const PAN211xAddressWrite = 0x71 << 1
+const PAN211xAddressRead = 0x71<<1 | 1
+
 // MasterI2C is the interface required by RegistersI2C.
 type MasterI2C interface {
-	WaitForBus()
+	Start()
+	Restart()
 	Stop()
-	Write(address uint8, chunks ...[]uint8) error
-	Read(address uint8, data []uint8) (int, error)
+	Read() (uint8, error)
+	Write(b uint8) error
 }
 
 // RegistersI2C implements the Registers interface over I2C.
@@ -28,46 +33,95 @@ func accessRead(reg uint8) uint8 { return reg<<1 | 1 }
 
 // Read reads one byte from the given register.
 func (r *RegistersI2C) Read(reg uint8) (uint8, error) {
-	r.i2c.WaitForBus()
+	r.i2c.Start()
 	defer r.i2c.Stop()
 
-	if err := r.i2c.Write(PAN211xAddress, []uint8{accessRead(reg)}); err != nil {
+	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
 		return 0, err
 	}
 
-	data := make([]uint8, 1)
-	if _, err := r.i2c.Read(PAN211xAddress, data); err != nil {
+	if err := r.i2c.Write(accessRead(reg)); err != nil {
 		return 0, err
 	}
 
-	return data[0], nil
+	r.i2c.Restart()
+
+	if err := r.i2c.Write(PAN211xAddressRead); err != nil {
+		return 0, err
+	}
+
+	return r.i2c.Read()
 }
 
 // Write writes one byte to the given register.
 func (r *RegistersI2C) Write(reg uint8, value uint8) error {
-	r.i2c.WaitForBus()
+	r.i2c.Start()
 	defer r.i2c.Stop()
 
-	return r.i2c.Write(PAN211xAddress, []uint8{accessWrite(reg), value})
+	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
+		return err
+	}
+
+	if err := r.i2c.Write(accessWrite(reg)); err != nil {
+		return err
+	}
+
+	if err := r.i2c.Write(value); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // WriteBuffer writes data to the given register.
 func (r *RegistersI2C) WriteBuffer(reg uint8, data []byte) error {
-	r.i2c.WaitForBus()
+
+	r.i2c.Start()
 	defer r.i2c.Stop()
 
-	return r.i2c.Write(PAN211xAddress, []uint8{accessWrite(reg)}, data)
+	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
+		return err
+	}
+
+	if err := r.i2c.Write(accessWrite(reg)); err != nil {
+		return err
+	}
+
+	for _, b := range data {
+		if err := r.i2c.Write(b); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // ReadBuffer reads len(buf) bytes from the given register into buf.
 func (r *RegistersI2C) ReadBuffer(reg uint8, buf []byte) error {
-	r.i2c.WaitForBus()
+	r.i2c.Start()
 	defer r.i2c.Stop()
 
-	if err := r.i2c.Write(PAN211xAddress, []uint8{accessRead(reg)}); err != nil {
+	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
 		return err
 	}
 
-	_, err := r.i2c.Read(PAN211xAddress, buf)
-	return err
+	if err := r.i2c.Write(accessRead(reg)); err != nil {
+		return err
+	}
+
+	r.i2c.Restart()
+
+	if err := r.i2c.Write(PAN211xAddressRead); err != nil {
+		return err
+	}
+
+	for i := range buf {
+		b, err := r.i2c.Read()
+		if err != nil {
+			return err
+		}
+		buf[i] = b
+	}
+
+	return nil
 }

@@ -6,9 +6,6 @@ import (
 	"time"
 )
 
-// PAN211xAddress is the 7-bit I2C address of the PAN211x chip.
-const PAN211xAddress = 0x71
-
 // maxFIFO is the maximum FIFO size in bytes (shared between TX and RX in normal mode).
 const maxFIFO = 128
 
@@ -182,42 +179,42 @@ func (d *Driver) Send(payload []byte) error {
 		return err
 	}
 
-	// // Write payload into the TX FIFO.
-	// if err := d.registers.WriteBuffer(regTRX_FIFO, payload); err != nil {
-	// 	return err
-	// }
+	// Write payload into the TX FIFO.
+	if err := d.registers.WriteBuffer(regTRX_FIFO, payload); err != nil {
+		return err
+	}
 
-	// // Set the TX payload length register.
-	// if err := d.registers.Write(regTXPLLEN_CFG, uint8(len(payload))); err != nil {
-	// 	return err
-	// }
+	// Set the TX payload length register.
+	if err := d.registers.Write(regTXPLLEN_CFG, uint8(len(payload))); err != nil {
+		return err
+	}
 
-	// // Clear any stale TX interrupt flag (write 1 to clear).
-	// if err := d.registers.Write(regRFIRQFLG, irqTX); err != nil {
-	// 	return err
-	// }
+	// Clear any stale TX interrupt flag (write 1 to clear).
+	if err := d.registers.Write(regRFIRQFLG, irqTX); err != nil {
+		return err
+	}
 
-	// // Switch to TX mode. In single-packet mode (default) the chip returns to STB3
-	// // automatically after transmitting one packet.
-	// if err := d.registers.Write(regSTATE_CFG, stateTX); err != nil {
-	// 	return err
-	// }
+	// Switch to TX mode. In single-packet mode (default) the chip returns to STB3
+	// automatically after transmitting one packet.
+	if err := d.registers.Write(regSTATE_CFG, stateTX); err != nil {
+		return err
+	}
 
-	// // Poll RFIRQFLG for the TX-complete interrupt.
-	// // TX settling ~73 µs + time-on-air + ~26 µs exit; allow generous timeout.
-	// for i := 0; i < 50000; i++ {
-	// 	flags, err := d.registers.Read(regRFIRQFLG)
-	// 	if err != nil {
-	// 		// Best-effort return to STB3; primary error takes precedence.
-	// 		_ = d.registers.Write(regSTATE_CFG, stateSTB3)
-	// 		return err
-	// 	}
-	// 	if flags&irqTX != 0 {
-	// 		// TX complete. Clear the flag; chip is already back in STB3.
-	// 		return d.registers.Write(regRFIRQFLG, irqTX)
-	// 	}
-	// 	runtime.Gosched()
-	// }
+	// Poll RFIRQFLG for the TX-complete interrupt.
+	// TX settling ~73 µs + time-on-air + ~26 µs exit; allow generous timeout.
+	for i := 0; i < 5000; i++ {
+		flags, err := d.registers.Read(regRFIRQFLG)
+		if err != nil {
+			// Best-effort return to STB3; primary error takes precedence.
+			_ = d.registers.Write(regSTATE_CFG, stateSTB3)
+			return err
+		}
+		if flags&irqTX != 0 {
+			// TX complete. Clear the flag; chip is already back in STB3.
+			return d.registers.Write(regRFIRQFLG, irqTX)
+		}
+		runtime.Gosched()
+	}
 
 	// Timeout: best-effort return to STB3; primary error takes precedence.
 	_ = d.registers.Write(regSTATE_CFG, stateSTB3)

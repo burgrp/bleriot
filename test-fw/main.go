@@ -41,7 +41,10 @@ func main() {
 
 	for {
 
-		pan.Send(send)
+		err := pan.Send(send)
+		if err != nil {
+			println("Error sending:", err.Error())
+		}
 
 		//regs.Read(0x0F)
 
