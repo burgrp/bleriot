@@ -18,9 +18,34 @@ const (
 	pinI2cSCL   = machine.PA9
 )
 
-var send = []byte("Hello, PAN211x!")
+// BLE ADV_NONCONN_IND payload: AdvA followed by AdvData.
+// Header (ADV_NONCONN_IND | TxAdd=1) and Length are auto-inserted by the chip
+// via TXHDR0_CFG=0x42 and TxLen register when PKT_EXT_CFG[HDR_LEN_EXIST]=1.
+// AdvA DE:AD:BE:EF:00:01 is stored LSB-first as required by the BLE spec.
+var send = []byte{
+	0x01, 0x00, 0xEF, 0xBE, 0xAD, 0xDE, // AdvA: DE:AD:BE:EF:00:01
+	0x02, 0x01, 0x06, // AD Flags: LE General Discoverable, no BR/EDR
+	0x04, 0x09, 'B', 'O', 'B', // AD Complete Local Name: "BOB"
+}
+
+// printBTAddr prints the advertiser address from the PDU (bytes 0-5, MSB-first display).
+func printBTAddr() {
+	a := send[0:6]
+	const h = "0123456789ABCDEF"
+	println("BT addr:", string([]byte{
+		h[a[5]>>4], h[a[5]&0xF], ':',
+		h[a[4]>>4], h[a[4]&0xF], ':',
+		h[a[3]>>4], h[a[3]&0xF], ':',
+		h[a[2]>>4], h[a[2]&0xF], ':',
+		h[a[1]>>4], h[a[1]&0xF], ':',
+		h[a[0]>>4], h[a[0]&0xF],
+	}))
+}
 
 func main() {
+
+	println("Starting...")
+
 	machine.ConfigureUARTPin(pinUartTx, 0) // TX
 	machine.ConfigureUARTPin(pinUartRx, 0) // RX
 
@@ -39,34 +64,60 @@ func main() {
 
 	pan := pan211x.NewDriver(regs)
 
-	for {
+	println("Initializing PAN211x...")
 
-		err := pan.Send(send)
-		if err != nil {
-			println("Error sending:", err.Error())
+	if err := pan.Init(pan211x.BLECh37); err != nil {
+		println("Init error:", err.Error())
+		for {
 		}
+	}
+	println("Init OK")
 
-		//regs.Read(0x0F)
-
-		var stats runtime.MemStats
-		runtime.ReadMemStats(&stats)
-		println("Alloc: ", stats.Alloc, " TotalAlloc: ", stats.TotalAlloc, " Sys: ", stats.Sys)
-
-		time.Sleep(500 * time.Millisecond)
+	// Read back key registers to verify chip state after Init.
+	for _, r := range []struct {
+		addr uint8
+		name string
+		want uint8
+	}{
+		{0x07, "WMODE_CFG0", 0xFC},
+		{0x08, "WMODE_CFG1", 0xB2},
+		{0x19, "PKT_EXT_CFG", 0x60},
+		{0x1A, "WHITEN_CFG", 0xD3},
+		{0x1B, "TXHDR0_CFG", 0x42},
+		{0x39, "RF_CH", 0x02},
+		{0x6F, "MISC_CFG", 0x10},
+	} {
+		v, err := regs.Read(r.addr)
+		if err != nil {
+			println(r.name, "read err:", err.Error())
+		} else if v != r.want {
+			println(r.name, "=", v, "want", r.want, "MISMATCH")
+		} else {
+			println(r.name, "=", v, "OK")
+		}
 	}
 
-}
+	printBTAddr()
 
-// func hex32(v uint32) string {
-// 	digits := "0123456789ABCDEF"
-// 	return "0x" + string([]byte{
-// 		digits[v>>28&0xf],
-// 		digits[v>>24&0xf],
-// 		digits[v>>20&0xf],
-// 		digits[v>>16&0xf],
-// 		digits[v>>12&0xf],
-// 		digits[v>>8&0xf],
-// 		digits[v>>4&0xf],
-// 		digits[v&0xf],
-// 	})
-// }
+	channels := [3]pan211x.BLEChannel{pan211x.BLECh37, pan211x.BLECh38, pan211x.BLECh39}
+	ch := 0
+
+	for {
+		if err := pan.SetChannel(channels[ch]); err != nil {
+			println("SetChannel error:", err.Error())
+		} else if err := pan.Send(send); err != nil {
+			println("Send error:", err.Error())
+		} else {
+			// Toggle green LED on successful TX.
+			pinLedGreen.Set(!pinLedGreen.Get())
+		}
+		ch = (ch + 1) % 3
+
+		if ch == 0 {
+			var stats runtime.MemStats
+			runtime.ReadMemStats(&stats)
+			println("Alloc:", stats.Alloc)
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}

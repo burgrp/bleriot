@@ -2,19 +2,69 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"tinygo.org/x/bluetooth"
 )
 
+func listAdapters() {
+	entries, err := os.ReadDir("/sys/class/bluetooth")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cannot list adapters:", err)
+		os.Exit(1)
+	}
+	if len(entries) == 0 {
+		fmt.Println("No Bluetooth adapters found.")
+		return
+	}
+	fmt.Println("Available adapters:")
+	for _, e := range entries {
+		fmt.Println(" ", e.Name())
+	}
+}
+
+type Config struct {
+	IgnoreAddresses []string `json:"ignoreAddresses"`
+}
+
+func loadConfig(path string) Config {
+	var cfg Config
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return cfg
+	}
+	json.Unmarshal(data, &cfg)
+	return cfg
+}
+
 func main() {
-	adapter := bluetooth.DefaultAdapter
+	if len(os.Args) < 2 {
+		listAdapters()
+		os.Exit(0)
+	}
+	adapterID := os.Args[1]
+
+	cfg := loadConfig("config.json")
+
+	ignored := make(map[string]bool, len(cfg.IgnoreAddresses))
+	for _, addr := range cfg.IgnoreAddresses {
+		ignored[strings.ToUpper(addr)] = true
+	}
+
+	adapter := bluetooth.NewAdapter(adapterID)
 	must(adapter.Enable())
 
 	fmt.Println("Scanning…")
 
 	err := adapter.Scan(func(a *bluetooth.Adapter, r bluetooth.ScanResult) {
+		if ignored[strings.ToUpper(r.Address.String())] {
+			return
+		}
+
 		fmt.Println("----")
 
 		fmt.Println("Addr:", r.Address)
