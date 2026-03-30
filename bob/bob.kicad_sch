@@ -5607,7 +5607,7 @@
 				)
 			)
 		)
-		(property "Value" "270R"
+		(property "Value" "330R"
 			(at 217.17 132.08 90)
 			(effects
 				(font
@@ -7451,7 +7451,7 @@
 				)
 			)
 		)
-		(property "Value" "270R"
+		(property "Value" "330R"
 			(at 217.17 140.97 90)
 			(effects
 				(font
