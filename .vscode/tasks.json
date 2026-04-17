@@ -11,6 +11,12 @@
             "group": {
                 "kind": "build",
                 "isDefault": true
+            },
+            "options": {
+                "cwd": "${workspaceFolder}/test-fw"
+            },
+            "runOptions": {
+                "instanceLimit": 2
             }
         }
     ]

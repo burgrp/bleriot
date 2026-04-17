@@ -8,6 +8,7 @@ build:
 	tinygo build --size html --serial rtt --scheduler tasks -print-allocs=. --gc leaking --target ${TARGET_TINYGO} -o ${IMAGE} .
 
 flash: build
+	pkill pyocd || true
 	sleep 1
 	pyocd load -t ${TARGET_PYOCD} ${IMAGE}
 	pyocd rtt -t ${TARGET_PYOCD}

@@ -9,13 +9,9 @@ import (
 // maxFIFO is the maximum FIFO size in bytes (shared between TX and RX in normal mode).
 const maxFIFO = 128
 
-// BLE advertising access address (per BLE spec, little-endian byte order).
-const (
-	bleAccAddr0 = 0xD6
-	bleAccAddr1 = 0xBE
-	bleAccAddr2 = 0x89
-	bleAccAddr3 = 0x8E
-)
+// calChannel is used during RF calibration (2485 MHz). Must differ from the
+// operating channel. Not user-configurable; it is a chip-level requirement.
+const calChannel = 0x55
 
 // Register addresses (7-bit, Page0 unless noted). The 8-bit access byte sent over
 // I2C is formed by shifting left by 1 and ORing with the R/W bit (0=write, 1=read).
@@ -31,7 +27,7 @@ const (
 	regRXPLLEN_CFG   = 0x09 // RX payload length (fixed-length mode)
 	regTXPLLEN_CFG   = 0x0A // TX payload length (bytes in FIFO, not counting auto header/len)
 	regIRQ_MASK      = 0x0B // IRQ mask register
-	regPIPE0_RXADDR0 = 0x0F // pipe0 RX address byte 0
+	regPIPE0_RXADDR0 = 0x0F // pipe0 RX address byte 0 (transmitted first on air)
 	regPIPE0_RXADDR1 = 0x10 // pipe0 RX address byte 1
 	regPIPE0_RXADDR2 = 0x11 // pipe0 RX address byte 2
 	regPIPE0_RXADDR3 = 0x12 // pipe0 RX address byte 3
@@ -45,10 +41,19 @@ const (
 	regTXAUTO_CFG    = 0x29 // auto-retransmit: ARD[7:4] | ARC[3:0]
 	regTRXMODE_CFG   = 0x2A // TX/RX mode: TX_SINGLE, RX_CONTINUOUS
 	regBLEMATCH_CFG0 = 0x2D // BLE address match filter
+	regRF_DATARATE   = 0x36 // air data rate: bits[5:4] 00=1Mbps 01=2Mbps 11=250kbps
 	regRF_CHANNEL    = 0x39 // RF channel: frequency = 2400 + val [MHz]
 	regMISC_CFG      = 0x6F // misc: I_NDC_PREAMBLE_SEL[5]=BLE preamble, PID_LOW_SEL[4]
 	regRFIRQFLG      = 0x73 // interrupt flags (write 1 to clear)
 	regSTATUS3       = 0x77 // received payload length
+)
+
+// DataRate values for RF_DATARATE_CFG (register 0x36).
+// Reserved bits [7:6]=01 and [3:0]=0101 must be preserved.
+const (
+	DataRate1Mbps   uint8 = 0x55 // bits[5:4] = 00
+	DataRate2Mbps   uint8 = 0x65 // bits[5:4] = 01
+	DataRate250kbps uint8 = 0x75 // bits[5:4] = 11
 )
 
 // STATE_CFG values.
@@ -72,6 +77,38 @@ var (
 	ErrCalibration     = errors.New("calibration failed")
 )
 
+// Address is a 4-byte device address stored as a little-endian uint32.
+// The zero value (0x00000000) is reserved.
+type Address uint32
+
+// Bytes returns the address as 4 bytes in little-endian order, as transmitted
+// on the wire and written to radio hardware registers.
+func (a Address) Bytes() [4]byte {
+	return [4]byte{byte(a), byte(a >> 8), byte(a >> 16), byte(a >> 24)}
+}
+
+// Config holds the RF parameters for Init. All fields are caller-supplied so
+// the driver is independent of any specific protocol or network.
+type Config struct {
+	// OwnAddr is this device's address, written to the PIPE0_RXADDR registers.
+	// The chip uses it as the RF sync word for hardware filtering:
+	// only packets transmitted with TXADDR == OwnAddr are accepted.
+	OwnAddr Address
+
+	// RFChannel sets the operating frequency: F = 2400 + RFChannel [MHz].
+	// Valid range: 0–83 (2400–2483 MHz).
+	RFChannel uint8
+
+	// WhitenCfg is written to WHITEN_CFG (reg 0x1A).
+	// Format: WHITEN_SKIP_ADDR[7]=1 | bit-reversed 7-bit LFSR seed[6:0].
+	// For BLE channels: seed = channel_index | 0x40, then bit-reversed.
+	WhitenCfg uint8
+
+	// DataRate is written to RF_DATARATE_CFG (reg 0x36).
+	// Use the DataRate* constants. Reserved bits are included in the constant values.
+	DataRate uint8
+}
+
 // Registers abstracts the physical bus (I2C or SPI) for register access.
 type Registers interface {
 	Read(reg uint8) (uint8, error)
@@ -82,39 +119,23 @@ type Registers interface {
 	ReadBuffer(reg uint8, buf []byte) error
 }
 
-// BLEChannel holds the register values for a BLE advertising channel.
-type BLEChannel struct {
-	rfCh      uint8 // RF_CH register: frequency = 2400 + rfCh [MHz]
-	whitenCfg uint8 // WHITEN_CFG: WHITEN_SKIP_ADDR[7]=1 | bit-reversed 7-bit BLE LFSR seed
-}
-
-// BLE advertising channel configurations.
-// The PAN211x requires the BLE LFSR seed (channel_index | 0x40) to be bit-reversed:
-//
-//	Ch37 (2402 MHz, index 37): seed 0x65 → bit-rev → 0x53, WHITEN_CFG = 0x80|0x53 = 0xD3
-//	Ch38 (2426 MHz, index 38): seed 0x66 → bit-rev → 0x33, WHITEN_CFG = 0x80|0x33 = 0xB3
-//	Ch39 (2480 MHz, index 39): seed 0x67 → bit-rev → 0x73, WHITEN_CFG = 0x80|0x73 = 0xF3
-var (
-	BLECh37 = BLEChannel{rfCh: 2, whitenCfg: 0xD3}  // 2402 MHz
-	BLECh38 = BLEChannel{rfCh: 26, whitenCfg: 0xB3} // 2426 MHz
-	BLECh39 = BLEChannel{rfCh: 80, whitenCfg: 0xF3} // 2480 MHz
-)
-
-// Driver provides BLE packet send and receive over the PAN211x transceiver.
+// Driver controls a PAN211x transceiver. RF parameters are supplied via Config
+// at construction; the driver itself carries no protocol-specific knowledge.
 type Driver struct {
 	registers Registers
+	cfg       Config
 }
 
-// NewDriver creates a Driver using the given Registers implementation.
-func NewDriver(registers Registers) *Driver {
-	return &Driver{registers: registers}
+// NewDriver creates a Driver using the given Registers implementation and Config.
+func NewDriver(registers Registers, cfg Config) *Driver {
+	return &Driver{registers: registers, cfg: cfg}
 }
 
-// Init wakes the chip, performs RF calibration, and configures it for BLE advertising.
+// Init wakes the chip, reads factory OTP calibration, applies Config RF parameters,
+// performs RF calibration, and leaves the chip in RX mode.
 // Must be called once before Send or Receive.
-func (d *Driver) Init(ch BLEChannel) error {
+func (d *Driver) Init() error {
 	// ── Step 1: Power-up sequence ────────────────────────────────────────────
-	// Ensure Page0 selected.
 	if err := d.registers.Write(regPAGE_CFG, 0x00); err != nil {
 		return err
 	}
@@ -194,7 +215,7 @@ func (d *Driver) Init(ch BLEChannel) error {
 		}
 	}
 
-	// ── Step 4: Page0 — BLE configuration ────────────────────────────────────
+	// ── Step 4: Page0 — RF configuration ─────────────────────────────────────
 	if err := d.registers.Write(regPAGE_CFG, 0x00); err != nil {
 		return err
 	}
@@ -204,7 +225,7 @@ func (d *Driver) Init(ch BLEChannel) error {
 		return err
 	}
 
-	// I2C_CFG: I2C enabled, no IOMUX (we poll RFIRQFLG register, not a pin).
+	// I2C_CFG: I2C enabled, no IOMUX (poll RFIRQFLG register instead of IRQ pin).
 	if err := d.registers.Write(regI2C_CFG, 0x05); err != nil {
 		return err
 	}
@@ -216,46 +237,48 @@ func (d *Driver) Init(ch BLEChannel) error {
 	}
 
 	// WMODE_CFG1: RX_GOON=1, FIFO_128_EN=1, DPY_EN=1, ENHANCE=0, 4-byte addr width.
+	// RX_GOON=1 keeps the chip in RX mode after each received packet.
 	// 0xB2 = 0b1_0_1_1_0_0_10
 	if err := d.registers.Write(regWMODE_CFG1, 0xB2); err != nil {
 		return err
 	}
 
-	if err := d.registers.Write(regRXPLLEN_CFG, 0x13); err != nil { // RxLen default
+	if err := d.registers.Write(regRXPLLEN_CFG, 0x0C); err != nil { // 12-byte fixed payload
 		return err
 	}
-	if err := d.registers.Write(regTXPLLEN_CFG, 0x13); err != nil { // TxLen default (overridden in Send)
+	if err := d.registers.Write(regTXPLLEN_CFG, 0x13); err != nil { // overridden per Send call
 		return err
 	}
 	if err := d.registers.Write(regIRQ_MASK, 0x7F); err != nil {
 		return err
 	}
 
-	// BLE advertising access address 0x8E89BED6 for pipe0 RX and TX.
+	// Own address → PIPE0_RXADDR: hardware accepts only packets whose sync word
+	// (TXADDR on the sender) matches this device's address.
+	a := d.cfg.OwnAddr.Bytes()
 	for _, rw := range []struct{ reg, val uint8 }{
-		{regPIPE0_RXADDR0, bleAccAddr0}, {regPIPE0_RXADDR1, bleAccAddr1},
-		{regPIPE0_RXADDR2, bleAccAddr2}, {regPIPE0_RXADDR3, bleAccAddr3},
-		{regTXADDR0, bleAccAddr0}, {regTXADDR1, bleAccAddr1},
-		{regTXADDR2, bleAccAddr2}, {regTXADDR3, bleAccAddr3},
+		{regPIPE0_RXADDR0, a[0]}, {regPIPE0_RXADDR1, a[1]},
+		{regPIPE0_RXADDR2, a[2]}, {regPIPE0_RXADDR3, a[3]},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
 		}
 	}
+	// TXADDR is not set here; Send sets it to the destination address before each TX.
 
-	// PKT_EXT_CFG: HDR_LEN_EXIST=1 — chip auto-inserts BLE header (from TXHDR0_CFG)
-	// and length (from TxLen) before FIFO data. FIFO must contain AdvA+AdvData only.
+	// PKT_EXT_CFG: HDR_LEN_EXIST=1 — chip auto-inserts a 1-byte header (TXHDR0_CFG)
+	// and length before FIFO data on TX; strips them on RX.
 	if err := d.registers.Write(regPKT_EXT_CFG, 0x60); err != nil {
 		return err
 	}
 
-	// Whitening config: initial channel (updated per packet via SetChannel).
-	if err := d.registers.Write(regWHITEN_CFG, ch.whitenCfg); err != nil {
+	if err := d.registers.Write(regWHITEN_CFG, d.cfg.WhitenCfg); err != nil {
 		return err
 	}
 
-	// TXHDR0_CFG: BLE PDU header byte = ADV_NONCONN_IND(0x02) | TxAdd=1(0x40) = 0x42.
-	if err := d.registers.Write(regTXHDR0_CFG, 0x42); err != nil {
+	// TXHDR0_CFG: header byte prepended by the chip on every TX.
+	// Set to 0x00; upper layers are responsible for packet header content.
+	if err := d.registers.Write(regTXHDR0_CFG, 0x00); err != nil {
 		return err
 	}
 
@@ -269,7 +292,7 @@ func (d *Driver) Init(ch BLEChannel) error {
 		return err
 	}
 
-	// Whitelist (SDK defaults; not used in TX-only mode).
+	// Whitelist defaults (not used; access address filtering is sufficient).
 	for _, rw := range []struct{ reg, val uint8 }{
 		{0x30, 0xCC}, {0x31, 0xCC}, {0x32, 0xCC}, {0x33, 0xCC}, {0x34, 0xCC}, {0x35, 0x00},
 	} {
@@ -278,8 +301,8 @@ func (d *Driver) Init(ch BLEChannel) error {
 		}
 	}
 
-	// Set calibration channel (2485 MHz); must be set before RF calibration.
-	if err := d.registers.Write(regRF_CHANNEL, 0x55); err != nil {
+	// Set calibration channel (2485 MHz); must differ from the operating channel.
+	if err := d.registers.Write(regRF_CHANNEL, calChannel); err != nil {
 		return err
 	}
 
@@ -291,11 +314,15 @@ func (d *Driver) Init(ch BLEChannel) error {
 		{0x5D, 0xDC}, {0x5E, 0x02}, {0x5F, 0x06},
 		{0x60, 0x0E}, {0x61, 0x2E},
 		{0x66, 0x34}, {0x68, 0x0D},
-		{0x6E, 0x20}, {regMISC_CFG, 0x10}, // MISC_CFG: PID_LOW_SEL[4]=1 (SDK default for BLE mode)
+		{0x6E, 0x20}, {regMISC_CFG, 0x10},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
 		}
+	}
+
+	if err := d.registers.Write(regRF_DATARATE, d.cfg.DataRate); err != nil {
+		return err
 	}
 
 	// ── Step 5: RF calibration (Page1) ───────────────────────────────────────
@@ -356,18 +383,15 @@ func (d *Driver) Init(ch BLEChannel) error {
 		return err
 	}
 
-	// Back to Page0, clear all IRQs, set actual RF channel.
+	// Back to Page0, set operating channel, enter RX.
 	if err := d.registers.Write(regPAGE_CFG, 0x00); err != nil {
 		return err
 	}
-	if err := d.registers.Write(regRFIRQFLG, 0xFF); err != nil {
-		return err
-	}
-	if err := d.registers.Write(regRF_CHANNEL, ch.rfCh); err != nil {
+	if err := d.registers.Write(regRF_CHANNEL, d.cfg.RFChannel); err != nil {
 		return err
 	}
 
-	return nil
+	return d.enterRX()
 }
 
 // waitBit polls register reg until (val & mask) != 0 or iterations are exhausted.
@@ -385,27 +409,37 @@ func (d *Driver) waitBit(reg, mask uint8, maxIter int) error {
 	return ErrCalibration
 }
 
-// SetChannel switches the RF channel and whitening seed for the next transmission.
-// Call this between Send() calls to cycle through BLE advertising channels.
-func (d *Driver) SetChannel(ch BLEChannel) error {
-	if err := d.registers.Write(regRF_CHANNEL, ch.rfCh); err != nil {
+// enterRX clears all pending IRQ flags and puts the chip into RX mode.
+// With RX_GOON=1 (WMODE_CFG1 bit7) the chip stays in RX after each received packet.
+func (d *Driver) enterRX() error {
+	if err := d.registers.Write(regRFIRQFLG, 0xFF); err != nil {
 		return err
 	}
-	return d.registers.Write(regWHITEN_CFG, ch.whitenCfg)
+	return d.registers.Write(regSTATE_CFG, stateRX)
 }
 
-// Send transmits a BLE packet. payload must contain AdvA (6 bytes) followed by
-// AdvData — no PDU header or length byte; the chip auto-inserts those from
-// TXHDR0_CFG and TxLen when HDR_LEN_EXIST=1 (reg 0x19=0x60).
-// Maximum payload is 128 bytes; BLE advertising is typically ≤37 bytes.
-func (d *Driver) Send(payload []byte) error {
+// Send transmits payload to dst. Sets TXADDR to dst before TX so the receiving
+// device's hardware (PIPE0_RXADDR == dst) accepts the packet. Blocks only for
+// the duration of the air transmission. Re-enters RX mode before returning.
+// payload must be at most 128 bytes.
+func (d *Driver) Send(dst [4]byte, payload []byte) error {
 	if len(payload) > maxFIFO {
 		return ErrPayloadTooLarge
 	}
 
-	// Enter STB3 (FIFO access requires STB3 or above).
+	// Enter STB3 (FIFO and address register access requires STB3 or above).
 	if err := d.registers.Write(regSTATE_CFG, stateSTB3); err != nil {
 		return err
+	}
+
+	// Set TXADDR to destination: the chip uses this as the RF sync word,
+	// which must match the receiver's PIPE0_RXADDR for hardware filtering.
+	for i, rw := range [4]struct{ reg uint8 }{
+		{regTXADDR0}, {regTXADDR1}, {regTXADDR2}, {regTXADDR3},
+	} {
+		if err := d.registers.Write(rw.reg, dst[i]); err != nil {
+			return err
+		}
 	}
 
 	// Set TX payload length (number of bytes in FIFO, excluding auto header+length).
@@ -432,62 +466,50 @@ func (d *Driver) Send(payload []byte) error {
 	for i := 0; i < 5000; i++ {
 		flags, err := d.registers.Read(regRFIRQFLG)
 		if err != nil {
-			_ = d.registers.Write(regSTATE_CFG, stateSTB3)
+			_ = d.enterRX()
 			return err
 		}
 		if flags&irqTX != 0 {
-			return d.registers.Write(regRFIRQFLG, 0xFF)
+			_ = d.registers.Write(regRFIRQFLG, 0xFF)
+			return d.enterRX()
 		}
 		runtime.Gosched()
 	}
 
-	// Timeout: print diagnostics and attempt recovery.
+	// Timeout: attempt recovery.
 	state, _ := d.registers.Read(regSTATE_CFG)
 	irqFlags, _ := d.registers.Read(regRFIRQFLG)
 	println("TX timeout: STATE_CFG=", state, "RFIRQFLG=", irqFlags)
-	_ = d.registers.Write(regSTATE_CFG, stateSTB3)
+	_ = d.enterRX()
 	return ErrTimeout
 }
 
-// Receive switches the chip to RX mode and waits for one BLE packet.
-// The received PDU bytes are written into buf; the actual number of bytes received
-// is returned. len(buf) should be at least 39 bytes for a full BLE ADV PDU.
-func (d *Driver) Receive(buf []byte) (int, error) {
-	if err := d.registers.Write(regRFIRQFLG, irqRX); err != nil {
-		return 0, err
-	}
-	if err := d.registers.Write(regSTATE_CFG, stateRX); err != nil {
-		return 0, err
-	}
-
-	for i := 0; i < 500000; i++ {
-		flags, err := d.registers.Read(regRFIRQFLG)
-		if err != nil {
-			_ = d.registers.Write(regSTATE_CFG, stateSTB3)
-			return 0, err
-		}
-		if flags&irqRX != 0 {
-			rxLen, err := d.registers.Read(regSTATUS3)
-			if err != nil {
-				_ = d.registers.Write(regSTATE_CFG, stateSTB3)
-				return 0, err
-			}
-			n := int(rxLen)
-			if n > len(buf) {
-				n = len(buf)
-			}
-			if err := d.registers.ReadBuffer(regTRX_FIFO, buf[:n]); err != nil {
-				_ = d.registers.Write(regSTATE_CFG, stateSTB3)
-				return 0, err
-			}
-			if err := d.registers.Write(regRFIRQFLG, irqRX); err != nil {
-				return 0, err
-			}
-			return n, d.registers.Write(regSTATE_CFG, stateSTB3)
-		}
-		runtime.Gosched()
+// Receive checks whether a packet has been received. If one is available it is
+// copied into buf and (n, true) is returned. If no packet is waiting, returns
+// (0, false) immediately without blocking.
+// With RX_GOON=1 the chip stays in RX mode automatically after each received packet.
+func (d *Driver) Receive(buf []byte) (n int, ok bool) {
+	flags, err := d.registers.Read(regRFIRQFLG)
+	if err != nil || flags&irqRX == 0 {
+		return 0, false
 	}
 
-	_ = d.registers.Write(regSTATE_CFG, stateSTB3)
-	return 0, ErrTimeout
+	rxLen, err := d.registers.Read(regSTATUS3)
+	if err != nil {
+		_ = d.registers.Write(regRFIRQFLG, 0xFF)
+		return 0, false
+	}
+
+	n = int(rxLen)
+	if n > len(buf) {
+		n = len(buf)
+	}
+
+	if err := d.registers.ReadBuffer(regTRX_FIFO, buf[:n]); err != nil {
+		_ = d.registers.Write(regRFIRQFLG, 0xFF)
+		return 0, false
+	}
+
+	_ = d.registers.Write(regRFIRQFLG, irqRX)
+	return n, true
 }
