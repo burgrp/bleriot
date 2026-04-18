@@ -96,32 +96,19 @@ func (r *RegistersI2C) WriteBuffer(reg uint8, data []byte) error {
 	return nil
 }
 
-// ReadBuffer reads len(buf) bytes from the given register into buf.
+// ReadBuffer reads len(buf) bytes from reg into buf using separate single-byte
+// transactions. Each Read() is a complete START…STOP cycle, which avoids the
+// STM32-family I2C hardware's ACK/STOP race that can leave the bus stuck BUSY
+// when reading more than one byte in a single burst transaction.
+// For FIFO registers (reg 0x01) the PAN211x advances its read pointer on each
+// transaction, so successive calls return successive bytes.
 func (r *RegistersI2C) ReadBuffer(reg uint8, buf []byte) error {
-	r.i2c.Start()
-	defer r.i2c.Stop()
-
-	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
-		return err
-	}
-
-	if err := r.i2c.Write(accessRead(reg)); err != nil {
-		return err
-	}
-
-	r.i2c.Restart()
-
-	if err := r.i2c.Write(PAN211xAddressRead); err != nil {
-		return err
-	}
-
 	for i := range buf {
-		b, err := r.i2c.Read()
+		b, err := r.Read(reg)
 		if err != nil {
 			return err
 		}
 		buf[i] = b
 	}
-
 	return nil
 }

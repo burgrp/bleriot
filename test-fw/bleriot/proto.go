@@ -3,7 +3,9 @@
 // caller-supplied buffers.
 package bleriot
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+)
 
 // PacketSize is the fixed size of every BleRiot packet on the wire.
 const PacketSize = 12
@@ -107,9 +109,9 @@ type Radio interface {
 // Reliability (timeouts, retries) and subscription tracking are the caller's
 // responsibility.
 type Stack struct {
-	radio   Radio
+	radio      Radio
 	ownAddress Address
-	buf     [PacketSize]byte // reused for every encode/decode; safe because single-goroutine
+	buf        [PacketSize]byte // reused for every encode/decode; safe because single-goroutine
 }
 
 // NewStack creates a Stack bound to radio and ownAddress.

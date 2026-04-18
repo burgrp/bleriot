@@ -44,6 +44,7 @@ func (i2c *Master) Stop() {
 	clearErrors(i2c.peri)
 }
 
+
 func (i2c *Master) Read() (uint8, error) {
 
 	for {
