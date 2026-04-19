@@ -49,7 +49,7 @@ func main() {
 	pan := pan211x.NewDriver(regs, pan211x.Config{
 		OwnAddr:    addr,
 		RFChannel:  40,
-		DataRate:   pan211x.DataRate250kbps,
+		DataRate:   pan211x.DATARATE_250KBPS,
 		PayloadLen: payloadLen,
 	})
 
