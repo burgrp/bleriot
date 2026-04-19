@@ -304,6 +304,10 @@ const (
 // ── STATE_CFG operation codes ─────────────────────────────────────────────────
 
 const (
+	// STATE_STB3_INIT: STB3 with EN_LS_3V=0. Written first during Init to reset
+	// the state machine before EN_LS_3V is asserted via STATE_STB3.
+	STATE_STB3_INIT = uint8(0x04)
+
 	// STATE_STB3: Standby 3 with EN_LS_3V=1 (bit 6). Primary idle state.
 	// Enter before modifying any configuration register.
 	STATE_STB3 = uint8(0x74)

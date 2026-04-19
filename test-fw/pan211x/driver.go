@@ -63,7 +63,7 @@ func (d *Driver) Init() error {
 	}
 
 	// ── Step 2: Enter STB3 with soft reset ───────────────────────────────────
-	if err := d.registers.Write(STATE_CFG, 0x04); err != nil {
+	if err := d.registers.Write(STATE_CFG, STATE_STB3_INIT); err != nil {
 		return err
 	}
 	time.Sleep(1 * time.Millisecond)
