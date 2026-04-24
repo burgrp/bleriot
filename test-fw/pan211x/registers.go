@@ -476,7 +476,7 @@ const (
 
 const (
 	DATARATE_1MBPS   = uint8(0x55) // 1 Mbps  — required for BLE
-	DATARATE_2MBPS   = uint8(0x65) // 2 Mbps
+	DATARATE_2MBPS   = uint8(0x65) // 2 Mbps — requires 32 MHz crystal
 	DATARATE_250KBPS = uint8(0x75) // 250 kbps
 )
 

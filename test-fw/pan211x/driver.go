@@ -66,15 +66,15 @@ func (d *Driver) Init() error {
 	if err := d.registers.Write(STATE_CFG, STATE_STB3_INIT); err != nil {
 		return err
 	}
-	time.Sleep(1 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
 		return err
 	}
-	time.Sleep(1 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	if err := d.registers.Write(SYS_CFG, SYS_CFG_RESET); err != nil {
 		return err
 	}
-	time.Sleep(1 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	if err := d.registers.Write(SYS_CFG, SYS_CFG_RELEASE); err != nil {
 		return err
 	}
@@ -133,7 +133,8 @@ func (d *Driver) Init() error {
 	for _, rw := range []struct{ reg, val uint8 }{
 		{P1_RF_TUNE_27, 0xAA}, {P1_RF_TUNE_32, 0x1E}, {P1_RF_TUNE_33, 0x19},
 		{P1_RF_TUNE_37, 0x15}, {P1_RF_TUNE_3A, 0x14}, {P1_RF_TUNE_3E, 0xF1},
-		{P1_VCO_PA_CTL, 0xA2}, {P1_PA_BIAS, PA_BIAS_9DBM}, {P1_RF_TUNE_4C, 0x48},
+		{P1_VCO_PA_CTL, 0xA2}, {P1_TX_PWR_AMP, 0x17}, {P1_PA_BIAS, PA_BIAS_9DBM},
+		{P1_TX_PWR_CTL, 0x88}, {P1_RF_TUNE_4C, 0x48},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
@@ -151,11 +152,12 @@ func (d *Driver) Init() error {
 	if err := d.registers.Write(SYS_CFG, SYS_CFG_NORMAL); err != nil {
 		return err
 	}
-	// WMODE_CFG0: 2-byte CRC, XN297L mode, whitening disabled, big-endian.
-	if err := d.registers.Write(WMODE_CFG0, CRC_2B|ENDIAN_BIG); err != nil {
+	// WMODE_CFG0: 2-byte CRC, XN297L mode, whitening enabled, big-endian. Matches SDK 0x89.
+	// Whitening is required: long zero runs in payload corrupt receiver CDR without it.
+	if err := d.registers.Write(WMODE_CFG0, CRC_2B|WHITEN_EN_BIT|ENDIAN_BIG); err != nil {
 		return err
 	}
-	// WMODE_CFG1: RX_GOON=1, FIFO_128=1, EnDPL=0, ENHANCE=0, 4-byte addr.
+	// WMODE_CFG1: RX_GOON=1, FIFO_128=1 (required in XN297L normal mode per RM p.51), 4-byte addr.
 	if err := d.registers.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|ADDR_4B); err != nil {
 		return err
 	}
@@ -165,8 +167,8 @@ func (d *Driver) Init() error {
 	if err := d.registers.Write(TXPLLEN_CFG, d.cfg.PayloadLen); err != nil {
 		return err
 	}
-	// TX and RX IRQs enabled; all error IRQs masked.
-	if err := d.registers.Write(RFIRQ_CFG, IRQ_MAX_RT|IRQ_ADDR_ERR|IRQ_CRC_ERR|IRQ_LEN_ERR|IRQ_PID_ERR|IRQ_RX_TIMEOUT); err != nil {
+	// Mask only IRQ_MAX_RT (irrelevant with ARC=0). All error IRQs visible in RFIRQFLG.
+	if err := d.registers.Write(RFIRQ_CFG, IRQ_MAX_RT); err != nil {
 		return err
 	}
 	if err := d.registers.Write(TXAUTO_CFG, 0x00); err != nil {
@@ -196,7 +198,7 @@ func (d *Driver) Init() error {
 		}
 	}
 
-	// Calibration channel, data rate, RF tuning (per SDK ES_Tool V1.2.6, 16 MHz XTAL).
+	// Calibration channel, data rate, RF tuning (per SDK ES_Tool V1.2.6; crystal-independent).
 	if err := d.registers.Write(RF_CHANNEL_CFG, RF_CH_CAL); err != nil {
 		return err
 	}
@@ -377,11 +379,20 @@ func (d *Driver) Receive(buf []byte) (n int, ok bool) {
 // DumpState prints key register values to RTT for debugging.
 // Always operates on page0 (restores page0 after reading).
 func (d *Driver) DumpState() {
+	d.registers.Write(PAGE_CFG, 0x01)
+	pwrAmp, _ := d.registers.Read(P1_TX_PWR_AMP)
+	pwrCtl, _ := d.registers.Read(P1_TX_PWR_CTL)
+	paBias, _ := d.registers.Read(P1_PA_BIAS)
 	d.registers.Write(PAGE_CFG, 0x00)
 	state, _ := d.registers.Read(STATE_CFG)
 	irq, _ := d.registers.Read(RFIRQFLG)
+	irqmask, _ := d.registers.Read(RFIRQ_CFG)
 	wmode0, _ := d.registers.Read(WMODE_CFG0)
 	wmode1, _ := d.registers.Read(WMODE_CFG1)
+	whiten, _ := d.registers.Read(WHITEN_CFG)
+	pktExt, _ := d.registers.Read(PKT_EXT_CFG)
+	trxmode, _ := d.registers.Read(TRXMODE_CFG)
+	txauto, _ := d.registers.Read(TXAUTO_CFG)
 	ch, _ := d.registers.Read(RF_CHANNEL_CFG)
 	dr, _ := d.registers.Read(RF_DATARATE_CFG)
 	rxlen, _ := d.registers.Read(RXPLLEN_CFG)
@@ -389,9 +400,15 @@ func (d *Driver) DumpState() {
 	a1, _ := d.registers.Read(PIPE0_RXADDR1)
 	a2, _ := d.registers.Read(PIPE0_RXADDR2)
 	a3, _ := d.registers.Read(PIPE0_RXADDR3)
+	t0, _ := d.registers.Read(TXADDR0)
+	t1, _ := d.registers.Read(TXADDR1)
+	t2, _ := d.registers.Read(TXADDR2)
+	t3, _ := d.registers.Read(TXADDR3)
+	rssiL, _ := d.registers.Read(RT_RSSI_L)
+	rssiH, _ := d.registers.Read(RT_RSSI_H)
 	println("--- STATE_CFG:", state)
 	println("  OPERATE_MODE:", state&0x07, " (4=STB3 5=TX 6=RX)")
-	println("--- RFIRQFLG:", irq)
+	println("--- RFIRQFLG:", irq, " RFIRQ_CFG(mask):", irqmask)
 	println("  TX_IRQ:", (irq>>7)&1, " TX_MAX_RT:", (irq>>6)&1)
 	println("  RX_ADDR_ERR:", (irq>>5)&1, " RX_CRC_ERR:", (irq>>4)&1)
 	println("  RX_LEN_ERR:", (irq>>3)&1, " RX_PID_ERR:", (irq>>2)&1)
@@ -409,7 +426,13 @@ func (d *Driver) DumpState() {
 	println("  CH:", ch, " (freq=", 2400+uint16(ch), "MHz)")
 	println("  DATARATE[5:4]:", (dr>>4)&3, " (0=1M 1=2M 3=250k)  raw:", dr)
 	println("  RXLEN:", rxlen)
+	println("  WHITEN_CFG:", whiten, " (seed=[6:0], skip_addr=[7])")
+	println("  PKT_EXT_CFG:", pktExt, " TRXMODE_CFG:", trxmode, " TXAUTO_CFG:", txauto)
 	println("  RXADDR:", a0, a1, a2, a3)
+	println("  TXADDR:", t0, t1, t2, t3)
+	println("  RT_RSSI_L:", rssiL, " RT_RSSI_H:", rssiH)
+	println("--- P1 PA (9dBm: PWR_AMP=23 PWR_CTL=136 PA_BIAS=176)")
+	println("  P1_TX_PWR_AMP:", pwrAmp, " P1_TX_PWR_CTL:", pwrCtl, " P1_PA_BIAS:", paBias)
 }
 
 // enterRX enters RX from STB3. Used after TX completes.
