@@ -89,6 +89,11 @@ func (d *Driver) Init() error {
 		return ErrNoDevice
 	}
 
+	// 16 MHz crystal pre-configuration (must be set before Page1 OTP read).
+	if err := d.registers.Write(0x37, 0xE0); err != nil {
+		return err
+	}
+
 	// ── Step 3: Read factory OTP calibration (Page1) ─────────────────────────
 	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
 		return err
@@ -129,11 +134,13 @@ func (d *Driver) Init() error {
 		return err
 	}
 
-	// ── Step 4: Page1 pre-configuration (SDK normal_tx example) ──────────────
+	// ── Step 4: Page1 pre-configuration (16 MHz crystal values from ES_Tool V1.2.6) ──
 	for _, rw := range []struct{ reg, val uint8 }{
 		{P1_RF_TUNE_27, 0xAA}, {P1_RF_TUNE_32, 0x1E}, {P1_RF_TUNE_33, 0x19},
 		{P1_RF_TUNE_37, 0x15}, {P1_RF_TUNE_3A, 0x14}, {P1_RF_TUNE_3E, 0xF1},
-		{P1_VCO_PA_CTL, 0xA2}, {P1_TX_PWR_AMP, 0x17}, {P1_PA_BIAS, PA_BIAS_9DBM},
+		{0x3F, 0xD2}, {0x40, 0x20}, // undocumented; required for 16 MHz crystal
+		{P1_VCO_PA_CTL, 0xA6},      // 0xA6 for 16 MHz crystal (SDK 32 MHz uses 0xA2)
+		{P1_TX_PWR_AMP, 0x17}, {P1_PA_BIAS, PA_BIAS_9DBM},
 		{P1_TX_PWR_CTL, 0x88}, {P1_RF_TUNE_4C, 0x48},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
@@ -433,6 +440,322 @@ func (d *Driver) DumpState() {
 	println("  RT_RSSI_L:", rssiL, " RT_RSSI_H:", rssiH)
 	println("--- P1 PA (9dBm: PWR_AMP=23 PWR_CTL=136 PA_BIAS=176)")
 	println("  P1_TX_PWR_AMP:", pwrAmp, " P1_TX_PWR_CTL:", pwrCtl, " P1_PA_BIAS:", paBias)
+}
+
+// InitBLE configures the chip for BLE advertising (1 Mbps, 3-byte CRC, ADV_NONCONN_IND).
+// Identical calibration sequence to Init(); call instead of Init() for BLE-only operation.
+func (d *Driver) InitBLE() error {
+	// ── Step 1: SPI interface init ────────────────────────────────────────────
+	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
+		return err
+	}
+	if err := d.registers.Write(SPI_CFG, SPI_CFG_INIT); err != nil {
+		return err
+	}
+
+	// ── Step 2: Enter STB3 with soft reset ───────────────────────────────────
+	if err := d.registers.Write(STATE_CFG, STATE_STB3_INIT); err != nil {
+		return err
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
+		return err
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := d.registers.Write(SYS_CFG, SYS_CFG_RESET); err != nil {
+		return err
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := d.registers.Write(SYS_CFG, SYS_CFG_RELEASE); err != nil {
+		return err
+	}
+
+	v, err := d.registers.Read(SPI_CFG)
+	if err != nil {
+		return err
+	}
+	if v != SPI_CFG_INIT {
+		println("SPI_CFG readback:", v)
+		return ErrNoDevice
+	}
+
+	// 16 MHz crystal pre-configuration (must be set before Page1 OTP read).
+	if err := d.registers.Write(0x37, 0xE0); err != nil {
+		return err
+	}
+
+	// ── Step 3: Read factory OTP calibration (Page1) ─────────────────────────
+	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_OTP_CTL, OTP_CTL_START); err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_OTP_DATA, OTP_READ_WORD2); err != nil {
+		return err
+	}
+	value2, err := d.registers.Read(P1_OTP_DATA)
+	if err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_OTP_DATA, OTP_READ_WORD4); err != nil {
+		return err
+	}
+	value4, err := d.registers.Read(P1_OTP_DATA)
+	if err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_OTP_CTL, OTP_CTL_STOP); err != nil {
+		return err
+	}
+	println("OTP value2:", value2, "value4:", value4)
+	if (value2 & OTP_VALID_MASK) != OTP_VALID_VAL {
+		println("OTP check failed, value2&0x0F:", value2&OTP_VALID_MASK)
+		return ErrCalibration
+	}
+	if err := d.registers.Write(P1_PA_TUNE_47, 0x83|((value2>>1)&0x70)); err != nil {
+		return err
+	}
+	calBit := uint8(0)
+	if (value2 & OTP_CAL_MASK) == 0 {
+		calBit = 1
+	}
+	if err := d.registers.Write(P1_PA_TUNE_43, 0x10|calBit); err != nil {
+		return err
+	}
+
+	// ── Step 4: Page1 pre-configuration (16 MHz crystal values from ES_Tool V1.2.6) ─
+	for _, rw := range []struct{ reg, val uint8 }{
+		{P1_RF_TUNE_27, 0xAA},
+		{P1_RF_TUNE_37, 0x15}, {P1_RF_TUNE_3A, 0x14}, {P1_RF_TUNE_3E, 0xF1},
+		{0x3F, 0xD2}, {0x40, 0x20}, // undocumented; required for 16 MHz crystal
+		{P1_VCO_PA_CTL, 0xA6},      // 0xA6 for 16 MHz crystal (SDK 32 MHz uses 0xA2)
+		{P1_TX_PWR_AMP, 0x17}, {P1_PA_BIAS, PA_BIAS_9DBM},
+		{P1_TX_PWR_CTL, 0x88}, {P1_RF_TUNE_4C, 0x48},
+	} {
+		if err := d.registers.Write(rw.reg, rw.val); err != nil {
+			return err
+		}
+	}
+
+	// ── Step 5: Page0 BLE configuration ──────────────────────────────────────
+	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
+		return err
+	}
+	if err := d.registers.Write(XTAL_CFG, (value4>>4)|0xC0); err != nil {
+		return err
+	}
+	if err := d.registers.Write(SYS_CFG, SYS_CFG_NORMAL); err != nil {
+		return err
+	}
+	// BLE: 3-byte CRC, BLE work mode, whitening, CRC-skip-addr. SDK value 0xFC.
+	if err := d.registers.Write(WMODE_CFG0, CRC_3B|WORK_MODE_BLE|WHITEN_EN_BIT|CRC_SKIP_ADDR_BIT); err != nil {
+		return err
+	}
+	// RX_GOON + FIFO_128 + DPY_EN (dynamic payload, required for BLE length auto-insert) + 4B addr.
+	if err := d.registers.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|DPY_EN_BIT|ADDR_4B); err != nil {
+		return err
+	}
+	// BLE requires 1 Mbps.
+	if err := d.registers.Write(RF_DATARATE_CFG, DATARATE_1MBPS); err != nil {
+		return err
+	}
+	// Mask all IRQs except TX complete.
+	if err := d.registers.Write(RFIRQ_CFG, ^IRQ_TX); err != nil {
+		return err
+	}
+	if err := d.registers.Write(TXAUTO_CFG, 0x00); err != nil {
+		return err
+	}
+	// Single TX burst, continuous RX, pre-sync enabled (SDK value 0x41).
+	if err := d.registers.Write(TRXMODE_CFG, TX_SINGLE_BIT|RX_CONTINUOUS_BIT|PRE_SYNC_EN_BIT); err != nil {
+		return err
+	}
+	// Auto-insert 2-byte BLE PDU header (PDU-type byte + length byte).
+	if err := d.registers.Write(PKT_EXT_CFG, PKT_EXT_CFG_BLE); err != nil {
+		return err
+	}
+	// PDU header byte 0: ADV_NONCONN_IND (0x02) | TxAdd=1 (random address) → 0x42.
+	if err := d.registers.Write(TXHDR0_CFG, 0x42); err != nil {
+		return err
+	}
+	// BLE advertising access address 0x8E89BED6 (LSB-first).
+	// In BLE mode the chip uses PIPE0_RXADDR / TXADDR as the on-air access address.
+	for i, b := range [4]uint8{0xD6, 0xBE, 0x89, 0x8E} {
+		if err := d.registers.Write(PIPE0_RXADDR0+uint8(i), b); err != nil {
+			return err
+		}
+		if err := d.registers.Write(TXADDR0+uint8(i), b); err != nil {
+			return err
+		}
+	}
+	// Whitening seed for ch37 with WHITEN_SKIP_ADDR_BIT (bit7 must stay set).
+	if err := d.registers.Write(WHITEN_CFG, WHITEN_SKIP_ADDR_BIT|WHITEN_BLE_CH37); err != nil {
+		return err
+	}
+	// BLE length filter, whitelist start offset, PID mode (match SDK).
+	if err := d.registers.Write(BLEMATCH_CFG0, BLELEN_EQUAL); err != nil {
+		return err
+	}
+	if err := d.registers.Write(BLEMATCHSTART_CFG, 0x00); err != nil {
+		return err
+	}
+	if err := d.registers.Write(MISC_CFG, PID_LOW_SEL_BIT); err != nil {
+		return err
+	}
+	// Set calibration channel, then RF tuning.
+	if err := d.registers.Write(RF_CHANNEL_CFG, RF_CH_CAL); err != nil {
+		return err
+	}
+	for _, rw := range []struct{ reg, val uint8 }{
+		{RF_ANA_43, 0x3A}, {RF_ANA_44, RF_ANA_44_9DBM},
+		{RF_ANA_55, 0xDD}, {RF_ANA_56, 0xC9}, {RF_ANA_57, 0xB7},
+		{RF_ANA_5A, 0x10}, {RF_ANA_5B, 0xFD}, {RF_ANA_5C, 0xE9},
+		{RF_ANA_5D, 0xDC}, {RF_ANA_5E, 0x02}, {RF_ANA_5F, 0x06},
+		{RF_ANA_60, 0x0E}, {RF_ANA_61, 0x2E},
+		{RF_ANA_66, 0x34}, {RF_ANA_68, 0x0D},
+		{RF_ANA_6E, 0x20},
+	} {
+		if err := d.registers.Write(rw.reg, rw.val); err != nil {
+			return err
+		}
+	}
+
+	// ── Step 6: RF calibration (identical to Init) ────────────────────────────
+	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_CAL_CTL, CAL_VCO); err != nil {
+		return err
+	}
+	if err := d.waitBit(P1_CAL_STATUS_VCO, CAL_VCO_DONE_BIT, 10000); err != nil {
+		println("VCO cal timeout")
+		return ErrCalibration
+	}
+	if err := d.registers.Write(P1_CAL_CTL, CAL_THERMAL); err != nil {
+		return err
+	}
+	time.Sleep(55 * time.Millisecond)
+	if err := d.registers.Write(STATE_CFG, STATE_RX); err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Microsecond)
+	if err := d.registers.Write(P1_CAL_CTL, CAL_FREQ); err != nil {
+		return err
+	}
+	if err := d.waitBit(P1_CAL_STATUS_DONE, CAL_DONE_BIT, 10000); err != nil {
+		println("freq cal timeout")
+		return ErrCalibration
+	}
+	if err := d.registers.Write(P1_CAL_CTL, CAL_PHASE1); err != nil {
+		return err
+	}
+	if err := d.waitBit(P1_CAL_STATUS_PHASE1, CAL_PHASE1_DONE_BIT, 10000); err != nil {
+		println("phase1 cal timeout")
+		return ErrCalibration
+	}
+	if err := d.registers.Write(P1_CAL_CTL, CAL_PHASE2); err != nil {
+		return err
+	}
+	if err := d.waitBit(P1_CAL_STATUS_DONE, CAL_DONE_BIT, 10000); err != nil {
+		println("phase2 cal timeout")
+		return ErrCalibration
+	}
+	if err := d.registers.Write(P1_CAL_CTL, CAL_STOP); err != nil {
+		return err
+	}
+	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
+		return err
+	}
+	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
+		return err
+	}
+	return d.registers.Write(RFIRQFLG, IRQ_ALL)
+}
+
+// AdvertiseBLE sends one advertising event on BLE channels 37, 38, 39.
+// advA is the 6-byte advertiser address (LSB-first, static-random: advA[5] bits[7:6]=0b11).
+// advData contains the AD structures payload (max 31 bytes).
+func (d *Driver) AdvertiseBLE(advA [6]byte, advData []byte) error {
+	if len(advData) > 31 {
+		return ErrPayloadTooLarge
+	}
+	// Build payload on stack: AdvA + AdvData (no header prefix — chip adds it).
+	var payload [37]byte
+	copy(payload[:6], advA[:])
+	n := 6 + copy(payload[6:], advData)
+
+	for _, ch := range [3]struct{ rfCh, whiten uint8 }{
+		{RF_CH_BLE_37, WHITEN_BLE_CH37},
+		{RF_CH_BLE_38, WHITEN_BLE_CH38},
+		{RF_CH_BLE_39, WHITEN_BLE_CH39},
+	} {
+		if err := d.sendBLEPkt(ch.rfCh, ch.whiten, payload[:n]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sendBLEPkt transmits one BLE advertising packet on the given RF channel.
+func (d *Driver) sendBLEPkt(rfCh, whiten uint8, payload []byte) error {
+	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
+		return err
+	}
+	if err := d.registers.Write(RF_CHANNEL_CFG, rfCh); err != nil {
+		return err
+	}
+	if err := d.registers.Write(WHITEN_CFG, WHITEN_SKIP_ADDR_BIT|whiten); err != nil {
+		return err
+	}
+	if err := d.registers.Write(TXPLLEN_CFG, uint8(len(payload))); err != nil {
+		return err
+	}
+	if err := d.registers.WriteBuffer(TRX_FIFO, payload); err != nil {
+		return err
+	}
+	if err := d.registers.Write(RFIRQFLG, IRQ_ALL); err != nil {
+		return err
+	}
+	if err := d.registers.Write(STATE_CFG, STATE_TX); err != nil {
+		return err
+	}
+	for i := 0; i < 5000; i++ {
+		flags, err := d.registers.Read(RFIRQFLG)
+		if err != nil {
+			return err
+		}
+		if flags&IRQ_TX != 0 {
+			_ = d.registers.Write(RFIRQFLG, IRQ_TX)
+			return nil
+		}
+		runtime.Gosched()
+	}
+	state, _ := d.registers.Read(STATE_CFG)
+	irqFlags, _ := d.registers.Read(RFIRQFLG)
+	println("BLE TX timeout STATE_CFG:", state, "RFIRQFLG:", irqFlags)
+	return ErrTimeout
+}
+
+// StartCarrierWave emits a continuous unmodulated carrier at rfCh.
+// Must be called after InitBLE. Stop with StopCarrierWave.
+// Follows SDK pan211.c PAN211_StartCarrierWave (BLE variant, no page switch).
+func (d *Driver) StartCarrierWave(rfCh uint8) error {
+	d.registers.Write(STATE_CFG, STATE_STB3)
+	d.registers.Write(RF_CHANNEL_CFG, rfCh)
+	d.registers.Write(0x41, 0x1A) // undocumented Page0 RF analog tuning for CW
+	d.registers.Write(0x42, 0x41) // undocumented Page0 RF analog tuning for CW
+	d.registers.Write(TRXMODE_CFG, TX_CONTINUOUS_BIT|PRE_SYNC_EN_BIT) // 0x81
+	return d.registers.Write(STATE_CFG, STATE_TX)
+}
+
+// StopCarrierWave exits continuous TX mode and restores normal BLE operation.
+func (d *Driver) StopCarrierWave() error {
+	d.registers.Write(0x41, 0x00)
+	d.registers.Write(0x42, 0x00)
+	d.registers.Write(STATE_CFG, STATE_STB3)
+	d.registers.Write(TRXMODE_CFG, TRXMODE_CFG_NORMAL)
+	return d.registers.Write(TXHDR0_CFG, 0x42)
 }
 
 // enterRX enters RX from STB3. Used after TX completes.

@@ -264,7 +264,8 @@ const (
 	P1_RF_TUNE_3E = uint8(0x3E)
 
 	// P1_VCO_PA_CTL: VCO/PA control.
-	// 0xA2 = normal; 0x20 = enter carrier-wave; 0x00 = exit carrier-wave.
+	// 0xA6 = normal (16 MHz crystal); 0xA2 = normal (32 MHz crystal);
+	// 0x20 = enter carrier-wave; 0x00 = exit carrier-wave.
 	P1_VCO_PA_CTL = uint8(0x41)
 
 	// P1_CW_TUNE: carrier-wave mode tuning.
@@ -473,11 +474,12 @@ const (
 
 // ── RF_DATARATE_CFG values ────────────────────────────────────────────────────
 // Reserved bits [7:6]=0b01 and [3:0]=0b0101 are included in each constant.
+// DATARATE field bits[5:4]: 00=1Mbps, 01=2Mbps, 11=250kbps. Reset = 0x45 (1Mbps).
 
 const (
-	DATARATE_1MBPS   = uint8(0x55) // 1 Mbps  — required for BLE
-	DATARATE_2MBPS   = uint8(0x65) // 2 Mbps — requires 32 MHz crystal
-	DATARATE_250KBPS = uint8(0x75) // 250 kbps
+	DATARATE_1MBPS   = uint8(0x45) // 1 Mbps  — required for BLE (bits[5:4]=00)
+	DATARATE_2MBPS   = uint8(0x55) // 2 Mbps — requires 32 MHz crystal (bits[5:4]=01)
+	DATARATE_250KBPS = uint8(0x75) // 250 kbps (bits[5:4]=11)
 )
 
 // ── RF_CHANNEL_CFG notable values ─────────────────────────────────────────────
