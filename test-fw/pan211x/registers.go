@@ -239,6 +239,10 @@ const (
 	// Write OTP_CTL_START before reading, OTP_CTL_STOP after.
 	P1_OTP_CTL = uint8(0x05)
 
+	// P1_RF_TUNE_0A / P1_RF_TUNE_0B: Long Range BLE mode tuning registers.
+	P1_RF_TUNE_0A = uint8(0x0A)
+	P1_RF_TUNE_0B = uint8(0x0B)
+
 	// P1_CAL_CTL: calibration trigger (one-hot). Dual-use with TXHDR0_CFG (0x1B).
 	// Write CAL_* values in sequence. Poll P1_CAL_STATUS_* for completion.
 	P1_CAL_CTL = uint8(0x1B)
@@ -290,6 +294,9 @@ const (
 	// P1_TX_PWR_CTL: TX power control register.
 	// 0x88 for both 0 dBm and 9 dBm.
 	P1_TX_PWR_CTL = uint8(0x48)
+
+	// P1_RF_TUNE_49: Long Range BLE mode tuning register.
+	P1_RF_TUNE_49 = uint8(0x49)
 
 	// P1_RF_TUNE_4C: RF analog tuning, init value 0x48.
 	P1_RF_TUNE_4C = uint8(0x4C)

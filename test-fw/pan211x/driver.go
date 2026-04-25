@@ -133,14 +133,14 @@ func (d *Driver) Init() error {
 		return err
 	}
 
-	// ── Step 4: Page1 pre-configuration (ES_Tool V1.2.6, 16 MHz, XN297L normal) ──
+	// ── Step 4: Page1 pre-configuration (ES_Tool V1.2.7, 16 MHz, Long Range S8) ──
 	for _, rw := range []struct{ reg, val uint8 }{
-		{P1_RF_TUNE_27, 0xAA},
-		{P1_RF_TUNE_32, 0x1E}, {P1_RF_TUNE_33, 0x19},
-		{P1_RF_TUNE_37, 0x15}, {P1_RF_TUNE_3A, 0x14}, {P1_RF_TUNE_3E, 0xF1},
+		{P1_RF_TUNE_0A, 0x48}, {P1_RF_TUNE_0B, 0x30},
+		{P1_RF_TUNE_32, 0x10}, {P1_RF_TUNE_33, 0x1C},
+		{P1_RF_TUNE_37, 0x15}, {P1_RF_TUNE_3A, 0x54}, {P1_RF_TUNE_3E, 0xF1},
 		{P1_RF_TUNE_3F, 0xD2}, {P1_RF_TUNE_40, 0x20}, // 16 MHz crystal
 		{P1_VCO_PA_CTL, 0xA6},                         // 0xA6 for 16 MHz (32 MHz = 0xA2)
-		{P1_PA_BIAS, PA_BIAS_9DBM}, {P1_RF_TUNE_4C, 0x48},
+		{P1_PA_BIAS, PA_BIAS_9DBM}, {P1_RF_TUNE_49, 0x44}, {P1_RF_TUNE_4C, 0x48},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
@@ -158,13 +158,12 @@ func (d *Driver) Init() error {
 	if err := d.registers.Write(SYS_CFG, SYS_CFG_NORMAL); err != nil {
 		return err
 	}
-	// WMODE_CFG0: 2-byte CRC, XN297L mode, whitening enabled, big-endian. Matches SDK 0x89.
-	// Whitening is required: long zero runs in payload corrupt receiver CDR without it.
-	if err := d.registers.Write(WMODE_CFG0, CRC_2B|WHITEN_EN_BIT|ENDIAN_BIG); err != nil {
+	// WMODE_CFG0: 3-byte CRC, BLE mode, whitening, CRC-skip-addr (0xFC).
+	if err := d.registers.Write(WMODE_CFG0, CRC_3B|WORK_MODE_BLE|WHITEN_EN_BIT|CRC_SKIP_ADDR_BIT); err != nil {
 		return err
 	}
-	// WMODE_CFG1: RX_GOON=1, FIFO_128=1, 5-byte addr (per ES_Tool generated init, 0xA3).
-	if err := d.registers.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|ADDR_5B); err != nil {
+	// WMODE_CFG1: RX_GOON, FIFO_128, DPY_EN, 4-byte addr (0xB2).
+	if err := d.registers.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|DPY_EN_BIT|ADDR_4B); err != nil {
 		return err
 	}
 	if err := d.registers.Write(RXPLLEN_CFG, d.cfg.PayloadLen); err != nil {
@@ -173,22 +172,37 @@ func (d *Driver) Init() error {
 	if err := d.registers.Write(TXPLLEN_CFG, d.cfg.PayloadLen); err != nil {
 		return err
 	}
-	// Mask only IRQ_MAX_RT (irrelevant with ARC=0). All error IRQs visible in RFIRQFLG.
-	if err := d.registers.Write(RFIRQ_CFG, IRQ_MAX_RT); err != nil {
+	// Mask ADDR_ERR interrupt (fires for non-matching BLE packets on channel).
+	if err := d.registers.Write(RFIRQ_CFG, IRQ_ADDR_ERR); err != nil {
+		return err
+	}
+	// PKT_EXT_CFG: auto-insert 1 BLE header byte + length byte; FEC TX+RX (0x5C).
+	if err := d.registers.Write(PKT_EXT_CFG, HDR_LEN_EXIST_BIT|HDR_LEN_1_BIT|PRI_TX_FEC_BIT|PRI_RX_FEC_BIT); err != nil {
+		return err
+	}
+	// Whitening seed for Long Range BLE mode (0xD3 = skip_addr | seed 0x53).
+	if err := d.registers.Write(WHITEN_CFG, 0xD3); err != nil {
+		return err
+	}
+	// BLE header byte auto-inserted by chip (ADV_NONCONN_IND | TxAdd=1).
+	if err := d.registers.Write(TXHDR0_CFG, 0x42); err != nil {
 		return err
 	}
 	if err := d.registers.Write(TXAUTO_CFG, 0x00); err != nil {
 		return err
 	}
-	// TRXMODE_CFG: single TX, continuous RX, pre-sync enabled.
-	if err := d.registers.Write(TRXMODE_CFG, TRXMODE_CFG_NORMAL); err != nil {
+	// TRXMODE_CFG: single TX, continuous RX, pre-sync disabled (0x40).
+	if err := d.registers.Write(TRXMODE_CFG, TX_SINGLE_BIT|RX_CONTINUOUS_BIT); err != nil {
 		return err
 	}
-	// Whitening seed = WHITEN_DEFAULT (SDK default). Both TX and RX must use same seed.
-	if err := d.registers.Write(WHITEN_CFG, WHITEN_DEFAULT); err != nil {
+	// BLE length filter: accept only packets whose Length field == RxLen.
+	if err := d.registers.Write(BLEMATCH_CFG0, BLELEN_EQUAL); err != nil {
 		return err
 	}
-	// Enable PIPE0 explicitly (default=1, but be explicit after soft reset).
+	// Whitelist match starts at offset 0.
+	if err := d.registers.Write(BLEMATCHSTART_CFG, 0x00); err != nil {
+		return err
+	}
 	if err := d.registers.Write(RXPIPE_CFG, PIPE0_EN); err != nil {
 		return err
 	}
@@ -204,15 +218,28 @@ func (d *Driver) Init() error {
 		}
 	}
 
-	// Calibration channel and RF analog tuning (ES_Tool V1.2.6, 16 MHz XN297L).
-	// Data rate register not written — chip defaults to 1 Mbps.
+	// Long Range BLE mode Page0 config registers (undocumented, ES_Tool V1.2.7).
+	if err := d.registers.Write(0x36, 0xB0); err != nil {
+		return err
+	}
+	if err := d.registers.Write(0x37, 0xEB); err != nil {
+		return err
+	}
+	if err := d.registers.Write(0x38, 0x4B); err != nil {
+		return err
+	}
+
+	// Calibration channel and RF analog tuning (ES_Tool V1.2.7, 16 MHz Long Range S8).
 	if err := d.registers.Write(RF_CHANNEL_CFG, RF_CH_CAL); err != nil {
 		return err
 	}
 	for _, rw := range []struct{ reg, val uint8 }{
-		{RF_ANA_43, 0x3A}, {RF_ANA_44, RF_ANA_44_9DBM},
+		{RF_ANA_43, 0x3B}, {RF_ANA_44, RF_ANA_44_9DBM},
 		{RF_ANA_55, 0xDD}, {RF_ANA_56, 0xC9}, {RF_ANA_57, 0xB7},
+		{RF_ANA_5A, 0x10}, {RF_ANA_5B, 0xFD}, {RF_ANA_5C, 0xE9}, {RF_ANA_5D, 0xDC},
+		{RF_ANA_5E, 0x02}, {RF_ANA_5F, 0x06}, {RF_ANA_60, 0x0E}, {RF_ANA_61, 0x2E},
 		{RF_ANA_66, 0x34}, {RF_ANA_68, 0x0D}, {RF_ANA_6E, 0x20},
+		{MISC_CFG, 0x10},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
@@ -283,14 +310,20 @@ func (d *Driver) Init() error {
 		return err
 	}
 
-	// Set TX power to 9 dBm (Page1 registers not written during pre-config).
+	// Set TX power to 9 dBm (ES_Tool V1.2.7 SetTxPower sequence).
 	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
 		return err
 	}
-	if err := d.registers.Write(P1_TX_PWR_AMP, 0x17); err != nil {
+	if err := d.registers.Write(P1_RF_TUNE_27, 0x0A); err != nil {
 		return err
 	}
-	if err := d.registers.Write(P1_TX_PWR_CTL, 0x88); err != nil {
+	if err := d.registers.Write(P1_TX_PWR_AMP, TX_PWR_AMP_9DBM); err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_PA_BIAS, PA_BIAS_9DBM); err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_TX_PWR_CTL, TX_PWR_CTL_VAL); err != nil {
 		return err
 	}
 	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
@@ -389,6 +422,16 @@ func (d *Driver) Receive(buf []byte) (n int, ok bool) {
 	}
 	_ = d.registers.Write(RFIRQFLG, IRQ_RX)
 	return len(buf), true
+}
+
+// PacketRSSI returns the RSSI of the last received packet in dBm (range −90 to −20).
+// Read immediately after Receive() returns true.
+// Formula: (PKT_RSSI_L + PKT_RSSI_H[5:0]×256 − 16384) / 4
+func (d *Driver) PacketRSSI() int16 {
+	lo, _ := d.registers.Read(PKT_RSSI_L)
+	hi, _ := d.registers.Read(PKT_RSSI_H)
+	raw := int32(hi&0x3F)<<8 | int32(lo)
+	return int16((raw - 16384) / 4)
 }
 
 // DumpState prints key register values to RTT for debugging.

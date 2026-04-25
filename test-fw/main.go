@@ -136,7 +136,8 @@ func runNode(pan *pan211x.Driver) {
 		}
 		missCount = 0
 		v := u32le(buf[:])
-		println("RX:", v)
+		rssi := pan.PacketRSSI()
+		println("RX:", v, "RSSI:", rssi)
 		pinLedGreen.Set(!pinLedGreen.Get())
 
 		if err := pan.Send(dst, buf[:]); err != nil {
