@@ -370,6 +370,11 @@ Both packages share the same pinout.
 | Frequency tolerance for the crystal | F_TOLHXTLA | | VDD=3.3V, T_A=25°C | -20 | - | 20 | ppm |
 | Drive level | PD_HXTLA | | VDD=3.3V, T_A=25°C | - | - | 100 | μW |
 
+> **Note — firmware init differences for 16 MHz crystal:** The PAN211x SDK targets a 32 MHz crystal. A 16 MHz crystal requires additional register writes during `Init()` not present in the SDK:
+> - Page 0 `0x37 = 0xE0` before entering Page 1.
+> - Page 1 `0x3F = 0xD2`, `0x40 = 0x20` (undocumented RF tuning).
+> - Page 1 `0x41 (VCO_PA_CTL) = 0xA6` instead of the SDK's `0xA2`.
+
 ### 8.9 General Operating Conditions
 
 | Parameter | Symbol | Description | Conditions | Min | Typ | Max | Unit |

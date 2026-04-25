@@ -263,8 +263,14 @@ const (
 	// P1_RF_TUNE_3E: RF analog tuning, init value 0xF1.
 	P1_RF_TUNE_3E = uint8(0x3E)
 
+	// P1_RF_TUNE_3F / P1_RF_TUNE_40: undocumented RF analog tuning registers.
+	// Required for correct operation with a 16 MHz crystal; init 0xD2 / 0x20.
+	P1_RF_TUNE_3F = uint8(0x3F)
+	P1_RF_TUNE_40 = uint8(0x40)
+
 	// P1_VCO_PA_CTL: VCO/PA control.
-	// 0xA2 = normal; 0x20 = enter carrier-wave; 0x00 = exit carrier-wave.
+	// 0xA6 = normal (16 MHz crystal); 0xA2 = normal (32 MHz crystal);
+	// 0x20 = enter carrier-wave; 0x00 = exit carrier-wave.
 	P1_VCO_PA_CTL = uint8(0x41)
 
 	// P1_CW_TUNE: carrier-wave mode tuning.

@@ -1743,6 +1743,12 @@ The following schematic shows the typical application circuit for PAN211x:
   - Formula: CL = (C3 × C4)/(C3 + C4) + Cstray
   - Typical: 10pF ±5% C0G/NP0 ceramic capacitors
 
+> **16 MHz crystal — additional register requirements:** The SDK init sequence targets a 32 MHz crystal. When using a 16 MHz crystal, three extra register writes are required during `Init()` that are absent from the SDK:
+> 1. Page 0 `0x37 = 0xE0` — must be written **before** entering Page 1 for OTP access.
+> 2. Page 1 `0x3F = 0xD2` and `0x40 = 0x20` — undocumented RF analog tuning; added to the Page 1 pre-configuration block (after `0x3E`).
+> 3. Page 1 `0x41 (VCO_PA_CTL) = 0xA6` — the SDK writes `0xA2` (32 MHz); use `0xA6` for 16 MHz.
+> Without these, the VCO does not lock correctly and TX produces no output.
+
 **Antenna Matching:**
 - The ANT pin requires proper RF matching network
 - Simple matching: 27Ω series resistor for basic operation

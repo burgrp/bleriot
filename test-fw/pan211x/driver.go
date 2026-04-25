@@ -26,7 +26,6 @@ func (a Address) Bytes() [4]byte {
 type Config struct {
 	OwnAddr    Address // RX filter: only packets with TXADDR==OwnAddr are accepted
 	RFChannel  uint8   // operating frequency: F = 2400 + RFChannel [MHz], range 0-83
-	DataRate   uint8   // use DATARATE_* constants
 	PayloadLen uint8   // fixed packet length in bytes (both TX and RX)
 }
 
@@ -89,6 +88,11 @@ func (d *Driver) Init() error {
 		return ErrNoDevice
 	}
 
+	// 16 MHz crystal pre-configuration (must be set before Page1 OTP read).
+	if err := d.registers.Write(0x37, 0xE0); err != nil {
+		return err
+	}
+
 	// ── Step 3: Read factory OTP calibration (Page1) ─────────────────────────
 	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
 		return err
@@ -129,12 +133,14 @@ func (d *Driver) Init() error {
 		return err
 	}
 
-	// ── Step 4: Page1 pre-configuration (SDK normal_tx example) ──────────────
+	// ── Step 4: Page1 pre-configuration (ES_Tool V1.2.6, 16 MHz, XN297L normal) ──
 	for _, rw := range []struct{ reg, val uint8 }{
-		{P1_RF_TUNE_27, 0xAA}, {P1_RF_TUNE_32, 0x1E}, {P1_RF_TUNE_33, 0x19},
+		{P1_RF_TUNE_27, 0xAA},
+		{P1_RF_TUNE_32, 0x1E}, {P1_RF_TUNE_33, 0x19},
 		{P1_RF_TUNE_37, 0x15}, {P1_RF_TUNE_3A, 0x14}, {P1_RF_TUNE_3E, 0xF1},
-		{P1_VCO_PA_CTL, 0xA2}, {P1_TX_PWR_AMP, 0x17}, {P1_PA_BIAS, PA_BIAS_9DBM},
-		{P1_TX_PWR_CTL, 0x88}, {P1_RF_TUNE_4C, 0x48},
+		{P1_RF_TUNE_3F, 0xD2}, {P1_RF_TUNE_40, 0x20}, // 16 MHz crystal
+		{P1_VCO_PA_CTL, 0xA6},                         // 0xA6 for 16 MHz (32 MHz = 0xA2)
+		{P1_PA_BIAS, PA_BIAS_9DBM}, {P1_RF_TUNE_4C, 0x48},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
@@ -157,8 +163,8 @@ func (d *Driver) Init() error {
 	if err := d.registers.Write(WMODE_CFG0, CRC_2B|WHITEN_EN_BIT|ENDIAN_BIG); err != nil {
 		return err
 	}
-	// WMODE_CFG1: RX_GOON=1, FIFO_128=1 (required in XN297L normal mode per RM p.51), 4-byte addr.
-	if err := d.registers.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|ADDR_4B); err != nil {
+	// WMODE_CFG1: RX_GOON=1, FIFO_128=1, 5-byte addr (per ES_Tool generated init, 0xA3).
+	if err := d.registers.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|ADDR_5B); err != nil {
 		return err
 	}
 	if err := d.registers.Write(RXPLLEN_CFG, d.cfg.PayloadLen); err != nil {
@@ -198,21 +204,15 @@ func (d *Driver) Init() error {
 		}
 	}
 
-	// Calibration channel, data rate, RF tuning (per SDK ES_Tool V1.2.6; crystal-independent).
+	// Calibration channel and RF analog tuning (ES_Tool V1.2.6, 16 MHz XN297L).
+	// Data rate register not written — chip defaults to 1 Mbps.
 	if err := d.registers.Write(RF_CHANNEL_CFG, RF_CH_CAL); err != nil {
-		return err
-	}
-	if err := d.registers.Write(RF_DATARATE_CFG, d.cfg.DataRate); err != nil {
 		return err
 	}
 	for _, rw := range []struct{ reg, val uint8 }{
 		{RF_ANA_43, 0x3A}, {RF_ANA_44, RF_ANA_44_9DBM},
 		{RF_ANA_55, 0xDD}, {RF_ANA_56, 0xC9}, {RF_ANA_57, 0xB7},
-		{RF_ANA_5A, 0x10}, {RF_ANA_5B, 0xFD}, {RF_ANA_5C, 0xE9},
-		{RF_ANA_5D, 0xDC}, {RF_ANA_5E, 0x02}, {RF_ANA_5F, 0x06},
-		{RF_ANA_60, 0x0E}, {RF_ANA_61, 0x2E},
-		{RF_ANA_66, 0x34}, {RF_ANA_68, 0x0D},
-		{RF_ANA_6E, 0x20},
+		{RF_ANA_66, 0x34}, {RF_ANA_68, 0x0D}, {RF_ANA_6E, 0x20},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
@@ -275,13 +275,28 @@ func (d *Driver) Init() error {
 		return err
 	}
 
-	// Set operating channel, clear all IRQ, enter RX.
+	// Set operating channel and clear all IRQ flags.
 	if err := d.registers.Write(RF_CHANNEL_CFG, d.cfg.RFChannel); err != nil {
 		return err
 	}
 	if err := d.registers.Write(RFIRQFLG, IRQ_ALL); err != nil {
 		return err
 	}
+
+	// Set TX power to 9 dBm (Page1 registers not written during pre-config).
+	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_TX_PWR_AMP, 0x17); err != nil {
+		return err
+	}
+	if err := d.registers.Write(P1_TX_PWR_CTL, 0x88); err != nil {
+		return err
+	}
+	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
+		return err
+	}
+
 	return d.registers.Write(STATE_CFG, STATE_RX)
 }
 

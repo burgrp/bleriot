@@ -604,7 +604,13 @@ BLE requires 1 Mbps.
 
 ### 0x37–0x38 — Undocumented
 
-Not described in the RM. Not written by the SDK. Purpose unknown.
+Not described in the RM. Purpose inferred from hardware testing.
+
+**0x37 — Crystal pre-configuration gate (16 MHz hardware)**
+
+Must be written to **0xE0** before entering Page 1 for OTP access when using a 16 MHz crystal. Without this write, the Page 1 RF analog tuning values and OTP read do not take effect correctly. Not required (and not written) by the SDK, which targets 32 MHz crystal hardware.
+
+**0x38** — Purpose unknown; not written by SDK or 16 MHz init.
 
 ---
 
@@ -981,11 +987,24 @@ Init value: **0xF1**.
 
 ---
 
+### 0x3F (Page 1) — RF Analog Tuning ⚙ (Undocumented)
+
+Not described in the RM or SDK. Required for correct RF operation with a **16 MHz crystal**; init value **0xD2**. Not written by the SDK (which targets 32 MHz hardware).
+
+---
+
+### 0x40 (Page 1) — RF Analog Tuning ⚙ (Undocumented)
+
+Not described in the RM or SDK. Required for correct RF operation with a **16 MHz crystal**; init value **0x20**. Not written by the SDK (which targets 32 MHz hardware).
+
+---
+
 ### 0x41 (Page 1) — VCO / PA Control ⚙
 
 | Value | Context |
 |-------|---------|
-| 0xA2 | Normal operation |
+| 0xA6 | Normal operation — **16 MHz crystal** |
+| 0xA2 | Normal operation — 32 MHz crystal (SDK default) |
 | 0x20 | Carrier-wave test mode entry |
 | 0x00 | Carrier-wave test mode exit |
 
@@ -1101,6 +1120,7 @@ Step 2 — STB3 with soft reset
   delay 1 ms
   Write SYS_CFG    ← 0x02   (release SOFT_RSTL)
   Read  SPI_CFG            → must read 0x83 (chip-present check)
+  [16 MHz crystal only] Write 0x37 ← 0xE0  (must precede Page 1 entry)
 
 Step 3 — Read factory OTP (Page 1)
   Write PAGE_CFG   ← 0x01
@@ -1119,8 +1139,10 @@ Step 4 — Page 1 pre-configuration
   Write 0x37 ← 0x15
   Write 0x3A ← 0x14
   Write 0x3E ← 0xF1
-  Write 0x41 ← 0xA2
-  Write 0x46 ← 0xB0
+  [16 MHz crystal only] Write 0x3F ← 0xD2
+  [16 MHz crystal only] Write 0x40 ← 0x20
+  Write 0x41 ← 0xA6   (16 MHz crystal) / 0xA2 (32 MHz crystal, SDK default)
+  Write 0x46 ← 0xB0   (= PA_BIAS_9DBM)
   Write 0x4C ← 0x48
 
 Step 5 — Page 0 RF configuration
