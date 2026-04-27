@@ -410,19 +410,19 @@ The chip auto-prepends `TXHDR0` (PDU type = 0x42 = `ADV_NONCONN_IND | TxAdd=1`) 
 | Value | SKIP_ADDR | SEED | Use |
 |-------|-----------|------|-----|
 | 0x7F | 0 | 0x7F | SDK default / XN297L-compatible |
-| 0x53 | 0 | 0x53 | BLE advertising channel 37 (2402 MHz) |
-| 0x33 | 0 | 0x33 | BLE advertising channel 38 (2426 MHz) |
-| 0x73 | 0 | 0x73 | BLE advertising channel 39 (2480 MHz) |
+| 0xD3 | **1** | 0x53 | BLE advertising channel 37 (2402 MHz) |
+| 0xB3 | **1** | 0x33 | BLE advertising channel 38 (2426 MHz) |
+| 0xF3 | **1** | 0x73 | BLE advertising channel 39 (2480 MHz) |
 
 **BLE whitening seed formula:**
 
 ```
-WHITEN_CFG = bit_reverse7(BLE_channel_index | 0x40)
+WHITEN_CFG = 0x80 | bit_reverse7(BLE_channel_index | 0x40)
 ```
 
-where `bit_reverse7` reverses all 7 bits and `BLE_channel_index` is the BLE logical channel number (37, 38, or 39 for advertising). In BLE WORK_MODE (`WORK_MODE`=11) address-field skipping is handled automatically by the chip; `WHITEN_SKIP_ADDR` (bit 7) is left 0.
+where `bit_reverse7` reverses all 7 bits and `BLE_channel_index` is the BLE logical channel number (37, 38, or 39 for advertising). **`WHITEN_SKIP_ADDR` (bit 7) must always be set to 1 in BLE mode** — the BLE access address and preamble are never whitened; only the PDU payload is whitened.
 
-Example for BLE ch 37: `37 | 0x40` = 101 = `0b1100101`; bit-reversed (7 bits) = `0b1010011` = **0x53**.
+Example for BLE ch 37: `37 | 0x40` = `0b1100101`; bit-reversed (7 bits) = `0b1010011` = 0x53; register = `0x80 | 0x53` = **0xD3**.
 
 ---
 
@@ -563,11 +563,11 @@ SDK BLE TX init: `0x04` (length filter = equal, whitelist disabled).
 
 ---
 
-### 0x2E — BLEMATCH_CFG1
+### 0x2E — BLEMATCH_CFG1 — BLE Pattern Match Threshold
 
-| Bits | Default | Note |
-|------|---------|------|
-| 7:0 | 0x28 | **Reserved — do not modify.** Always leave at 0x28. |
+| Bits | Name | R/W | Default | Description |
+|------|------|-----|---------|-------------|
+| 7:0 | PATT_MATCH_THRESHOLD | R/W | 0x28 | BLE access address correlation threshold. The chip counts bit matches against `0x8E89BED6`; a packet is accepted only when the count meets this value. Default 0x28 = 40 (of 32 bits) is PANCHIP's empirically tuned setting. Do not modify without PANCHIP guidance. |
 
 ---
 
@@ -1310,7 +1310,7 @@ When `WORK_MODE = 11` (BLE), the following registers differ from XN297L-compatib
 |----------|--------|-----|-------|
 | WMODE_CFG0 | 0x89 | 0xFC | 3B CRC, BLE mode, whitening, little-endian |
 | WMODE_CFG1 | 0xA2 | 0xB2 | DPY_EN=1 (auto-length from PDU) |
-| WHITEN_CFG | 0x7F | 0x53 / 0x33 / 0x73 | BLE channel seed (ch 37/38/39); SKIP_ADDR=0 in BLE mode |
+| WHITEN_CFG | 0x7F | 0xD3 / 0xB3 / 0xF3 | BLE channel seed (ch 37/38/39); SKIP_ADDR=1 required in BLE mode |
 | PKT_EXT_CFG | 0x00 | 0x60 | Auto-insert 2 header bytes |
 | TXHDR0_CFG | 0x00 | 0x42 | ADV_NONCONN_IND \| TxAdd=1 |
 | BLEMATCH_CFG0 | 0x00 | 0x04 | Length filter = equal |
