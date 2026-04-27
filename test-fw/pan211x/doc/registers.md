@@ -1,6 +1,6 @@
 # PAN211x Register Reference
 
-Sources: official reference manual, PAN211x-DK-v2.2.5 SDK (`pan211.c` and related examples).  
+Sources: official reference manual, PAN211x-DK-v2.2.5 SDK (`pan211.c` and related examples).
 Notation: **⚙** = SDK-derived / inferred from code; entries with no qualifier are from the official RM.
 
 ---
@@ -26,7 +26,7 @@ The PAN211x I2C address is **0x71** (7-bit). The first data byte in every I2C tr
 access_byte = reg_addr << 1 | R/W   (0=write, 1=read)
 ```
 
-Write to register 0x07: `START 0xE2 0x0E <data> STOP`  
+Write to register 0x07: `START 0xE2 0x0E <data> STOP`
 Read from register 0x73: `START 0xE2 0xE6 RESTART 0xE3 <data> STOP`
 
 ---
@@ -93,10 +93,20 @@ Read from register 0x73: `START 0xE2 0xE6 RESTART 0xE3 <data> STOP`
 | 0x37–0x38 | — | — | — | Undocumented; not written by SDK |
 | 0x39 | RF_CHANNEL_CFG | R/W | 0x00 | RF channel: F = 2400 + val \[MHz\] |
 | 0x3A–0x42 | ⚙ | W | — | RF analog tuning — undocumented |
-| 0x43 | ⚙ | W | — | RF driver tuning; TX-power dependent |
-| 0x44 | ⚙ | W | — | RF output tuning; TX-power dependent |
+| 0x43 | RF_PA_MODE_CFG ⚙ | R/W | 0x32 | PA mode sel \[5:4\], VCO TX clock \[2\], RXFLTR_IF \[1:0\]; data-rate and TX-power dependent |
+| 0x44 | RF_PA_POUT_CFG ⚙ | R/W | 0x7C | TX PA output current \[7:4\] and LDO select \[3:0\]; TX-power dependent |
 | 0x45 | IRQ_MUX_CFG | R/W | 0x00 | IRQ pin: interrupt / clock-out / PA control |
-| 0x46–0x6E | ⚙ | W | — | RF analog tuning — undocumented |
+| 0x46–0x54 | ⚙ | R/W | — | AGC and RSSI control (see `registers.go`) |
+| 0x55–0x57 | RF_RSSI_TH1–TH3 ⚙ | W | — | RSSI AGC threshold levels 1–3 |
+| 0x58–0x59 | ⚙ | R/W | — | RF analog — undocumented |
+| 0x5A–0x5D | RF_RSSI_FIX0–3 ⚙ | W | — | Fixed RSSI calibration words |
+| 0x5E–0x61 | RF_GAIN_WORD0–3 ⚙ | W | — | AGC gain table entries; WORD3 changes for high-gain RX |
+| 0x62–0x65 | ⚙ | W | — | RF timing — undocumented |
+| 0x66 | RF_TX_ANA_TIME ⚙ | W | — | TX analog setup time |
+| 0x67 | ⚙ | W | — | RF timing — undocumented |
+| 0x68 | RF_RX_PLL_SETUP ⚙ | W | — | RX RF PLL setup time \[5:0\] |
+| 0x69–0x6D | ⚙ | W | — | RF timing — undocumented |
+| 0x6E | RF_PA_RAMP_DLY ⚙ | W | — | PA ramp delay: DN \[6:4\], UP \[2:0\] |
 | 0x6F | MISC_CFG | R/W | 0x00 | ACK pipe number, IRQ polarity |
 | 0x70–0x72 | — | — | — | Undocumented |
 | 0x73 | RFIRQFLG | R/W | 0x00 | Interrupt flags (write 1 to clear) |
@@ -137,7 +147,7 @@ Always restore to 0x00 after any Page 1 access.
 
 The chip maintains separate TX and RX FIFO pointers. In the I2C implementation, each byte is a separate START–STOP transaction; the chip advances its internal pointer on each transaction. The active FIFO (TX or RX) is selected by the current operating mode.
 
-TX: write `len` bytes before asserting TX mode. Data replaces whatever was in the FIFO.  
+TX: write `len` bytes before asserting TX mode. Data replaces whatever was in the FIFO.
 RX: read `len` bytes after `RX_IRQ` fires.
 
 ---
@@ -190,7 +200,7 @@ Always write STB3 before reconfiguring registers. The chip must not be in TX or 
 | 1 | SOFT_RSTL | R/W | 1 | Logic soft-reset (active low). Write 0 to assert, write 1 to release. |
 | 0 | — | — | 0 | Reserved |
 
-**Init sequence:**  
+**Init sequence:**
 `Write 0x00` (assert reset) → 1 ms delay → `Write 0x02` (release reset) → `Write 0x06` (IRQ_DATA_MUX_EN=1 plus release reset).
 
 After soft reset all Page 0 registers return to defaults. SPI_CFG must be re-written.
@@ -209,8 +219,6 @@ After soft reset all Page 0 registers return to defaults. SPI_CFG must be re-wri
 | 2:0 | — | — | 011 | Reserved — forbidden to modify; always include 0b011 |
 
 Default = 0x6B = `REG_DATA_PUEN | REG_CSN_PUEN | REG_SCK_PUEN | 0b011`.
-
-SDK init writes **0x83** = `REG_SPI3_REN | 0b011`. After soft-reset this register reads back 0x83; the firmware uses this as a chip-present check.
 
 **Page 1 dual use:** When `PAGE_CFG` = 1, address 0x04 maps to the OTP data register (see Page 1 section).
 
@@ -385,7 +393,7 @@ Default = 0xCCCCCCCCCC.
 | 2 | PRI_RX_FEC | R/W | 0 | RX spread-spectrum / FEC enable |
 | 1:0 | PRI_CI_MODE | R/W | 00 | Spread-spectrum mode: `00`=off, `01`=S2, `10`=S8 |
 
-**BLE TX mode:** `PKT_EXT_CFG = 0x60` = `HDR_LEN_EXIST=1, HDR_LEN_NUMB=10` (2 header bytes).  
+**BLE TX mode:** `PKT_EXT_CFG = 0x60` = `HDR_LEN_EXIST=1, HDR_LEN_NUMB=10` (2 header bytes).
 The chip auto-prepends `TXHDR0` (PDU type = 0x42 = `ADV_NONCONN_IND | TxAdd=1`) and `TXHDR1` (auto-calculated PDU length) to the FIFO payload. The FIFO must contain only AdvA (6 bytes, LSB-first) + AdvData.
 
 ---
@@ -424,7 +432,7 @@ Example for BLE ch 37: `37 | 0x40` = 101 = `0b1100101`; bit-reversed (7 bits) = 
 |------|------|-----|---------|-------------|
 | 7:0 | TX_HEADER0 | R/W | 0x00 | Value auto-inserted as the first header byte when `PKT_EXT_CFG.HDR_LEN_EXIST`=1 |
 
-**BLE advertising:** `TXHDR0_CFG = 0x42` = `ADV_NONCONN_IND (PDU type 0x02) | TxAdd=1 (bit 6)`.  
+**BLE advertising:** `TXHDR0_CFG = 0x42` = `ADV_NONCONN_IND (PDU type 0x02) | TxAdd=1 (bit 6)`.
 (`0b01000010` → bits \[5:4\]=0b10 reserved, bits\[3:0\]=PDU type 0x2=ADV_NONCONN_IND, bit\[6\]=TxAdd=1)
 
 > **Note:** On Page 1, address 0x1B maps to the **Calibration Control** register (different physical register — see Page 1 section).
@@ -642,23 +650,33 @@ Not written by the SDK init sequence (the range 0x3A–0x42 is skipped; SDK jump
 
 ---
 
-### 0x43 — RF Driver Tuning (Undocumented, Page 0) ⚙
+### 0x43 — RF_PA_MODE_CFG (Page 0) ⚙
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 7 | RXADC_MODE_MANUAL_EN | RX ADC mode manual override enable |
+| 6 | RXADC_MODE_SEL | RX ADC mode select |
+| 5:4 | TXPA_MODE_SEL | TX PA operating mode: 0=250 kbps/FS01/FS32, 2=1 Mbps/2 Mbps/BLE |
+| 3 | EN_RXADCCLK | Enable RX ADC clock |
+| 2 | FSYNVCO_TXCTK | FSYN VCO TX clock: 0=1 Mbps/250 kbps, 1=2 Mbps |
+| 1:0 | RXFLTR_IF | RX filter IF mode: 2=1 Mbps/2 Mbps, 3=250 kbps |
 
 | SDK Init | TX 0 dBm | TX 9 dBm | Notes |
 |----------|----------|----------|-------|
-| 0x3A | 0x3A | 0x3A | Same value for all TX-power levels; from ES_Tool init sequence |
-
-Inferred purpose: RF driver bias or gain setting. Changing this register requires corresponding Page 1 register adjustments.
+| 0x3A | 0x3A | 0x3A | Same for all power levels |
 
 ---
 
-### 0x44 — RF Output Tuning (Undocumented, Page 0) ⚙
+### 0x44 — RF_PA_POUT_CFG (Page 0) ⚙
+
+| Bits | Name | Description |
+|------|------|-------------|
+| 7:4 | TXPA_POUT_CRNT | TX PA output current (power level select) |
+| 3:0 | TXPA_LDO_SEL | TX PA LDO voltage select |
 
 | SDK Init | TX 0 dBm | TX 9 dBm | Notes |
 |----------|----------|----------|-------|
-| 0x8C | 0x84 | 0x8C | TX-power dependent — part of TX-power configuration |
-
-Inferred purpose: PA output matching or bias. The difference between 0 dBm (0x84) and 9 dBm (0x8C) confirms a direct role in output power control.
+| 0x8C | 0x84 | 0x8C | TX-power dependent |
 
 ---
 
@@ -680,25 +698,25 @@ Not written by the SDK in the ES_Tool init sequence for normal operation.
 
 ---
 
-### 0x55–0x61 — RF Analog Tuning Bank (Undocumented, Page 0) ⚙
+### 0x55–0x61 — RSSI Thresholds and AGC Gain Words (Page 0) ⚙
 
-Written during init from the SDK ES_Tool V1.2.6 sequence (16 MHz crystal). These are required for correct RF operation and must not be changed.
+Written during init from the SDK ES_Tool V1.2.6 sequence (16 MHz crystal). Required for correct RF operation.
 
-| Addr | SDK Init | BLE RX mode | Inferred function |
-|------|----------|-------------|-------------------|
-| 0x55 | 0xDD | 0xDD | RF filter / baseband tuning |
-| 0x56 | 0xC9 | 0xC9 | RF filter / baseband tuning |
-| 0x57 | 0xB7 | 0xB7 | RF filter / baseband tuning |
-| 0x58 | — | — | Not written; purpose unknown |
-| 0x59 | — | — | Not written; purpose unknown |
-| 0x5A | 0x10 | 0x10 | RF baseband tuning |
-| 0x5B | 0xFD | 0xFD | RF baseband tuning |
-| 0x5C | 0xE9 | 0xE9 | RF baseband tuning |
-| 0x5D | 0xDC | 0xD4 ⚙ | RF baseband tuning; 0xD4 used in `19_realtime_rssi` (high-gain RX) |
-| 0x5E | 0x02 | 0x02 | RF baseband tuning |
-| 0x5F | 0x06 | 0x06 | RF baseband tuning |
-| 0x60 | 0x0E | 0x0E | RF baseband tuning |
-| 0x61 | 0x2E | 0x3E ⚙ | RF baseband / RX gain: **0x3E** = high-gain RX mode (used in `19_realtime_rssi`); 0x2E = normal |
+| Addr | Name | SDK Init | BLE RX mode | Function |
+|------|------|----------|-------------|----------|
+| 0x55 | RF_RSSI_TH1 | 0xDD | 0xDD | RSSI AGC threshold level 1 |
+| 0x56 | RF_RSSI_TH2 | 0xC9 | 0xC9 | RSSI AGC threshold level 2 |
+| 0x57 | RF_RSSI_TH3 | 0xB7 | 0xB7 | RSSI AGC threshold level 3 |
+| 0x58 | RF_RSSI_INIT | — | — | RSSI initial value for AGC; not written |
+| 0x59 | RF_RSSI_HYS | — | — | RSSI hysteresis for AGC; not written |
+| 0x5A | RF_RSSI_FIX0 | 0x10 | 0x10 | Fixed RSSI calibration word 0 |
+| 0x5B | RF_RSSI_FIX1 | 0xFD | 0xFD | Fixed RSSI calibration word 1 |
+| 0x5C | RF_RSSI_FIX2 | 0xE9 | 0xE9 | Fixed RSSI calibration word 2 |
+| 0x5D | RF_RSSI_FIX3 | 0xDC | 0xD4 ⚙ | Fixed RSSI calibration word 3; **0xD4** in high-gain RX mode |
+| 0x5E | RF_GAIN_WORD0 | 0x02 | 0x02 | AGC gain table entry 0 |
+| 0x5F | RF_GAIN_WORD1 | 0x06 | 0x06 | AGC gain table entry 1 |
+| 0x60 | RF_GAIN_WORD2 | 0x0E | 0x0E | AGC gain table entry 2 |
+| 0x61 | RF_GAIN_WORD3 | 0x2E | 0x3E ⚙ | AGC gain table entry 3; **0x3E** in high-gain RX mode |
 
 ---
 
@@ -708,9 +726,9 @@ Not written by SDK. Purpose unknown.
 
 ---
 
-### 0x66 — RF Analog Tuning (Undocumented, Page 0) ⚙
+### 0x66 — RF_TX_ANA_TIME (Page 0) ⚙
 
-SDK init value: **0x34**. Purpose unknown; required for correct RF operation.
+TX analog setup time. SDK init value: **0x34**.
 
 ---
 
@@ -720,9 +738,9 @@ Not written by SDK. Purpose unknown.
 
 ---
 
-### 0x68 — RF Analog Tuning (Undocumented, Page 0) ⚙
+### 0x68 — RF_RX_PLL_SETUP (Page 0) ⚙
 
-SDK init value: **0x0D**. Purpose unknown; required for correct RF operation.
+RX RF PLL setup time. Bits \[5:0\] = `RX_RFPLL_SETUP_TIME`. SDK init value: **0x0D**.
 
 ---
 
@@ -732,9 +750,9 @@ Not written by SDK. Purpose unknown.
 
 ---
 
-### 0x6E — RF Analog Tuning (Undocumented, Page 0) ⚙
+### 0x6E — RF_PA_RAMP_DLY (Page 0) ⚙
 
-SDK init value: **0x20**. Last register in the ES_Tool init sequence before the Page 1 RF calibration step.
+PA ramp delay select. Bits \[6:4\] = `PA_RAM_DN_DLY_SEL`, bits \[2:0\] = `PA_RAM_UP_DLY_SEL`. SDK init value: **0x20**. Last register written before Page 1 RF calibration.
 
 ---
 
@@ -1161,8 +1179,8 @@ Step 5 — Page 0 RF configuration
   Write PIPE0_RXADDR0–3 ← OwnAddr bytes [0..3]
   Write RF_CHANNEL   ← 0x55  (calibration channel)
   Write RF_DATARATE  ← DataRate
-  Write 0x43 ← 0x3A, 0x44 ← 0x8C   (RF analog tuning / TX 9 dBm)
-  Write 0x55–0x61, 0x66, 0x68, 0x6E ← (RF analog tuning table)
+  Write RF_PA_MODE_CFG ← 0x3A, RF_PA_POUT_CFG ← 0x8C   (PA mode + TX 9 dBm)
+  Write RF_RSSI_TH1–RF_GAIN_WORD3, RF_TX_ANA_TIME, RF_RX_PLL_SETUP, RF_PA_RAMP_DLY ← (analog tuning table)
 
 Step 6 — RF calibration (Page 1)
   Write PAGE_CFG   ← 0x01
@@ -1232,12 +1250,12 @@ All power-setting registers span both pages. Switch to Page 1, write registers, 
 
 | Register | Page | 0 dBm | 9 dBm |
 |----------|------|-------|-------|
-| 0x27 | 1 | 0xAA | 0xAA |
-| 0x3C | 1 | 0x13 | 0x17 |
-| 0x46 | 1 | 0xBD | 0xB0 |
-| 0x48 | 1 | 0x88 | 0x88 |
-| 0x43 | 0 | 0x3A | 0x3A |
-| 0x44 | 0 | 0x84 | 0x8C |
+| P1_RF_TUNE_27 | 1 | 0xAA | 0xAA |
+| P1_TX_PWR_AMP | 1 | 0x13 | 0x17 |
+| P1_PA_BIAS | 1 | 0xBD | 0xB0 |
+| P1_TX_PWR_CTL | 1 | 0x88 | 0x88 |
+| RF_PA_MODE_CFG | 0 | 0x3A | 0x3A |
+| RF_PA_POUT_CFG | 0 | RF_PA_POUT_CFG_0DBM (0x84) | RF_PA_POUT_CFG_9DBM (0x8C) |
 
 ---
 
@@ -1298,8 +1316,8 @@ When `WORK_MODE = 11` (BLE), the following registers differ from XN297L-compatib
 | BLEMATCH_CFG0 | 0x00 | 0x04 | Length filter = equal |
 | BLEMATCHSTART_CFG | 0x07 | 0x00 | Filter from byte 0 |
 | RF_DATARATE_CFG | any | 0x55 | BLE requires 1 Mbps |
-| 0x5D (Page 0) ⚙ | 0xDC | 0xD4 | RX demod tuning |
-| 0x61 (Page 0) ⚙ | 0x2E | 0x3E | RX demod tuning |
+| RF_RSSI_FIX3 ⚙ | 0xDC | 0xD4 | RSSI calibration word 3 |
+| RF_GAIN_WORD3 ⚙ | 0x2E | 0x3E | AGC gain table entry 3 |
 | 0x6F (Page 0) ⚙ | 0x00 | 0x10 | PID_LOW_SEL=1 in BLE RX |
 
 In BLE TX: FIFO payload = AdvA (6 bytes LSB-first) + AdvData only. Header (PDU type + length) auto-inserted by chip.

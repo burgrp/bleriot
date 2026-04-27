@@ -243,106 +243,108 @@ em { font-style: italic; }
 </style>
 </head>
 <body>
-<nav id="toc"><h2>Contents</h2><ul>
-<li style="margin-left:0px"><a href="#pan211x-register-reference">PAN211x Register Reference</a></li>
-<li style="margin-left:20px"><a href="#address-space-and-page-concept">Address Space and Page Concept</a></li>
-<li style="margin-left:40px"><a href="#i2c-access-byte-encoding">I2C Access Byte Encoding</a></li>
-<li style="margin-left:20px"><a href="#page-0-register-map">Page 0 Register Map</a></li>
-<li style="margin-left:20px"><a href="#page-0-register-details">Page 0 Register Details</a></li>
-<li style="margin-left:40px"><a href="#0x00-page_cfg-page-bank-select">0x00 — PAGE_CFG — Page Bank Select</a></li>
-<li style="margin-left:40px"><a href="#0x01-trx_fifo-txrx-fifo-access">0x01 — TRX_FIFO — TX/RX FIFO Access</a></li>
-<li style="margin-left:40px"><a href="#0x02-state_cfg-state-machine-control">0x02 — STATE_CFG — State Machine Control</a></li>
-<li style="margin-left:40px"><a href="#0x03-sys_cfg-system-control">0x03 — SYS_CFG — System Control</a></li>
-<li style="margin-left:40px"><a href="#0x04-spi_cfg-spi-bus-interface-config">0x04 — SPI_CFG — SPI / Bus Interface Config</a></li>
-<li style="margin-left:40px"><a href="#0x05-xtal_cfg-crystal-load-capacitor-trim">0x05 — XTAL_CFG — Crystal Load-Capacitor Trim</a></li>
-<li style="margin-left:40px"><a href="#0x06-i2c_cfg-i2c-interface-config">0x06 — I2C_CFG — I2C Interface Config</a></li>
-<li style="margin-left:40px"><a href="#0x07-wmode_cfg0-work-mode-configuration-0">0x07 — WMODE_CFG0 — Work Mode Configuration 0</a></li>
-<li style="margin-left:40px"><a href="#0x08-wmode_cfg1-work-mode-configuration-1">0x08 — WMODE_CFG1 — Work Mode Configuration 1</a></li>
-<li style="margin-left:40px"><a href="#0x09-rxpllen_cfg-receive-payload-length">0x09 — RXPLLEN_CFG — Receive Payload Length</a></li>
-<li style="margin-left:40px"><a href="#0x0a-txpllen_cfg-transmit-payload-length">0x0A — TXPLLEN_CFG — Transmit Payload Length</a></li>
-<li style="margin-left:40px"><a href="#0x0b-rfirq_cfg-interrupt-mask">0x0B — RFIRQ_CFG — Interrupt Mask</a></li>
-<li style="margin-left:40px"><a href="#0x0c-pid_cfg-pid-identifier-configuration">0x0C — PID_CFG — PID Identifier Configuration</a></li>
-<li style="margin-left:40px"><a href="#0x0d-trxtwtl_cfg-txrx-switch-wait-time-low">0x0D — TRXTWTL_CFG — TX/RX Switch Wait Time (Low)</a></li>
-<li style="margin-left:40px"><a href="#0x0e-trxtwth_cfg-txrx-switch-wait-time-high">0x0E — TRXTWTH_CFG — TX/RX Switch Wait Time (High)</a></li>
-<li style="margin-left:40px"><a href="#0x0f0x13-pipe0_rxaddr04-pipe-0-rx-address">0x0F–0x13 — PIPE0_RXADDR0–4 — Pipe 0 RX Address</a></li>
-<li style="margin-left:40px"><a href="#0x140x18-txaddr04-tx-destination-address">0x14–0x18 — TXADDR0–4 — TX Destination Address</a></li>
-<li style="margin-left:40px"><a href="#0x19-pkt_ext_cfg-packet-extension-configuration">0x19 — PKT_EXT_CFG — Packet Extension Configuration</a></li>
-<li style="margin-left:40px"><a href="#0x1a-whiten_cfg-whitening-configuration">0x1A — WHITEN_CFG — Whitening Configuration</a></li>
-<li style="margin-left:40px"><a href="#0x1b-txhdr0_cfg-tx-header-byte-0">0x1B — TXHDR0_CFG — TX Header Byte 0</a></li>
-<li style="margin-left:40px"><a href="#0x1c-txhdr1_cfg-tx-header-byte-1">0x1C — TXHDR1_CFG — TX Header Byte 1</a></li>
-<li style="margin-left:40px"><a href="#0x1d-txramaddr_cfg-tx-fifo-ram-start-address">0x1D — TXRAMADDR_CFG — TX FIFO RAM Start Address</a></li>
-<li style="margin-left:40px"><a href="#0x1e-rxramaddr_cfg-rx-fifo-ram-start-address">0x1E — RXRAMADDR_CFG — RX FIFO RAM Start Address</a></li>
-<li style="margin-left:40px"><a href="#0x1f-rxpipe_cfg-multi-pipe-rx-enable">0x1F — RXPIPE_CFG — Multi-Pipe RX Enable</a></li>
-<li style="margin-left:40px"><a href="#0x200x24-pipe1_rxaddr04-pipe-1-rx-address">0x20–0x24 — PIPE1_RXADDR0–4 — Pipe 1 RX Address</a></li>
-<li style="margin-left:40px"><a href="#0x250x28-pipe25-rxaddr0-pipes-25-address-lsb">0x25–0x28 — PIPE2–5 RXADDR0 — Pipes 2–5 Address LSB</a></li>
-<li style="margin-left:40px"><a href="#0x29-txauto_cfg-auto-retransmit-configuration">0x29 — TXAUTO_CFG — Auto-Retransmit Configuration</a></li>
-<li style="margin-left:40px"><a href="#0x2a-trxmode_cfg-txrx-mode-configuration">0x2A — TRXMODE_CFG — TX/RX Mode Configuration</a></li>
-<li style="margin-left:40px"><a href="#0x2b-rxtimeoutl_cfg-rx-timeout-low">0x2B — RXTIMEOUTL_CFG — RX Timeout (Low)</a></li>
-<li style="margin-left:40px"><a href="#0x2c-rxtimeouth_cfg-rx-timeout-high">0x2C — RXTIMEOUTH_CFG — RX Timeout (High)</a></li>
-<li style="margin-left:40px"><a href="#0x2d-blematch_cfg0-ble-filter-configuration">0x2D — BLEMATCH_CFG0 — BLE Filter Configuration</a></li>
-<li style="margin-left:40px"><a href="#0x2e-blematch_cfg1">0x2E — BLEMATCH_CFG1</a></li>
-<li style="margin-left:40px"><a href="#0x2f0x34-wlist05_cfg-ble-whitelist-adva">0x2F–0x34 — WLIST0–5_CFG — BLE Whitelist AdvA</a></li>
-<li style="margin-left:40px"><a href="#0x35-blematchstart_cfg-ble-filter-payload-start">0x35 — BLEMATCHSTART_CFG — BLE Filter Payload Start</a></li>
-<li style="margin-left:40px"><a href="#0x36-rf_datarate_cfg-air-data-rate">0x36 — RF_DATARATE_CFG — Air Data Rate</a></li>
-<li style="margin-left:40px"><a href="#0x370x38-undocumented">0x37–0x38 — Undocumented</a></li>
-<li style="margin-left:40px"><a href="#0x39-rf_channel_cfg-rf-channel">0x39 — RF_CHANNEL_CFG — RF Channel</a></li>
-<li style="margin-left:40px"><a href="#0x3a0x42-rf-analog-tuning-undocumented-page-0">0x3A–0x42 — RF Analog Tuning (Undocumented, Page 0)</a></li>
-<li style="margin-left:40px"><a href="#0x43-rf-driver-tuning-undocumented-page-0">0x43 — RF Driver Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x44-rf-output-tuning-undocumented-page-0">0x44 — RF Output Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x45-irq_mux_cfg-irq-pin-multiplexing">0x45 — IRQ_MUX_CFG — IRQ Pin Multiplexing</a></li>
-<li style="margin-left:40px"><a href="#0x460x54-rf-analog-tuning-undocumented-page-0">0x46–0x54 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x550x61-rf-analog-tuning-bank-undocumented-page-0">0x55–0x61 — RF Analog Tuning Bank (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x620x65-rf-analog-tuning-undocumented-page-0">0x62–0x65 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x66-rf-analog-tuning-undocumented-page-0">0x66 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x67-rf-analog-tuning-undocumented-page-0">0x67 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x68-rf-analog-tuning-undocumented-page-0">0x68 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x690x6d-rf-analog-tuning-undocumented-page-0">0x69–0x6D — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x6e-rf-analog-tuning-undocumented-page-0">0x6E — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x6f-misc_cfg-miscellaneous-configuration">0x6F — MISC_CFG — Miscellaneous Configuration</a></li>
-<li style="margin-left:40px"><a href="#0x700x72-undocumented-page-0">0x70–0x72 — Undocumented (Page 0)</a></li>
-<li style="margin-left:40px"><a href="#0x73-rfirqflg-rf-interrupt-status-flags">0x73 — RFIRQFLG — RF Interrupt Status Flags</a></li>
-<li style="margin-left:40px"><a href="#0x74-status0-status-register-0-read-only">0x74 — STATUS0 — Status Register 0 (Read-Only)</a></li>
-<li style="margin-left:40px"><a href="#0x75-status1-received-header-byte-0-read-only">0x75 — STATUS1 — Received Header Byte 0 (Read-Only)</a></li>
-<li style="margin-left:40px"><a href="#0x76-status2-received-header-byte-1-read-only">0x76 — STATUS2 — Received Header Byte 1 (Read-Only)</a></li>
-<li style="margin-left:40px"><a href="#0x77-status3-received-payload-length-read-only">0x77 — STATUS3 — Received Payload Length (Read-Only)</a></li>
-<li style="margin-left:40px"><a href="#0x780x79-undocumented-page-0">0x78–0x79 — Undocumented (Page 0)</a></li>
-<li style="margin-left:40px"><a href="#0x7a-pkt_rssi_l-last-packet-rssi-low">0x7A — PKT_RSSI_L — Last Packet RSSI (Low)</a></li>
-<li style="margin-left:40px"><a href="#0x7b-pkt_rssi_h-last-packet-rssi-high">0x7B — PKT_RSSI_H — Last Packet RSSI (High)</a></li>
-<li style="margin-left:40px"><a href="#0x7c0x7d-undocumented-page-0">0x7C–0x7D — Undocumented (Page 0)</a></li>
-<li style="margin-left:40px"><a href="#0x7e-rt_rssi_l-ambient-noise-rssi-low">0x7E — RT_RSSI_L — Ambient Noise RSSI (Low)</a></li>
-<li style="margin-left:40px"><a href="#0x7f-rt_rssi_h-ambient-noise-rssi-high">0x7F — RT_RSSI_H — Ambient Noise RSSI (High)</a></li>
-<li style="margin-left:20px"><a href="#page-1-register-details">Page 1 Register Details</a></li>
-<li style="margin-left:40px"><a href="#0x04-page-1-otp-data-register">0x04 (Page 1) — OTP Data Register ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x05-page-1-otp-mode-control">0x05 (Page 1) — OTP Mode Control ⚙</a></li>
-<li style="margin-left:40px"><a href="#otp-calibration-data-fields">OTP Calibration Data Fields ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x1b-page-1-calibration-control-register">0x1B (Page 1) — Calibration Control Register ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x27-page-1-rf-analog-tuning">0x27 (Page 1) — RF Analog Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x320x33-page-1-rf-analog-tuning">0x32–0x33 (Page 1) — RF Analog Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x37-page-1-rf-analog-tuning">0x37 (Page 1) — RF Analog Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x3a-page-1-rf-analog-tuning">0x3A (Page 1) — RF Analog Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x3c-page-1-tx-power-amplitude-control">0x3C (Page 1) — TX Power Amplitude Control ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x3e-page-1-rf-analog-tuning">0x3E (Page 1) — RF Analog Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x41-page-1-vco-pa-control">0x41 (Page 1) — VCO / PA Control ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x42-page-1-carrier-wave-tuning">0x42 (Page 1) — Carrier-Wave Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x43-page-1-otp-dependent-pa-tuning">0x43 (Page 1) — OTP-Dependent PA Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x46-page-1-pa-bias-control">0x46 (Page 1) — PA Bias Control ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x47-page-1-otp-dependent-pa-tuning">0x47 (Page 1) — OTP-Dependent PA Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x48-page-1-tx-power-control">0x48 (Page 1) — TX Power Control ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x4c-page-1-rf-analog-tuning">0x4C (Page 1) — RF Analog Tuning ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x6d-page-1-calibration-status-phase-1-done">0x6D (Page 1) — Calibration Status: Phase 1 Done ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x70-page-1-calibration-status-vco-done">0x70 (Page 1) — Calibration Status: VCO Done ⚙</a></li>
-<li style="margin-left:40px"><a href="#0x7f-page-1-calibration-status-frequency-phase-2-done">0x7F (Page 1) — Calibration Status: Frequency / Phase 2 Done ⚙</a></li>
-<li style="margin-left:20px"><a href="#initialization-sequence">Initialization Sequence</a></li>
-<li style="margin-left:20px"><a href="#tx-operation">TX Operation</a></li>
-<li style="margin-left:20px"><a href="#rx-operation">RX Operation</a></li>
-<li style="margin-left:20px"><a href="#tx-power-configuration">TX Power Configuration</a></li>
-<li style="margin-left:20px"><a href="#carrier-wave-test-mode">Carrier-Wave Test Mode</a></li>
-<li style="margin-left:20px"><a href="#sleep-wakeup-09_sleep-example">Sleep / Wakeup (`09_sleep` example)</a></li>
-<li style="margin-left:20px"><a href="#ble-mode-configuration-differences">BLE Mode Configuration Differences</a></li>
-</ul></nav>
+<nav id="toc"><h2>Contents</h2><ol class="toc-list">
+<li class="toc-h1"><a href="#pan211x-register-reference">PAN211x Register Reference</a></li>
+<li class="toc-h2"><a href="#address-space-and-page-concept">Address Space and Page Concept</a></li>
+<li class="toc-h3"><a href="#i2c-access-byte-encoding">I2C Access Byte Encoding</a></li>
+<li class="toc-h2"><a href="#page-0-register-map">Page 0 Register Map</a></li>
+<li class="toc-h2"><a href="#page-0-register-details">Page 0 Register Details</a></li>
+<li class="toc-h3"><a href="#0x00-pagecfg-page-bank-select">0x00 — PAGECFG — Page Bank Select</a></li>
+<li class="toc-h3"><a href="#0x01-trxfifo-txrx-fifo-access">0x01 — TRXFIFO — TX/RX FIFO Access</a></li>
+<li class="toc-h3"><a href="#0x02-statecfg-state-machine-control">0x02 — STATECFG — State Machine Control</a></li>
+<li class="toc-h3"><a href="#0x03-syscfg-system-control">0x03 — SYSCFG — System Control</a></li>
+<li class="toc-h3"><a href="#0x04-spicfg-spi-bus-interface-config">0x04 — SPICFG — SPI / Bus Interface Config</a></li>
+<li class="toc-h3"><a href="#0x05-xtalcfg-crystal-load-capacitor-trim">0x05 — XTALCFG — Crystal Load-Capacitor Trim</a></li>
+<li class="toc-h3"><a href="#0x06-i2ccfg-i2c-interface-config">0x06 — I2CCFG — I2C Interface Config</a></li>
+<li class="toc-h3"><a href="#0x07-wmodecfg0-work-mode-configuration-0">0x07 — WMODECFG0 — Work Mode Configuration 0</a></li>
+<li class="toc-h3"><a href="#0x08-wmodecfg1-work-mode-configuration-1">0x08 — WMODECFG1 — Work Mode Configuration 1</a></li>
+<li class="toc-h3"><a href="#0x09-rxpllencfg-receive-payload-length">0x09 — RXPLLENCFG — Receive Payload Length</a></li>
+<li class="toc-h3"><a href="#0x0a-txpllencfg-transmit-payload-length">0x0A — TXPLLENCFG — Transmit Payload Length</a></li>
+<li class="toc-h3"><a href="#0x0b-rfirqcfg-interrupt-mask">0x0B — RFIRQCFG — Interrupt Mask</a></li>
+<li class="toc-h3"><a href="#0x0c-pidcfg-pid-identifier-configuration">0x0C — PIDCFG — PID Identifier Configuration</a></li>
+<li class="toc-h3"><a href="#0x0d-trxtwtlcfg-txrx-switch-wait-time-low">0x0D — TRXTWTLCFG — TX/RX Switch Wait Time (Low)</a></li>
+<li class="toc-h3"><a href="#0x0e-trxtwthcfg-txrx-switch-wait-time-high">0x0E — TRXTWTHCFG — TX/RX Switch Wait Time (High)</a></li>
+<li class="toc-h3"><a href="#0x0f0x13-pipe0rxaddr04-pipe-0-rx-address">0x0F–0x13 — PIPE0RXADDR0–4 — Pipe 0 RX Address</a></li>
+<li class="toc-h3"><a href="#0x140x18-txaddr04-tx-destination-address">0x14–0x18 — TXADDR0–4 — TX Destination Address</a></li>
+<li class="toc-h3"><a href="#0x19-pktextcfg-packet-extension-configuration">0x19 — PKTEXTCFG — Packet Extension Configuration</a></li>
+<li class="toc-h3"><a href="#0x1a-whitencfg-whitening-configuration">0x1A — WHITENCFG — Whitening Configuration</a></li>
+<li class="toc-h3"><a href="#0x1b-txhdr0cfg-tx-header-byte-0">0x1B — TXHDR0CFG — TX Header Byte 0</a></li>
+<li class="toc-h3"><a href="#0x1c-txhdr1cfg-tx-header-byte-1">0x1C — TXHDR1CFG — TX Header Byte 1</a></li>
+<li class="toc-h3"><a href="#0x1d-txramaddrcfg-tx-fifo-ram-start-address">0x1D — TXRAMADDRCFG — TX FIFO RAM Start Address</a></li>
+<li class="toc-h3"><a href="#0x1e-rxramaddrcfg-rx-fifo-ram-start-address">0x1E — RXRAMADDRCFG — RX FIFO RAM Start Address</a></li>
+<li class="toc-h3"><a href="#0x1f-rxpipecfg-multi-pipe-rx-enable">0x1F — RXPIPECFG — Multi-Pipe RX Enable</a></li>
+<li class="toc-h3"><a href="#0x200x24-pipe1rxaddr04-pipe-1-rx-address">0x20–0x24 — PIPE1RXADDR0–4 — Pipe 1 RX Address</a></li>
+<li class="toc-h3"><a href="#0x250x28-pipe25-rxaddr0-pipes-25-address-lsb">0x25–0x28 — PIPE2–5 RXADDR0 — Pipes 2–5 Address LSB</a></li>
+<li class="toc-h3"><a href="#0x29-txautocfg-auto-retransmit-configuration">0x29 — TXAUTOCFG — Auto-Retransmit Configuration</a></li>
+<li class="toc-h3"><a href="#0x2a-trxmodecfg-txrx-mode-configuration">0x2A — TRXMODECFG — TX/RX Mode Configuration</a></li>
+<li class="toc-h3"><a href="#0x2b-rxtimeoutlcfg-rx-timeout-low">0x2B — RXTIMEOUTLCFG — RX Timeout (Low)</a></li>
+<li class="toc-h3"><a href="#0x2c-rxtimeouthcfg-rx-timeout-high">0x2C — RXTIMEOUTHCFG — RX Timeout (High)</a></li>
+<li class="toc-h3"><a href="#0x2d-blematchcfg0-ble-filter-configuration">0x2D — BLEMATCHCFG0 — BLE Filter Configuration</a></li>
+<li class="toc-h3"><a href="#0x2e-blematchcfg1">0x2E — BLEMATCHCFG1</a></li>
+<li class="toc-h3"><a href="#0x2f0x34-wlist05cfg-ble-whitelist-adva">0x2F–0x34 — WLIST0–5CFG — BLE Whitelist AdvA</a></li>
+<li class="toc-h3"><a href="#0x35-blematchstartcfg-ble-filter-payload-start">0x35 — BLEMATCHSTARTCFG — BLE Filter Payload Start</a></li>
+<li class="toc-h3"><a href="#0x36-rfdataratecfg-air-data-rate">0x36 — RFDATARATECFG — Air Data Rate</a></li>
+<li class="toc-h3"><a href="#0x370x38-undocumented">0x37–0x38 — Undocumented</a></li>
+<li class="toc-h3"><a href="#0x39-rfchannelcfg-rf-channel">0x39 — RFCHANNELCFG — RF Channel</a></li>
+<li class="toc-h3"><a href="#0x3a0x42-rf-analog-tuning-undocumented-page-0">0x3A–0x42 — RF Analog Tuning (Undocumented, Page 0)</a></li>
+<li class="toc-h3"><a href="#0x43-rfpamodecfg-page-0">0x43 — RFPAMODECFG (Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x44-rfpapoutcfg-page-0">0x44 — RFPAPOUTCFG (Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x45-irqmuxcfg-irq-pin-multiplexing">0x45 — IRQMUXCFG — IRQ Pin Multiplexing</a></li>
+<li class="toc-h3"><a href="#0x460x54-rf-analog-tuning-undocumented-page-0">0x46–0x54 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x550x61-rssi-thresholds-and-agc-gain-words-page-0">0x55–0x61 — RSSI Thresholds and AGC Gain Words (Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x620x65-rf-analog-tuning-undocumented-page-0">0x62–0x65 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x66-rftxanatime-page-0">0x66 — RFTXANATIME (Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x67-rf-analog-tuning-undocumented-page-0">0x67 — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x68-rfrxpllsetup-page-0">0x68 — RFRXPLLSETUP (Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x690x6d-rf-analog-tuning-undocumented-page-0">0x69–0x6D — RF Analog Tuning (Undocumented, Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x6e-rfparampdly-page-0">0x6E — RFPARAMPDLY (Page 0) ⚙</a></li>
+<li class="toc-h3"><a href="#0x6f-misccfg-miscellaneous-configuration">0x6F — MISCCFG — Miscellaneous Configuration</a></li>
+<li class="toc-h3"><a href="#0x700x72-undocumented-page-0">0x70–0x72 — Undocumented (Page 0)</a></li>
+<li class="toc-h3"><a href="#0x73-rfirqflg-rf-interrupt-status-flags">0x73 — RFIRQFLG — RF Interrupt Status Flags</a></li>
+<li class="toc-h3"><a href="#0x74-status0-status-register-0-read-only">0x74 — STATUS0 — Status Register 0 (Read-Only)</a></li>
+<li class="toc-h3"><a href="#0x75-status1-received-header-byte-0-read-only">0x75 — STATUS1 — Received Header Byte 0 (Read-Only)</a></li>
+<li class="toc-h3"><a href="#0x76-status2-received-header-byte-1-read-only">0x76 — STATUS2 — Received Header Byte 1 (Read-Only)</a></li>
+<li class="toc-h3"><a href="#0x77-status3-received-payload-length-read-only">0x77 — STATUS3 — Received Payload Length (Read-Only)</a></li>
+<li class="toc-h3"><a href="#0x780x79-undocumented-page-0">0x78–0x79 — Undocumented (Page 0)</a></li>
+<li class="toc-h3"><a href="#0x7a-pktrssil-last-packet-rssi-low">0x7A — PKTRSSIL — Last Packet RSSI (Low)</a></li>
+<li class="toc-h3"><a href="#0x7b-pktrssih-last-packet-rssi-high">0x7B — PKTRSSIH — Last Packet RSSI (High)</a></li>
+<li class="toc-h3"><a href="#0x7c0x7d-undocumented-page-0">0x7C–0x7D — Undocumented (Page 0)</a></li>
+<li class="toc-h3"><a href="#0x7e-rtrssil-ambient-noise-rssi-low">0x7E — RTRSSIL — Ambient Noise RSSI (Low)</a></li>
+<li class="toc-h3"><a href="#0x7f-rtrssih-ambient-noise-rssi-high">0x7F — RTRSSIH — Ambient Noise RSSI (High)</a></li>
+<li class="toc-h2"><a href="#page-1-register-details">Page 1 Register Details</a></li>
+<li class="toc-h3"><a href="#0x04-page-1-otp-data-register">0x04 (Page 1) — OTP Data Register ⚙</a></li>
+<li class="toc-h3"><a href="#0x05-page-1-otp-mode-control">0x05 (Page 1) — OTP Mode Control ⚙</a></li>
+<li class="toc-h3"><a href="#otp-calibration-data-fields">OTP Calibration Data Fields ⚙</a></li>
+<li class="toc-h3"><a href="#0x1b-page-1-calibration-control-register">0x1B (Page 1) — Calibration Control Register ⚙</a></li>
+<li class="toc-h3"><a href="#0x27-page-1-rf-analog-tuning">0x27 (Page 1) — RF Analog Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x320x33-page-1-rf-analog-tuning">0x32–0x33 (Page 1) — RF Analog Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x37-page-1-rf-analog-tuning">0x37 (Page 1) — RF Analog Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x3a-page-1-rf-analog-tuning">0x3A (Page 1) — RF Analog Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x3c-page-1-tx-power-amplitude-control">0x3C (Page 1) — TX Power Amplitude Control ⚙</a></li>
+<li class="toc-h3"><a href="#0x3e-page-1-rf-analog-tuning">0x3E (Page 1) — RF Analog Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x3f-page-1-rf-analog-tuning-undocumented">0x3F (Page 1) — RF Analog Tuning ⚙ (Undocumented)</a></li>
+<li class="toc-h3"><a href="#0x40-page-1-rf-analog-tuning-undocumented">0x40 (Page 1) — RF Analog Tuning ⚙ (Undocumented)</a></li>
+<li class="toc-h3"><a href="#0x41-page-1-vco-pa-control">0x41 (Page 1) — VCO / PA Control ⚙</a></li>
+<li class="toc-h3"><a href="#0x42-page-1-carrier-wave-tuning">0x42 (Page 1) — Carrier-Wave Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x43-page-1-otp-dependent-pa-tuning">0x43 (Page 1) — OTP-Dependent PA Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x46-page-1-pa-bias-control">0x46 (Page 1) — PA Bias Control ⚙</a></li>
+<li class="toc-h3"><a href="#0x47-page-1-otp-dependent-pa-tuning">0x47 (Page 1) — OTP-Dependent PA Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x48-page-1-tx-power-control">0x48 (Page 1) — TX Power Control ⚙</a></li>
+<li class="toc-h3"><a href="#0x4c-page-1-rf-analog-tuning">0x4C (Page 1) — RF Analog Tuning ⚙</a></li>
+<li class="toc-h3"><a href="#0x6d-page-1-calibration-status-phase-1-done">0x6D (Page 1) — Calibration Status: Phase 1 Done ⚙</a></li>
+<li class="toc-h3"><a href="#0x70-page-1-calibration-status-vco-done">0x70 (Page 1) — Calibration Status: VCO Done ⚙</a></li>
+<li class="toc-h3"><a href="#0x7f-page-1-calibration-status-frequency-phase-2-done">0x7F (Page 1) — Calibration Status: Frequency / Phase 2 Done ⚙</a></li>
+<li class="toc-h2"><a href="#initialization-sequence">Initialization Sequence</a></li>
+<li class="toc-h2"><a href="#tx-operation">TX Operation</a></li>
+<li class="toc-h2"><a href="#rx-operation">RX Operation</a></li>
+<li class="toc-h2"><a href="#tx-power-configuration">TX Power Configuration</a></li>
+<li class="toc-h2"><a href="#carrier-wave-test-mode">Carrier-Wave Test Mode</a></li>
+<li class="toc-h2"><a href="#sleep-wakeup-09sleep-example">Sleep / Wakeup (09sleep example)</a></li>
+<li class="toc-h2"><a href="#ble-mode-configuration-differences">BLE Mode Configuration Differences</a></li>
+</ol></nav>
 <div id="content">
 <h1 id="pan211x-register-reference">PAN211x Register Reference</h1>
-<p>Sources: official reference manual, PAN211x-DK-v2.2.5 SDK (<code>pan211.c</code> and related examples).<br />
+<p>Sources: official reference manual, PAN211x-DK-v2.2.5 SDK (<code>pan211.c</code> and related examples).
 Notation: <strong>⚙</strong> = SDK-derived / inferred from code; entries with no qualifier are from the official RM.</p>
 <hr />
 <h2 id="address-space-and-page-concept">Address Space and Page Concept</h2>
@@ -375,7 +377,7 @@ Notation: <strong>⚙</strong> = SDK-derived / inferred from code; entries with 
 <p>The PAN211x I2C address is <strong>0x71</strong> (7-bit). The first data byte in every I2C transaction is a register <strong>access byte</strong>, not a plain register address:</p>
 <pre><code>access_byte = reg_addr &lt;&lt; 1 | R/W   (0=write, 1=read)
 </code></pre>
-<p>Write to register 0x07: <code>START 0xE2 0x0E &lt;data&gt; STOP</code><br />
+<p>Write to register 0x07: <code>START 0xE2 0x0E &lt;data&gt; STOP</code>
 Read from register 0x73: <code>START 0xE2 0xE6 RESTART 0xE3 &lt;data&gt; STOP</code></p>
 <hr />
 <h2 id="page-0-register-map">Page 0 Register Map</h2>
@@ -798,17 +800,17 @@ Read from register 0x73: <code>START 0xE2 0xE6 RESTART 0xE3 &lt;data&gt; STOP</c
 </tr>
 <tr>
 <td>0x43</td>
-<td>⚙</td>
-<td>W</td>
-<td>—</td>
-<td>RF driver tuning; TX-power dependent</td>
+<td>RF_PA_MODE_CFG ⚙</td>
+<td>R/W</td>
+<td>0x32</td>
+<td>PA mode sel [5:4], VCO TX clock [2], RXFLTR_IF [1:0]; data-rate and TX-power dependent</td>
 </tr>
 <tr>
 <td>0x44</td>
-<td>⚙</td>
-<td>W</td>
-<td>—</td>
-<td>RF output tuning; TX-power dependent</td>
+<td>RF_PA_POUT_CFG ⚙</td>
+<td>R/W</td>
+<td>0x7C</td>
+<td>TX PA output current [7:4] and LDO select [3:0]; TX-power dependent</td>
 </tr>
 <tr>
 <td>0x45</td>
@@ -818,11 +820,81 @@ Read from register 0x73: <code>START 0xE2 0xE6 RESTART 0xE3 &lt;data&gt; STOP</c
 <td>IRQ pin: interrupt / clock-out / PA control</td>
 </tr>
 <tr>
-<td>0x46–0x6E</td>
+<td>0x46–0x54</td>
+<td>⚙</td>
+<td>R/W</td>
+<td>—</td>
+<td>AGC and RSSI control (see <code>registers.go</code>)</td>
+</tr>
+<tr>
+<td>0x55–0x57</td>
+<td>RF_RSSI_TH1–TH3 ⚙</td>
+<td>W</td>
+<td>—</td>
+<td>RSSI AGC threshold levels 1–3</td>
+</tr>
+<tr>
+<td>0x58–0x59</td>
+<td>⚙</td>
+<td>R/W</td>
+<td>—</td>
+<td>RF analog — undocumented</td>
+</tr>
+<tr>
+<td>0x5A–0x5D</td>
+<td>RF_RSSI_FIX0–3 ⚙</td>
+<td>W</td>
+<td>—</td>
+<td>Fixed RSSI calibration words</td>
+</tr>
+<tr>
+<td>0x5E–0x61</td>
+<td>RF_GAIN_WORD0–3 ⚙</td>
+<td>W</td>
+<td>—</td>
+<td>AGC gain table entries; WORD3 changes for high-gain RX</td>
+</tr>
+<tr>
+<td>0x62–0x65</td>
 <td>⚙</td>
 <td>W</td>
 <td>—</td>
-<td>RF analog tuning — undocumented</td>
+<td>RF timing — undocumented</td>
+</tr>
+<tr>
+<td>0x66</td>
+<td>RF_TX_ANA_TIME ⚙</td>
+<td>W</td>
+<td>—</td>
+<td>TX analog setup time</td>
+</tr>
+<tr>
+<td>0x67</td>
+<td>⚙</td>
+<td>W</td>
+<td>—</td>
+<td>RF timing — undocumented</td>
+</tr>
+<tr>
+<td>0x68</td>
+<td>RF_RX_PLL_SETUP ⚙</td>
+<td>W</td>
+<td>—</td>
+<td>RX RF PLL setup time [5:0]</td>
+</tr>
+<tr>
+<td>0x69–0x6D</td>
+<td>⚙</td>
+<td>W</td>
+<td>—</td>
+<td>RF timing — undocumented</td>
+</tr>
+<tr>
+<td>0x6E</td>
+<td>RF_PA_RAMP_DLY ⚙</td>
+<td>W</td>
+<td>—</td>
+<td>PA ramp delay: DN [6:4], UP [2:0]</td>
 </tr>
 <tr>
 <td>0x6F</td>
@@ -920,7 +992,7 @@ Read from register 0x73: <code>START 0xE2 0xE6 RESTART 0xE3 &lt;data&gt; STOP</c
 <hr />
 <h2 id="page-0-register-details">Page 0 Register Details</h2>
 <hr />
-<h3 id="0x00-page_cfg-page-bank-select">0x00 — PAGE_CFG — Page Bank Select</h3>
+<h3 id="0x00-pagecfg-page-bank-select">0x00 — PAGE_CFG — Page Bank Select</h3>
 <p><strong>Shared register — accessible from both pages.</strong></p>
 <table>
 <thead>
@@ -951,7 +1023,7 @@ Read from register 0x73: <code>START 0xE2 0xE6 RESTART 0xE3 &lt;data&gt; STOP</c
 </table>
 <p>Always restore to 0x00 after any Page 1 access.</p>
 <hr />
-<h3 id="0x01-trx_fifo-txrx-fifo-access">0x01 — TRX_FIFO — TX/RX FIFO Access</h3>
+<h3 id="0x01-trxfifo-txrx-fifo-access">0x01 — TRX_FIFO — TX/RX FIFO Access</h3>
 <table>
 <thead>
 <tr>
@@ -973,10 +1045,10 @@ Read from register 0x73: <code>START 0xE2 0xE6 RESTART 0xE3 &lt;data&gt; STOP</c
 </tbody>
 </table>
 <p>The chip maintains separate TX and RX FIFO pointers. In the I2C implementation, each byte is a separate START–STOP transaction; the chip advances its internal pointer on each transaction. The active FIFO (TX or RX) is selected by the current operating mode.</p>
-<p>TX: write <code>len</code> bytes before asserting TX mode. Data replaces whatever was in the FIFO.<br />
+<p>TX: write <code>len</code> bytes before asserting TX mode. Data replaces whatever was in the FIFO.
 RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 <hr />
-<h3 id="0x02-state_cfg-state-machine-control">0x02 — STATE_CFG — State Machine Control</h3>
+<h3 id="0x02-statecfg-state-machine-control">0x02 — STATE_CFG — State Machine Control</h3>
 <p><strong>Shared register — accessible from both pages.</strong></p>
 <table>
 <thead>
@@ -1117,7 +1189,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </table>
 <p>Always write STB3 before reconfiguring registers. The chip must not be in TX or RX when address, payload-length, or mode registers are changed.</p>
 <hr />
-<h3 id="0x03-sys_cfg-system-control">0x03 — SYS_CFG — System Control</h3>
+<h3 id="0x03-syscfg-system-control">0x03 — SYS_CFG — System Control</h3>
 <table>
 <thead>
 <tr>
@@ -1159,11 +1231,11 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>Init sequence:</strong><br />
+<p><strong>Init sequence:</strong>
 <code>Write 0x00</code> (assert reset) → 1 ms delay → <code>Write 0x02</code> (release reset) → <code>Write 0x06</code> (IRQ_DATA_MUX_EN=1 plus release reset).</p>
 <p>After soft reset all Page 0 registers return to defaults. SPI_CFG must be re-written.</p>
 <hr />
-<h3 id="0x04-spi_cfg-spi-bus-interface-config">0x04 — SPI_CFG — SPI / Bus Interface Config</h3>
+<h3 id="0x04-spicfg-spi-bus-interface-config">0x04 — SPI_CFG — SPI / Bus Interface Config</h3>
 <table>
 <thead>
 <tr>
@@ -1220,10 +1292,9 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </tbody>
 </table>
 <p>Default = 0x6B = <code>REG_DATA_PUEN | REG_CSN_PUEN | REG_SCK_PUEN | 0b011</code>.</p>
-<p>SDK init writes <strong>0x83</strong> = <code>REG_SPI3_REN | 0b011</code>. After soft-reset this register reads back 0x83; the firmware uses this as a chip-present check.</p>
 <p><strong>Page 1 dual use:</strong> When <code>PAGE_CFG</code> = 1, address 0x04 maps to the OTP data register (see Page 1 section).</p>
 <hr />
-<h3 id="0x05-xtal_cfg-crystal-load-capacitor-trim">0x05 — XTAL_CFG — Crystal Load-Capacitor Trim</h3>
+<h3 id="0x05-xtalcfg-crystal-load-capacitor-trim">0x05 — XTAL_CFG — Crystal Load-Capacitor Trim</h3>
 <table>
 <thead>
 <tr>
@@ -1254,7 +1325,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 <p>Write = <code>(OTP_value4 &gt;&gt; 4) | 0xC0</code>. The upper 4 bits of OTP word 4 carry the factory-calibrated trim. Operating with the wrong trim degrades frequency accuracy and may prevent BLE-compatible reception.</p>
 <p><strong>Page 1 dual use:</strong> When <code>PAGE_CFG</code> = 1, address 0x05 maps to the OTP mode control register (see Page 1 section).</p>
 <hr />
-<h3 id="0x06-i2c_cfg-i2c-interface-config">0x06 — I2C_CFG — I2C Interface Config</h3>
+<h3 id="0x06-i2ccfg-i2c-interface-config">0x06 — I2C_CFG — I2C Interface Config</h3>
 <table>
 <thead>
 <tr>
@@ -1291,7 +1362,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </table>
 <p>Default = 0x05 (reserved bits 2:0 = 0b101). SDK does not write this register; the default is sufficient for I2C operation.</p>
 <hr />
-<h3 id="0x07-wmode_cfg0-work-mode-configuration-0">0x07 — WMODE_CFG0 — Work Mode Configuration 0</h3>
+<h3 id="0x07-wmodecfg0-work-mode-configuration-0">0x07 — WMODE_CFG0 — Work Mode Configuration 0</h3>
 <table>
 <thead>
 <tr>
@@ -1391,7 +1462,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </tbody>
 </table>
 <hr />
-<h3 id="0x08-wmode_cfg1-work-mode-configuration-1">0x08 — WMODE_CFG1 — Work Mode Configuration 1</h3>
+<h3 id="0x08-wmodecfg1-work-mode-configuration-1">0x08 — WMODE_CFG1 — Work Mode Configuration 1</h3>
 <table>
 <thead>
 <tr>
@@ -1512,7 +1583,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </tbody>
 </table>
 <hr />
-<h3 id="0x09-rxpllen_cfg-receive-payload-length">0x09 — RXPLLEN_CFG — Receive Payload Length</h3>
+<h3 id="0x09-rxpllencfg-receive-payload-length">0x09 — RXPLLEN_CFG — Receive Payload Length</h3>
 <table>
 <thead>
 <tr>
@@ -1535,7 +1606,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </table>
 <p>Range: 0–128 (when FIFO_128_EN=1) or 0–64.</p>
 <hr />
-<h3 id="0x0a-txpllen_cfg-transmit-payload-length">0x0A — TXPLLEN_CFG — Transmit Payload Length</h3>
+<h3 id="0x0a-txpllencfg-transmit-payload-length">0x0A — TXPLLEN_CFG — Transmit Payload Length</h3>
 <table>
 <thead>
 <tr>
@@ -1557,7 +1628,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </tbody>
 </table>
 <hr />
-<h3 id="0x0b-rfirq_cfg-interrupt-mask">0x0B — RFIRQ_CFG — Interrupt Mask</h3>
+<h3 id="0x0b-rfirqcfg-interrupt-mask">0x0B — RFIRQ_CFG — Interrupt Mask</h3>
 <p>All bits: <code>0</code> = interrupt <strong>enabled</strong> (asserts IRQ pin); <code>1</code> = interrupt <strong>masked</strong> (suppressed).</p>
 <table>
 <thead>
@@ -1671,7 +1742,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </tbody>
 </table>
 <hr />
-<h3 id="0x0c-pid_cfg-pid-identifier-configuration">0x0C — PID_CFG — PID Identifier Configuration</h3>
+<h3 id="0x0c-pidcfg-pid-identifier-configuration">0x0C — PID_CFG — PID Identifier Configuration</h3>
 <table>
 <thead>
 <tr>
@@ -1715,8 +1786,8 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </table>
 <p>PID (packet ID) is used in enhanced mode to detect duplicate packets. In normal and BLE modes this register is left at 0x00.</p>
 <hr />
-<h3 id="0x0d-trxtwtl_cfg-txrx-switch-wait-time-low">0x0D — TRXTWTL_CFG — TX/RX Switch Wait Time (Low)</h3>
-<h3 id="0x0e-trxtwth_cfg-txrx-switch-wait-time-high">0x0E — TRXTWTH_CFG — TX/RX Switch Wait Time (High)</h3>
+<h3 id="0x0d-trxtwtlcfg-txrx-switch-wait-time-low">0x0D — TRXTWTL_CFG — TX/RX Switch Wait Time (Low)</h3>
+<h3 id="0x0e-trxtwthcfg-txrx-switch-wait-time-high">0x0E — TRXTWTH_CFG — TX/RX Switch Wait Time (High)</h3>
 <table>
 <thead>
 <tr>
@@ -1749,7 +1820,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </table>
 <p>Specifies a wait period (in µs) between TX→RX or RX→TX transitions. Default = 0.</p>
 <hr />
-<h3 id="0x0f0x13-pipe0_rxaddr04-pipe-0-rx-address">0x0F–0x13 — PIPE0_RXADDR0–4 — Pipe 0 RX Address</h3>
+<h3 id="0x0f0x13-pipe0rxaddr04-pipe-0-rx-address">0x0F–0x13 — PIPE0_RXADDR0–4 — Pipe 0 RX Address</h3>
 <p>Five-byte hardware address filter for Pipe 0. Only packets whose sync-word matches this address are forwarded to the FIFO and assert <code>RX_IRQ</code>.</p>
 <p>Byte 0 (0x0F) is the LSB and the first byte sent over the air. Byte 4 (0x13) is the MSB. When using 4-byte addresses (<code>ADDR_BYTE_LEN</code>=<code>10</code>), byte 4 is ignored; when using 2-byte addresses only bytes 0–1 are used.</p>
 <p>Default = 0xCCCCCCCCCC.</p>
@@ -1759,7 +1830,7 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 <p>Destination address embedded in the packet as the sync word. Must match the intended receiver's <code>PIPE0_RXADDR</code> for hardware filtering to pass. Same byte order as PIPE0_RXADDR. Updated before each TX when sending to different destinations.</p>
 <p>Default = 0xCCCCCCCCCC.</p>
 <hr />
-<h3 id="0x19-pkt_ext_cfg-packet-extension-configuration">0x19 — PKT_EXT_CFG — Packet Extension Configuration</h3>
+<h3 id="0x19-pktextcfg-packet-extension-configuration">0x19 — PKT_EXT_CFG — Packet Extension Configuration</h3>
 <table>
 <thead>
 <tr>
@@ -1815,10 +1886,10 @@ RX: read <code>len</code> bytes after <code>RX_IRQ</code> fires.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>BLE TX mode:</strong> <code>PKT_EXT_CFG = 0x60</code> = <code>HDR_LEN_EXIST=1, HDR_LEN_NUMB=10</code> (2 header bytes).<br />
+<p><strong>BLE TX mode:</strong> <code>PKT_EXT_CFG = 0x60</code> = <code>HDR_LEN_EXIST=1, HDR_LEN_NUMB=10</code> (2 header bytes).
 The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_IND | TxAdd=1</code>) and <code>TXHDR1</code> (auto-calculated PDU length) to the FIFO payload. The FIFO must contain only AdvA (6 bytes, LSB-first) + AdvData.</p>
 <hr />
-<h3 id="0x1a-whiten_cfg-whitening-configuration">0x1A — WHITEN_CFG — Whitening Configuration</h3>
+<h3 id="0x1a-whitencfg-whitening-configuration">0x1A — WHITEN_CFG — Whitening Configuration</h3>
 <table>
 <thead>
 <tr>
@@ -1889,7 +1960,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <p>where <code>bit_reverse7</code> reverses all 7 bits and <code>BLE_channel_index</code> is the BLE logical channel number (37, 38, or 39 for advertising). In BLE WORK_MODE (<code>WORK_MODE</code>=11) address-field skipping is handled automatically by the chip; <code>WHITEN_SKIP_ADDR</code> (bit 7) is left 0.</p>
 <p>Example for BLE ch 37: <code>37 | 0x40</code> = 101 = <code>0b1100101</code>; bit-reversed (7 bits) = <code>0b1010011</code> = <strong>0x53</strong>.</p>
 <hr />
-<h3 id="0x1b-txhdr0_cfg-tx-header-byte-0">0x1B — TXHDR0_CFG — TX Header Byte 0</h3>
+<h3 id="0x1b-txhdr0cfg-tx-header-byte-0">0x1B — TXHDR0_CFG — TX Header Byte 0</h3>
 <table>
 <thead>
 <tr>
@@ -1910,13 +1981,13 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </tr>
 </tbody>
 </table>
-<p><strong>BLE advertising:</strong> <code>TXHDR0_CFG = 0x42</code> = <code>ADV_NONCONN_IND (PDU type 0x02) | TxAdd=1 (bit 6)</code>.<br />
+<p><strong>BLE advertising:</strong> <code>TXHDR0_CFG = 0x42</code> = <code>ADV_NONCONN_IND (PDU type 0x02) | TxAdd=1 (bit 6)</code>.
 (<code>0b01000010</code> → bits [5:4]=0b10 reserved, bits[3:0]=PDU type 0x2=ADV_NONCONN_IND, bit[6]=TxAdd=1)</p>
 <blockquote>
 <p><strong>Note:</strong> On Page 1, address 0x1B maps to the <strong>Calibration Control</strong> register (different physical register — see Page 1 section).</p>
 </blockquote>
 <hr />
-<h3 id="0x1c-txhdr1_cfg-tx-header-byte-1">0x1C — TXHDR1_CFG — TX Header Byte 1</h3>
+<h3 id="0x1c-txhdr1cfg-tx-header-byte-1">0x1C — TXHDR1_CFG — TX Header Byte 1</h3>
 <table>
 <thead>
 <tr>
@@ -1938,7 +2009,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </tbody>
 </table>
 <hr />
-<h3 id="0x1d-txramaddr_cfg-tx-fifo-ram-start-address">0x1D — TXRAMADDR_CFG — TX FIFO RAM Start Address</h3>
+<h3 id="0x1d-txramaddrcfg-tx-fifo-ram-start-address">0x1D — TXRAMADDR_CFG — TX FIFO RAM Start Address</h3>
 <table>
 <thead>
 <tr>
@@ -1960,7 +2031,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </tbody>
 </table>
 <hr />
-<h3 id="0x1e-rxramaddr_cfg-rx-fifo-ram-start-address">0x1E — RXRAMADDR_CFG — RX FIFO RAM Start Address</h3>
+<h3 id="0x1e-rxramaddrcfg-rx-fifo-ram-start-address">0x1E — RXRAMADDR_CFG — RX FIFO RAM Start Address</h3>
 <table>
 <thead>
 <tr>
@@ -1982,7 +2053,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </tbody>
 </table>
 <hr />
-<h3 id="0x1f-rxpipe_cfg-multi-pipe-rx-enable">0x1F — RXPIPE_CFG — Multi-Pipe RX Enable</h3>
+<h3 id="0x1f-rxpipecfg-multi-pipe-rx-enable">0x1F — RXPIPE_CFG — Multi-Pipe RX Enable</h3>
 <table>
 <thead>
 <tr>
@@ -2048,7 +2119,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <p>Write 0x01 to enable Pipe 0 only (typical single-address use). Multi-pipe mode allows simultaneous reception on up to 6 different addresses.</p>
 <p>Pipes 2–5 share MSBs with Pipe 1 (only their LSB differs — <code>PIPE2_RXADDR0</code>–<code>PIPE5_RXADDR0</code>).</p>
 <hr />
-<h3 id="0x200x24-pipe1_rxaddr04-pipe-1-rx-address">0x20–0x24 — PIPE1_RXADDR0–4 — Pipe 1 RX Address</h3>
+<h3 id="0x200x24-pipe1rxaddr04-pipe-1-rx-address">0x20–0x24 — PIPE1_RXADDR0–4 — Pipe 1 RX Address</h3>
 <p>Full 5-byte address for Pipe 1. Same byte order as PIPE0_RXADDR. Default = 0xCCCCCCCCCC.</p>
 <hr />
 <h3 id="0x250x28-pipe25-rxaddr0-pipes-25-address-lsb">0x25–0x28 — PIPE2–5 RXADDR0 — Pipes 2–5 Address LSB</h3>
@@ -2080,7 +2151,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </tbody>
 </table>
 <hr />
-<h3 id="0x29-txauto_cfg-auto-retransmit-configuration">0x29 — TXAUTO_CFG — Auto-Retransmit Configuration</h3>
+<h3 id="0x29-txautocfg-auto-retransmit-configuration">0x29 — TXAUTO_CFG — Auto-Retransmit Configuration</h3>
 <table>
 <thead>
 <tr>
@@ -2110,7 +2181,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </table>
 <p>Only used in enhanced mode (<code>ENHANCE</code>=1). Normal and BLE modes write 0x00 (no retransmit).</p>
 <hr />
-<h3 id="0x2a-trxmode_cfg-txrx-mode-configuration">0x2A — TRXMODE_CFG — TX/RX Mode Configuration</h3>
+<h3 id="0x2a-trxmodecfg-txrx-mode-configuration">0x2A — TRXMODE_CFG — TX/RX Mode Configuration</h3>
 <table>
 <thead>
 <tr>
@@ -2212,8 +2283,8 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </tbody>
 </table>
 <hr />
-<h3 id="0x2b-rxtimeoutl_cfg-rx-timeout-low">0x2B — RXTIMEOUTL_CFG — RX Timeout (Low)</h3>
-<h3 id="0x2c-rxtimeouth_cfg-rx-timeout-high">0x2C — RXTIMEOUTH_CFG — RX Timeout (High)</h3>
+<h3 id="0x2b-rxtimeoutlcfg-rx-timeout-low">0x2B — RXTIMEOUTL_CFG — RX Timeout (Low)</h3>
+<h3 id="0x2c-rxtimeouthcfg-rx-timeout-high">0x2C — RXTIMEOUTH_CFG — RX Timeout (High)</h3>
 <p>16-bit timeout value in microseconds. RX_TIMEOUT_IRQ fires if no packet is received within this window (requires <code>REG_RX_CFG_MODE</code> to include timeout).</p>
 <table>
 <thead>
@@ -2238,7 +2309,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </table>
 <p>Default = 0x07D0 = 2000 µs (2 ms). Write low byte first.</p>
 <hr />
-<h3 id="0x2d-blematch_cfg0-ble-filter-configuration">0x2D — BLEMATCH_CFG0 — BLE Filter Configuration</h3>
+<h3 id="0x2d-blematchcfg0-ble-filter-configuration">0x2D — BLEMATCH_CFG0 — BLE Filter Configuration</h3>
 <table>
 <thead>
 <tr>
@@ -2283,7 +2354,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <p>Filter compares the received AdvA field against <code>WLIST0–5_CFG</code>. Only used in BLE mode (<code>WORK_MODE</code>=11).</p>
 <p>SDK BLE TX init: <code>0x04</code> (length filter = equal, whitelist disabled).</p>
 <hr />
-<h3 id="0x2e-blematch_cfg1">0x2E — BLEMATCH_CFG1</h3>
+<h3 id="0x2e-blematchcfg1">0x2E — BLEMATCH_CFG1</h3>
 <table>
 <thead>
 <tr>
@@ -2301,11 +2372,11 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </tbody>
 </table>
 <hr />
-<h3 id="0x2f0x34-wlist05_cfg-ble-whitelist-adva">0x2F–0x34 — WLIST0–5_CFG — BLE Whitelist AdvA</h3>
+<h3 id="0x2f0x34-wlist05cfg-ble-whitelist-adva">0x2F–0x34 — WLIST0–5_CFG — BLE Whitelist AdvA</h3>
 <p>Six-byte BLE advertiser address (AdvA) used by the hardware whitelist filter. Byte 0 (0x2F) = bits[7:0], byte 5 (0x34) = bits[47:40].</p>
 <p>Only used in BLE mode with <code>WL_MATCH_MODE</code> ≠ 000.</p>
 <hr />
-<h3 id="0x35-blematchstart_cfg-ble-filter-payload-start">0x35 — BLEMATCHSTART_CFG — BLE Filter Payload Start</h3>
+<h3 id="0x35-blematchstartcfg-ble-filter-payload-start">0x35 — BLEMATCHSTART_CFG — BLE Filter Payload Start</h3>
 <table>
 <thead>
 <tr>
@@ -2335,7 +2406,7 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </table>
 <p>SDK BLE TX init writes 0x00 (start from byte 0).</p>
 <hr />
-<h3 id="0x36-rf_datarate_cfg-air-data-rate">0x36 — RF_DATARATE_CFG — Air Data Rate</h3>
+<h3 id="0x36-rfdataratecfg-air-data-rate">0x36 — RF_DATARATE_CFG — Air Data Rate</h3>
 <table>
 <thead>
 <tr>
@@ -2400,9 +2471,12 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <p>BLE requires 1 Mbps.</p>
 <hr />
 <h3 id="0x370x38-undocumented">0x37–0x38 — Undocumented</h3>
-<p>Not described in the RM. Not written by the SDK. Purpose unknown.</p>
+<p>Not described in the RM. Purpose inferred from hardware testing.</p>
+<p><strong>0x37 — Crystal pre-configuration gate (16 MHz hardware)</strong></p>
+<p>Must be written to <strong>0xE0</strong> before entering Page 1 for OTP access when using a 16 MHz crystal. Without this write, the Page 1 RF analog tuning values and OTP read do not take effect correctly. Not required (and not written) by the SDK, which targets 32 MHz crystal hardware.</p>
+<p><strong>0x38</strong> — Purpose unknown; not written by SDK or 16 MHz init.</p>
 <hr />
-<h3 id="0x39-rf_channel_cfg-rf-channel">0x39 — RF_CHANNEL_CFG — RF Channel</h3>
+<h3 id="0x39-rfchannelcfg-rf-channel">0x39 — RF_CHANNEL_CFG — RF Channel</h3>
 <table>
 <thead>
 <tr>
@@ -2457,7 +2531,48 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <p>⚙ These registers are not documented in the official RM. The SDK writes them during initialization with values derived from the ES_Tool V1.2.6 for a 16 MHz crystal. Do not modify without guidance from PANCHIP.</p>
 <p>Not written by the SDK init sequence (the range 0x3A–0x42 is skipped; SDK jumps directly from 0x39 to 0x43).</p>
 <hr />
-<h3 id="0x43-rf-driver-tuning-undocumented-page-0">0x43 — RF Driver Tuning (Undocumented, Page 0) ⚙</h3>
+<h3 id="0x43-rfpamodecfg-page-0">0x43 — RF_PA_MODE_CFG (Page 0) ⚙</h3>
+<table>
+<thead>
+<tr>
+<th>Bits</th>
+<th>Name</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>7</td>
+<td>RXADC_MODE_MANUAL_EN</td>
+<td>RX ADC mode manual override enable</td>
+</tr>
+<tr>
+<td>6</td>
+<td>RXADC_MODE_SEL</td>
+<td>RX ADC mode select</td>
+</tr>
+<tr>
+<td>5:4</td>
+<td>TXPA_MODE_SEL</td>
+<td>TX PA operating mode: 0=250 kbps/FS01/FS32, 2=1 Mbps/2 Mbps/BLE</td>
+</tr>
+<tr>
+<td>3</td>
+<td>EN_RXADCCLK</td>
+<td>Enable RX ADC clock</td>
+</tr>
+<tr>
+<td>2</td>
+<td>FSYNVCO_TXCTK</td>
+<td>FSYN VCO TX clock: 0=1 Mbps/250 kbps, 1=2 Mbps</td>
+</tr>
+<tr>
+<td>1:0</td>
+<td>RXFLTR_IF</td>
+<td>RX filter IF mode: 2=1 Mbps/2 Mbps, 3=250 kbps</td>
+</tr>
+</tbody>
+</table>
 <table>
 <thead>
 <tr>
@@ -2472,13 +2587,33 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <td>0x3A</td>
 <td>0x3A</td>
 <td>0x3A</td>
-<td>Same value for all TX-power levels; from ES_Tool init sequence</td>
+<td>Same for all power levels</td>
 </tr>
 </tbody>
 </table>
-<p>Inferred purpose: RF driver bias or gain setting. Changing this register requires corresponding Page 1 register adjustments.</p>
 <hr />
-<h3 id="0x44-rf-output-tuning-undocumented-page-0">0x44 — RF Output Tuning (Undocumented, Page 0) ⚙</h3>
+<h3 id="0x44-rfpapoutcfg-page-0">0x44 — RF_PA_POUT_CFG (Page 0) ⚙</h3>
+<table>
+<thead>
+<tr>
+<th>Bits</th>
+<th>Name</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>7:4</td>
+<td>TXPA_POUT_CRNT</td>
+<td>TX PA output current (power level select)</td>
+</tr>
+<tr>
+<td>3:0</td>
+<td>TXPA_LDO_SEL</td>
+<td>TX PA LDO voltage select</td>
+</tr>
+</tbody>
+</table>
 <table>
 <thead>
 <tr>
@@ -2493,13 +2628,12 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <td>0x8C</td>
 <td>0x84</td>
 <td>0x8C</td>
-<td>TX-power dependent — part of TX-power configuration</td>
+<td>TX-power dependent</td>
 </tr>
 </tbody>
 </table>
-<p>Inferred purpose: PA output matching or bias. The difference between 0 dBm (0x84) and 9 dBm (0x8C) confirms a direct role in output power control.</p>
 <hr />
-<h3 id="0x45-irq_mux_cfg-irq-pin-multiplexing">0x45 — IRQ_MUX_CFG — IRQ Pin Multiplexing</h3>
+<h3 id="0x45-irqmuxcfg-irq-pin-multiplexing">0x45 — IRQ_MUX_CFG — IRQ Pin Multiplexing</h3>
 <table>
 <thead>
 <tr>
@@ -2539,95 +2673,109 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <h3 id="0x460x54-rf-analog-tuning-undocumented-page-0">0x46–0x54 — RF Analog Tuning (Undocumented, Page 0) ⚙</h3>
 <p>Not written by the SDK in the ES_Tool init sequence for normal operation.</p>
 <hr />
-<h3 id="0x550x61-rf-analog-tuning-bank-undocumented-page-0">0x55–0x61 — RF Analog Tuning Bank (Undocumented, Page 0) ⚙</h3>
-<p>Written during init from the SDK ES_Tool V1.2.6 sequence (16 MHz crystal). These are required for correct RF operation and must not be changed.</p>
+<h3 id="0x550x61-rssi-thresholds-and-agc-gain-words-page-0">0x55–0x61 — RSSI Thresholds and AGC Gain Words (Page 0) ⚙</h3>
+<p>Written during init from the SDK ES_Tool V1.2.6 sequence (16 MHz crystal). Required for correct RF operation.</p>
 <table>
 <thead>
 <tr>
 <th>Addr</th>
+<th>Name</th>
 <th>SDK Init</th>
 <th>BLE RX mode</th>
-<th>Inferred function</th>
+<th>Function</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>0x55</td>
+<td>RF_RSSI_TH1</td>
 <td>0xDD</td>
 <td>0xDD</td>
-<td>RF filter / baseband tuning</td>
+<td>RSSI AGC threshold level 1</td>
 </tr>
 <tr>
 <td>0x56</td>
+<td>RF_RSSI_TH2</td>
 <td>0xC9</td>
 <td>0xC9</td>
-<td>RF filter / baseband tuning</td>
+<td>RSSI AGC threshold level 2</td>
 </tr>
 <tr>
 <td>0x57</td>
+<td>RF_RSSI_TH3</td>
 <td>0xB7</td>
 <td>0xB7</td>
-<td>RF filter / baseband tuning</td>
+<td>RSSI AGC threshold level 3</td>
 </tr>
 <tr>
 <td>0x58</td>
+<td>RF_RSSI_INIT</td>
 <td>—</td>
 <td>—</td>
-<td>Not written; purpose unknown</td>
+<td>RSSI initial value for AGC; not written</td>
 </tr>
 <tr>
 <td>0x59</td>
+<td>RF_RSSI_HYS</td>
 <td>—</td>
 <td>—</td>
-<td>Not written; purpose unknown</td>
+<td>RSSI hysteresis for AGC; not written</td>
 </tr>
 <tr>
 <td>0x5A</td>
+<td>RF_RSSI_FIX0</td>
 <td>0x10</td>
 <td>0x10</td>
-<td>RF baseband tuning</td>
+<td>Fixed RSSI calibration word 0</td>
 </tr>
 <tr>
 <td>0x5B</td>
+<td>RF_RSSI_FIX1</td>
 <td>0xFD</td>
 <td>0xFD</td>
-<td>RF baseband tuning</td>
+<td>Fixed RSSI calibration word 1</td>
 </tr>
 <tr>
 <td>0x5C</td>
+<td>RF_RSSI_FIX2</td>
 <td>0xE9</td>
 <td>0xE9</td>
-<td>RF baseband tuning</td>
+<td>Fixed RSSI calibration word 2</td>
 </tr>
 <tr>
 <td>0x5D</td>
+<td>RF_RSSI_FIX3</td>
 <td>0xDC</td>
 <td>0xD4 ⚙</td>
-<td>RF baseband tuning; 0xD4 used in <code>19_realtime_rssi</code> (high-gain RX)</td>
+<td>Fixed RSSI calibration word 3; <strong>0xD4</strong> in high-gain RX mode</td>
 </tr>
 <tr>
 <td>0x5E</td>
+<td>RF_GAIN_WORD0</td>
 <td>0x02</td>
 <td>0x02</td>
-<td>RF baseband tuning</td>
+<td>AGC gain table entry 0</td>
 </tr>
 <tr>
 <td>0x5F</td>
+<td>RF_GAIN_WORD1</td>
 <td>0x06</td>
 <td>0x06</td>
-<td>RF baseband tuning</td>
+<td>AGC gain table entry 1</td>
 </tr>
 <tr>
 <td>0x60</td>
+<td>RF_GAIN_WORD2</td>
 <td>0x0E</td>
 <td>0x0E</td>
-<td>RF baseband tuning</td>
+<td>AGC gain table entry 2</td>
 </tr>
 <tr>
 <td>0x61</td>
+<td>RF_GAIN_WORD3</td>
 <td>0x2E</td>
 <td>0x3E ⚙</td>
-<td>RF baseband / RX gain: <strong>0x3E</strong> = high-gain RX mode (used in <code>19_realtime_rssi</code>); 0x2E = normal</td>
+<td>AGC gain table entry 3; <strong>0x3E</strong> in high-gain RX mode</td>
 </tr>
 </tbody>
 </table>
@@ -2635,22 +2783,22 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <h3 id="0x620x65-rf-analog-tuning-undocumented-page-0">0x62–0x65 — RF Analog Tuning (Undocumented, Page 0) ⚙</h3>
 <p>Not written by SDK. Purpose unknown.</p>
 <hr />
-<h3 id="0x66-rf-analog-tuning-undocumented-page-0">0x66 — RF Analog Tuning (Undocumented, Page 0) ⚙</h3>
-<p>SDK init value: <strong>0x34</strong>. Purpose unknown; required for correct RF operation.</p>
+<h3 id="0x66-rftxanatime-page-0">0x66 — RF_TX_ANA_TIME (Page 0) ⚙</h3>
+<p>TX analog setup time. SDK init value: <strong>0x34</strong>.</p>
 <hr />
 <h3 id="0x67-rf-analog-tuning-undocumented-page-0">0x67 — RF Analog Tuning (Undocumented, Page 0) ⚙</h3>
 <p>Not written by SDK. Purpose unknown.</p>
 <hr />
-<h3 id="0x68-rf-analog-tuning-undocumented-page-0">0x68 — RF Analog Tuning (Undocumented, Page 0) ⚙</h3>
-<p>SDK init value: <strong>0x0D</strong>. Purpose unknown; required for correct RF operation.</p>
+<h3 id="0x68-rfrxpllsetup-page-0">0x68 — RF_RX_PLL_SETUP (Page 0) ⚙</h3>
+<p>RX RF PLL setup time. Bits [5:0] = <code>RX_RFPLL_SETUP_TIME</code>. SDK init value: <strong>0x0D</strong>.</p>
 <hr />
 <h3 id="0x690x6d-rf-analog-tuning-undocumented-page-0">0x69–0x6D — RF Analog Tuning (Undocumented, Page 0) ⚙</h3>
 <p>Not written by SDK. Purpose unknown.</p>
 <hr />
-<h3 id="0x6e-rf-analog-tuning-undocumented-page-0">0x6E — RF Analog Tuning (Undocumented, Page 0) ⚙</h3>
-<p>SDK init value: <strong>0x20</strong>. Last register in the ES_Tool init sequence before the Page 1 RF calibration step.</p>
+<h3 id="0x6e-rfparampdly-page-0">0x6E — RF_PA_RAMP_DLY (Page 0) ⚙</h3>
+<p>PA ramp delay select. Bits [6:4] = <code>PA_RAM_DN_DLY_SEL</code>, bits [2:0] = <code>PA_RAM_UP_DLY_SEL</code>. SDK init value: <strong>0x20</strong>. Last register written before Page 1 RF calibration.</p>
 <hr />
-<h3 id="0x6f-misc_cfg-miscellaneous-configuration">0x6F — MISC_CFG — Miscellaneous Configuration</h3>
+<h3 id="0x6f-misccfg-miscellaneous-configuration">0x6F — MISC_CFG — Miscellaneous Configuration</h3>
 <table>
 <thead>
 <tr>
@@ -2947,8 +3095,8 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <hr />
 <h3 id="0x780x79-undocumented-page-0">0x78–0x79 — Undocumented (Page 0)</h3>
 <hr />
-<h3 id="0x7a-pkt_rssi_l-last-packet-rssi-low">0x7A — PKT_RSSI_L — Last Packet RSSI (Low)</h3>
-<h3 id="0x7b-pkt_rssi_h-last-packet-rssi-high">0x7B — PKT_RSSI_H — Last Packet RSSI (High)</h3>
+<h3 id="0x7a-pktrssil-last-packet-rssi-low">0x7A — PKT_RSSI_L — Last Packet RSSI (Low)</h3>
+<h3 id="0x7b-pktrssih-last-packet-rssi-high">0x7B — PKT_RSSI_H — Last Packet RSSI (High)</h3>
 <table>
 <thead>
 <tr>
@@ -2977,8 +3125,8 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <hr />
 <h3 id="0x7c0x7d-undocumented-page-0">0x7C–0x7D — Undocumented (Page 0)</h3>
 <hr />
-<h3 id="0x7e-rt_rssi_l-ambient-noise-rssi-low">0x7E — RT_RSSI_L — Ambient Noise RSSI (Low)</h3>
-<h3 id="0x7f-rt_rssi_h-ambient-noise-rssi-high">0x7F — RT_RSSI_H — Ambient Noise RSSI (High)</h3>
+<h3 id="0x7e-rtrssil-ambient-noise-rssi-low">0x7E — RT_RSSI_L — Ambient Noise RSSI (Low)</h3>
+<h3 id="0x7f-rtrssih-ambient-noise-rssi-high">0x7F — RT_RSSI_H — Ambient Noise RSSI (High)</h3>
 <table>
 <thead>
 <tr>
@@ -3244,6 +3392,12 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 <h3 id="0x3e-page-1-rf-analog-tuning">0x3E (Page 1) — RF Analog Tuning ⚙</h3>
 <p>Init value: <strong>0xF1</strong>.</p>
 <hr />
+<h3 id="0x3f-page-1-rf-analog-tuning-undocumented">0x3F (Page 1) — RF Analog Tuning ⚙ (Undocumented)</h3>
+<p>Not described in the RM or SDK. Required for correct RF operation with a <strong>16 MHz crystal</strong>; init value <strong>0xD2</strong>. Not written by the SDK (which targets 32 MHz hardware).</p>
+<hr />
+<h3 id="0x40-page-1-rf-analog-tuning-undocumented">0x40 (Page 1) — RF Analog Tuning ⚙ (Undocumented)</h3>
+<p>Not described in the RM or SDK. Required for correct RF operation with a <strong>16 MHz crystal</strong>; init value <strong>0x20</strong>. Not written by the SDK (which targets 32 MHz hardware).</p>
+<hr />
 <h3 id="0x41-page-1-vco-pa-control">0x41 (Page 1) — VCO / PA Control ⚙</h3>
 <table>
 <thead>
@@ -3254,8 +3408,12 @@ The chip auto-prepends <code>TXHDR0</code> (PDU type = 0x42 = <code>ADV_NONCONN_
 </thead>
 <tbody>
 <tr>
+<td>0xA6</td>
+<td>Normal operation — <strong>16 MHz crystal</strong></td>
+</tr>
+<tr>
 <td>0xA2</td>
-<td>Normal operation</td>
+<td>Normal operation — 32 MHz crystal (SDK default)</td>
 </tr>
 <tr>
 <td>0x20</td>
@@ -3412,6 +3570,7 @@ Step 2 — STB3 with soft reset
   delay 1 ms
   Write SYS_CFG    ← 0x02   (release SOFT_RSTL)
   Read  SPI_CFG            → must read 0x83 (chip-present check)
+  [16 MHz crystal only] Write 0x37 ← 0xE0  (must precede Page 1 entry)
 
 Step 3 — Read factory OTP (Page 1)
   Write PAGE_CFG   ← 0x01
@@ -3430,8 +3589,10 @@ Step 4 — Page 1 pre-configuration
   Write 0x37 ← 0x15
   Write 0x3A ← 0x14
   Write 0x3E ← 0xF1
-  Write 0x41 ← 0xA2
-  Write 0x46 ← 0xB0
+  [16 MHz crystal only] Write 0x3F ← 0xD2
+  [16 MHz crystal only] Write 0x40 ← 0x20
+  Write 0x41 ← 0xA6   (16 MHz crystal) / 0xA2 (32 MHz crystal, SDK default)
+  Write 0x46 ← 0xB0   (= PA_BIAS_9DBM)
   Write 0x4C ← 0x48
 
 Step 5 — Page 0 RF configuration
@@ -3450,8 +3611,8 @@ Step 5 — Page 0 RF configuration
   Write PIPE0_RXADDR0–3 ← OwnAddr bytes [0..3]
   Write RF_CHANNEL   ← 0x55  (calibration channel)
   Write RF_DATARATE  ← DataRate
-  Write 0x43 ← 0x3A, 0x44 ← 0x8C   (RF analog tuning / TX 9 dBm)
-  Write 0x55–0x61, 0x66, 0x68, 0x6E ← (RF analog tuning table)
+  Write RF_PA_MODE_CFG ← 0x3A, RF_PA_POUT_CFG ← 0x8C   (PA mode + TX 9 dBm)
+  Write RF_RSSI_TH1–RF_GAIN_WORD3, RF_TX_ANA_TIME, RF_RX_PLL_SETUP, RF_PA_RAMP_DLY ← (analog tuning table)
 
 Step 6 — RF calibration (Page 1)
   Write PAGE_CFG   ← 0x01
@@ -3516,40 +3677,40 @@ If set:
 </thead>
 <tbody>
 <tr>
-<td>0x27</td>
+<td>P1_RF_TUNE_27</td>
 <td>1</td>
 <td>0xAA</td>
 <td>0xAA</td>
 </tr>
 <tr>
-<td>0x3C</td>
+<td>P1_TX_PWR_AMP</td>
 <td>1</td>
 <td>0x13</td>
 <td>0x17</td>
 </tr>
 <tr>
-<td>0x46</td>
+<td>P1_PA_BIAS</td>
 <td>1</td>
 <td>0xBD</td>
 <td>0xB0</td>
 </tr>
 <tr>
-<td>0x48</td>
+<td>P1_TX_PWR_CTL</td>
 <td>1</td>
 <td>0x88</td>
 <td>0x88</td>
 </tr>
 <tr>
-<td>0x43</td>
+<td>RF_PA_MODE_CFG</td>
 <td>0</td>
 <td>0x3A</td>
 <td>0x3A</td>
 </tr>
 <tr>
-<td>0x44</td>
+<td>RF_PA_POUT_CFG</td>
 <td>0</td>
-<td>0x84</td>
-<td>0x8C</td>
+<td>RF_PA_POUT_CFG_0DBM (0x84)</td>
+<td>RF_PA_POUT_CFG_9DBM (0x8C)</td>
 </tr>
 </tbody>
 </table>
@@ -3572,7 +3733,7 @@ Write STATE_CFG ← 0x74      (STB3)
 Write TRXMODE_CFG ← 0x41    (restore single TX)
 </code></pre>
 <hr />
-<h2 id="sleep-wakeup-09_sleep-example">Sleep / Wakeup (<code>09_sleep</code> example)</h2>
+<h2 id="sleep-wakeup-09sleep-example">Sleep / Wakeup (<code>09_sleep</code> example)</h2>
 <pre><code>Enter sleep:
   Write STATE_CFG ← 0x74   (STB3)
   Write STATE_CFG ← 0x21   (Sleep)
@@ -3646,16 +3807,16 @@ Exit sleep:
 <td>BLE requires 1 Mbps</td>
 </tr>
 <tr>
-<td>0x5D (Page 0) ⚙</td>
+<td>RF_RSSI_FIX3 ⚙</td>
 <td>0xDC</td>
 <td>0xD4</td>
-<td>RX demod tuning</td>
+<td>RSSI calibration word 3</td>
 </tr>
 <tr>
-<td>0x61 (Page 0) ⚙</td>
+<td>RF_GAIN_WORD3 ⚙</td>
 <td>0x2E</td>
 <td>0x3E</td>
-<td>RX demod tuning</td>
+<td>AGC gain table entry 3</td>
 </tr>
 <tr>
 <td>0x6F (Page 0) ⚙</td>

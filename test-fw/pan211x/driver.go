@@ -210,9 +210,9 @@ func (d *Driver) Init() error {
 		return err
 	}
 	for _, rw := range []struct{ reg, val uint8 }{
-		{RF_ANA_43, 0x3A}, {RF_ANA_44, RF_ANA_44_9DBM},
-		{RF_ANA_55, 0xDD}, {RF_ANA_56, 0xC9}, {RF_ANA_57, 0xB7},
-		{RF_ANA_66, 0x34}, {RF_ANA_68, 0x0D}, {RF_ANA_6E, 0x20},
+		{RF_PA_MODE_CFG, 0x3A}, {RF_PA_POUT_CFG, RF_PA_POUT_CFG_9DBM},
+		{RF_RSSI_TH1, 0xDD}, {RF_RSSI_TH2, 0xC9}, {RF_RSSI_TH3, 0xB7},
+		{RF_TX_ANA_TIME, 0x34}, {RF_RX_PLL_SETUP, 0x0D}, {RF_PA_RAMP_DLY, 0x20},
 	} {
 		if err := d.registers.Write(rw.reg, rw.val); err != nil {
 			return err
