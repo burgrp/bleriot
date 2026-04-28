@@ -11,6 +11,7 @@ var (
 	ErrTimeout         = errors.New("radio timeout")
 	ErrCalibration     = errors.New("calibration failed")
 	ErrNoDevice        = errors.New("no device")
+	ErrInvalidChannel  = errors.New("invalid channel")
 )
 
 type Address [5]byte
@@ -22,6 +23,8 @@ const (
 	BitRate1Mbps   BitRate = 1
 	BitRate2Mbps   BitRate = 2
 )
+
+const maxChannel = 83
 
 // Registers abstracts the physical bus (I2C or SPI) for register access.
 type Registers interface {
@@ -360,6 +363,9 @@ func (d *Driver) InitXN297L(cfg ConfigXN297L) error {
 
 // SetChannel sets the RF channel. ch = frequency_MHz − 2400 (valid 0–83).
 func (d *Driver) SetChannel(channel uint8) error {
+	if channel > maxChannel {
+		return ErrInvalidChannel
+	}
 	if err := d.ensureSTB3(); err != nil {
 		return err
 	}
