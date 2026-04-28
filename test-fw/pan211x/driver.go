@@ -38,9 +38,7 @@ type ConfigXN297L struct {
 
 type Driver struct {
 	registers  Registers
-	rxPipeMask uint8 // RXPIPE_CFG bits [5:0] — which pipes are active
 	payloadLen uint8
-	inRX       bool
 }
 
 func NewDriver(registers Registers) *Driver {
@@ -72,22 +70,11 @@ func (d *Driver) enterRX() error {
 	if err := d.registers.Write(RFIRQFLG, IRQ_ALL); err != nil {
 		return err
 	}
-	if err := d.registers.Write(STATE_CFG, STATE_RX); err != nil {
-		return err
-	}
-	d.inRX = true
-	return nil
+	return d.registers.Write(STATE_CFG, STATE_RX)
 }
 
-// ensureSTB3 transitions to STB3 if currently in RX mode.
 func (d *Driver) ensureSTB3() error {
-	if d.inRX {
-		if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
-			return err
-		}
-		d.inRX = false
-	}
-	return nil
+	return d.registers.Write(STATE_CFG, STATE_STB3)
 }
 
 // writeAddr writes a 5-byte address as individual register writes starting at startReg.
@@ -104,8 +91,6 @@ func (d *Driver) writeAddr(startReg uint8, addr Address) error {
 // Crystal: 16 MHz. TX power: 9 dBm. Caller must call SetChannel after this returns.
 func (d *Driver) InitXN297L(cfg ConfigXN297L) error {
 	d.payloadLen = cfg.PayloadLen
-	d.rxPipeMask = PIPE0_EN
-	d.inRX = false
 	r := d.registers
 
 	// Step 1: ensure Page 0.
@@ -127,6 +112,11 @@ func (d *Driver) InitXN297L(cfg ConfigXN297L) error {
 	}
 	time.Sleep(time.Millisecond)
 	if err := r.Write(SYS_CFG, SYS_CFG_RELEASE); err != nil {
+		return err
+	}
+	// Soft reset clears SPI_CFG to its default, which has REG_SPI3_REN=0 (reads disabled).
+	// Must re-enable 3-wire SPI reads before any register read operation.
+	if err := r.Write(SPI_CFG, SPI_CFG_INIT); err != nil {
 		return err
 	}
 	// Required for 16 MHz crystal before any Page 1 access.
@@ -357,34 +347,26 @@ func (d *Driver) InitXN297L(cfg ConfigXN297L) error {
 		return ErrCalibration
 	}
 
-	// Wrap up: stop FSM, return to STB3 on Page 0, clear all IRQ flags.
+	// Wrap up: stop FSM, return to Page 0, enter RX.
 	if err := r.Write(P1_CAL_CTL, CAL_STOP); err != nil {
-		return err
-	}
-	if err := r.Write(STATE_CFG, STATE_STB3); err != nil {
 		return err
 	}
 	if err := r.Write(PAGE_CFG, 0x00); err != nil {
 		return err
 	}
-	return r.Write(RFIRQFLG, IRQ_ALL)
 	// RF_CHANNEL_CFG is still RF_CH_CAL; caller must call SetChannel before use.
+	return d.enterRX()
 }
 
 // SetChannel sets the RF channel. ch = frequency_MHz − 2400 (valid 0–83).
-// Can be called at any time; temporarily leaves RX mode if active.
 func (d *Driver) SetChannel(channel uint8) error {
-	wasRX := d.inRX
 	if err := d.ensureSTB3(); err != nil {
 		return err
 	}
 	if err := d.registers.Write(RF_CHANNEL_CFG, channel); err != nil {
 		return err
 	}
-	if wasRX {
-		return d.enterRX()
-	}
-	return nil
+	return d.enterRX()
 }
 
 // EnableRxAddress sets the receive address for pipe pipeIndex (0–5) and enables the pipe.
@@ -394,7 +376,6 @@ func (d *Driver) EnableRxAddress(pipeIndex uint8, addr Address) error {
 	if pipeIndex > 5 {
 		return errors.New("invalid pipe index")
 	}
-	wasRX := d.inRX
 	if err := d.ensureSTB3(); err != nil {
 		return err
 	}
@@ -414,14 +395,14 @@ func (d *Driver) EnableRxAddress(pipeIndex uint8, addr Address) error {
 			return err
 		}
 	}
-	d.rxPipeMask |= 1 << pipeIndex
-	if err := d.registers.Write(RXPIPE_CFG, d.rxPipeMask); err != nil {
+	mask, err := d.registers.Read(RXPIPE_CFG)
+	if err != nil {
 		return err
 	}
-	if wasRX {
-		return d.enterRX()
+	if err := d.registers.Write(RXPIPE_CFG, mask|(1<<pipeIndex)); err != nil {
+		return err
 	}
-	return nil
+	return d.enterRX()
 }
 
 // DisableRxAddress disables the given pipe without changing its stored address.
@@ -429,18 +410,17 @@ func (d *Driver) DisableRxAddress(pipeIndex uint8) error {
 	if pipeIndex > 5 {
 		return errors.New("invalid pipe index")
 	}
-	wasRX := d.inRX
 	if err := d.ensureSTB3(); err != nil {
 		return err
 	}
-	d.rxPipeMask &^= 1 << pipeIndex
-	if err := d.registers.Write(RXPIPE_CFG, d.rxPipeMask); err != nil {
+	mask, err := d.registers.Read(RXPIPE_CFG)
+	if err != nil {
 		return err
 	}
-	if wasRX {
-		return d.enterRX()
+	if err := d.registers.Write(RXPIPE_CFG, mask&^(1<<pipeIndex)); err != nil {
+		return err
 	}
-	return nil
+	return d.enterRX()
 }
 
 // Send transmits payload to dst. len(payload) must not exceed PayloadLen from config.
@@ -470,9 +450,7 @@ func (d *Driver) Send(dst Address, payload []byte) error {
 
 	txErr := d.pollBit(RFIRQFLG, IRQ_TX, 10*time.Millisecond)
 
-	// Always return to STB3 then RX, regardless of TX outcome.
-	_ = d.registers.Write(STATE_CFG, STATE_STB3)
-	d.inRX = false
+	// Always re-enter RX regardless of TX outcome.
 	_ = d.enterRX()
 
 	return txErr
@@ -481,11 +459,6 @@ func (d *Driver) Send(dst Address, payload []byte) error {
 // Receive checks for a received packet without blocking.
 // Returns (n, true) if a packet was available and copied into buf, (0, false) otherwise.
 func (d *Driver) Receive(buf []byte) (n int, ok bool) {
-	if !d.inRX {
-		if err := d.enterRX(); err != nil {
-			return 0, false
-		}
-	}
 
 	flags, err := d.registers.Read(RFIRQFLG)
 	if err != nil || flags&IRQ_RX == 0 {
