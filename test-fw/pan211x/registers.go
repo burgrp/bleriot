@@ -115,8 +115,8 @@ const (
 	// RXRAMADDR_CFG: RX FIFO RAM start offset (normally 0x00). (P0)
 	RXRAMADDR_CFG = uint8(0x1E)
 
-	// RXPIPE_CFG: enable bits for RX pipes 0–5, and TX/RX inversion. (P0)
-	// [7]=TX_INVERT_EN [6]=RX_INVERT_EN [5:0]=ADDR_EN_5..0
+	// RXPIPE_CFG: enable bits for RX pipes 0–5. (P0)
+	// [7:6]=RESERVED (must not be written) [5:0]=PIPE_EN_5..0
 	RXPIPE_CFG = uint8(0x1F)
 
 	// PIPE1_RXADDR0–4: 5-byte RX address for pipe 1. (P0)
@@ -676,9 +676,7 @@ const (
 // ── RXPIPE_CFG bit constants ──────────────────────────────────────────────────
 
 const (
-	RXPIPE_TX_INVERT = uint8(0x80) // invert TX polarity
-	RXPIPE_RX_INVERT = uint8(0x40) // invert RX polarity
-	PIPE0_EN         = uint8(0x01)
+	PIPE0_EN = uint8(0x01)
 	PIPE1_EN         = uint8(0x02)
 	PIPE2_EN         = uint8(0x04)
 	PIPE3_EN         = uint8(0x08)

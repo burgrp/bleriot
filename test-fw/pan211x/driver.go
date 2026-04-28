@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// Errors returned by Driver methods.
 var (
 	ErrPayloadTooLarge = errors.New("payload too large")
 	ErrTimeout         = errors.New("radio timeout")
@@ -14,20 +13,15 @@ var (
 	ErrNoDevice        = errors.New("no device")
 )
 
-// Address is a 4-byte device address stored as a little-endian uint32.
-type Address uint32
+type Address [5]byte
 
-// Bytes returns the address as 4 bytes in little-endian order.
-func (a Address) Bytes() [4]byte {
-	return [4]byte{byte(a), byte(a >> 8), byte(a >> 16), byte(a >> 24)}
-}
+type BitRate uint8
 
-// Config holds the RF parameters for Init.
-type Config struct {
-	OwnAddr    Address // RX filter: only packets with TXADDR==OwnAddr are accepted
-	RFChannel  uint8   // operating frequency: F = 2400 + RFChannel [MHz], range 0-83
-	PayloadLen uint8   // fixed packet length in bytes (both TX and RX)
-}
+const (
+	BitRate250Kbps BitRate = 0
+	BitRate1Mbps   BitRate = 1
+	BitRate2Mbps   BitRate = 2
+)
 
 // Registers abstracts the physical bus (I2C or SPI) for register access.
 type Registers interface {
@@ -37,420 +31,40 @@ type Registers interface {
 	ReadBuffer(reg uint8, buf []byte) error
 }
 
-// Driver controls a PAN211x transceiver.
+type ConfigXN297L struct {
+	BitRate    BitRate
+	PayloadLen uint8
+}
+
 type Driver struct {
-	registers Registers
-	cfg       Config
+	registers  Registers
+	rxPipeMask uint8 // RXPIPE_CFG bits [5:0] — which pipes are active
+	payloadLen uint8
+	inRX       bool
 }
 
-// NewDriver creates a Driver using the given Registers implementation and Config.
-func NewDriver(registers Registers, cfg Config) *Driver {
-	return &Driver{registers: registers, cfg: cfg}
+func NewDriver(registers Registers) *Driver {
+	return &Driver{registers: registers}
 }
 
-// Init wakes the chip, reads factory OTP calibration, configures RF parameters,
-// performs RF calibration, and leaves the chip in continuous RX mode.
-// Follows the SDK PAN211_Init() sequence exactly.
-func (d *Driver) Init() error {
-	// ── Step 1: SPI interface init ────────────────────────────────────────────
-	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
-		return err
-	}
-	// REG_SPI3_REN=1 enables 3-wire SPI reads. Must be set before entering STB3.
-	if err := d.registers.Write(SPI_CFG, SPI_CFG_INIT); err != nil {
-		return err
-	}
-
-	// ── Step 2: Enter STB3 with soft reset ───────────────────────────────────
-	if err := d.registers.Write(STATE_CFG, STATE_STB3_INIT); err != nil {
-		return err
-	}
-	time.Sleep(10 * time.Millisecond)
-	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
-		return err
-	}
-	time.Sleep(10 * time.Millisecond)
-	if err := d.registers.Write(SYS_CFG, SYS_CFG_RESET); err != nil {
-		return err
-	}
-	time.Sleep(10 * time.Millisecond)
-	if err := d.registers.Write(SYS_CFG, SYS_CFG_RELEASE); err != nil {
-		return err
-	}
-
-	// Verify chip is accessible: SPI_CFG should still read SPI_CFG_INIT after reset.
-	v, err := d.registers.Read(SPI_CFG)
-	if err != nil {
-		return err
-	}
-	if v != SPI_CFG_INIT {
-		println("SPI_CFG readback:", v)
-		return ErrNoDevice
-	}
-
-	// 16 MHz crystal pre-configuration (must be set before Page1 OTP read).
-	if err := d.registers.Write(0x37, 0xE0); err != nil {
-		return err
-	}
-
-	// ── Step 3: Read factory OTP calibration (Page1) ─────────────────────────
-	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
-		return err
-	}
-	if err := d.registers.Write(P1_OTP_CTL, OTP_CTL_START); err != nil {
-		return err
-	}
-	if err := d.registers.Write(P1_OTP_DATA, OTP_READ_WORD2); err != nil {
-		return err
-	}
-	value2, err := d.registers.Read(P1_OTP_DATA)
-	if err != nil {
-		return err
-	}
-	if err := d.registers.Write(P1_OTP_DATA, OTP_READ_WORD4); err != nil {
-		return err
-	}
-	value4, err := d.registers.Read(P1_OTP_DATA)
-	if err != nil {
-		return err
-	}
-	if err := d.registers.Write(P1_OTP_CTL, OTP_CTL_STOP); err != nil {
-		return err
-	}
-	println("OTP value2:", value2, "value4:", value4)
-	if (value2 & OTP_VALID_MASK) != OTP_VALID_VAL {
-		println("OTP check failed, value2&0x0F:", value2&OTP_VALID_MASK)
-		return ErrCalibration
-	}
-	if err := d.registers.Write(P1_PA_TUNE_47, 0x83|((value2>>1)&0x70)); err != nil {
-		return err
-	}
-	calBit := uint8(0)
-	if (value2 & OTP_CAL_MASK) == 0 {
-		calBit = 1
-	}
-	if err := d.registers.Write(P1_PA_TUNE_43, 0x10|calBit); err != nil {
-		return err
-	}
-
-	// ── Step 4: Page1 pre-configuration (ES_Tool V1.2.6, 16 MHz, XN297L normal) ──
-	for _, rw := range []struct{ reg, val uint8 }{
-		{P1_RF_TUNE_27, 0xAA},
-		{P1_RF_TUNE_32, 0x1E}, {P1_RF_TUNE_33, 0x19},
-		{P1_RF_TUNE_37, 0x15}, {P1_RF_TUNE_3A, 0x14}, {P1_RF_TUNE_3E, 0xF1},
-		{P1_RF_TUNE_3F, 0xD2}, {P1_RF_TUNE_40, 0x20}, // 16 MHz crystal
-		{P1_VCO_PA_CTL, 0xA6},                         // 0xA6 for 16 MHz (32 MHz = 0xA2)
-		{P1_PA_BIAS, PA_BIAS_9DBM}, {P1_RF_TUNE_4C, 0x48},
-	} {
-		if err := d.registers.Write(rw.reg, rw.val); err != nil {
-			return err
-		}
-	}
-
-	// ── Step 5: Page0 RF configuration ───────────────────────────────────────
-	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
-		return err
-	}
-	// Crystal load capacitor from OTP.
-	if err := d.registers.Write(XTAL_CFG, (value4>>4)|0xC0); err != nil {
-		return err
-	}
-	if err := d.registers.Write(SYS_CFG, SYS_CFG_NORMAL); err != nil {
-		return err
-	}
-	// WMODE_CFG0: 2-byte CRC, XN297L mode, whitening enabled, big-endian. Matches SDK 0x89.
-	// Whitening is required: long zero runs in payload corrupt receiver CDR without it.
-	if err := d.registers.Write(WMODE_CFG0, CRC_2B|WHITEN_EN_BIT|ENDIAN_BIG); err != nil {
-		return err
-	}
-	// WMODE_CFG1: RX_GOON=1, FIFO_128=1, 5-byte addr (per ES_Tool generated init, 0xA3).
-	if err := d.registers.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|ADDR_5B); err != nil {
-		return err
-	}
-	if err := d.registers.Write(RXPLLEN_CFG, d.cfg.PayloadLen); err != nil {
-		return err
-	}
-	if err := d.registers.Write(TXPLLEN_CFG, d.cfg.PayloadLen); err != nil {
-		return err
-	}
-	// Mask only IRQ_MAX_RT (irrelevant with ARC=0). All error IRQs visible in RFIRQFLG.
-	if err := d.registers.Write(RFIRQ_CFG, IRQ_MAX_RT); err != nil {
-		return err
-	}
-	if err := d.registers.Write(TXAUTO_CFG, 0x00); err != nil {
-		return err
-	}
-	// TRXMODE_CFG: single TX, continuous RX, pre-sync enabled.
-	if err := d.registers.Write(TRXMODE_CFG, TRXMODE_CFG_NORMAL); err != nil {
-		return err
-	}
-	// Whitening seed = WHITEN_DEFAULT (SDK default). Both TX and RX must use same seed.
-	if err := d.registers.Write(WHITEN_CFG, WHITEN_DEFAULT); err != nil {
-		return err
-	}
-	// Enable PIPE0 explicitly (default=1, but be explicit after soft reset).
-	if err := d.registers.Write(RXPIPE_CFG, PIPE0_EN); err != nil {
-		return err
-	}
-
-	// Own address → PIPE0_RXADDR hardware RX filter (4 bytes, little-endian).
-	a := d.cfg.OwnAddr.Bytes()
-	for i, reg := range [4]uint8{
-		PIPE0_RXADDR0, PIPE0_RXADDR1,
-		PIPE0_RXADDR2, PIPE0_RXADDR3,
-	} {
-		if err := d.registers.Write(reg, a[i]); err != nil {
-			return err
-		}
-	}
-
-	// Calibration channel and RF analog tuning (ES_Tool V1.2.6, 16 MHz XN297L).
-	// Data rate register not written — chip defaults to 1 Mbps.
-	if err := d.registers.Write(RF_CHANNEL_CFG, RF_CH_CAL); err != nil {
-		return err
-	}
-	for _, rw := range []struct{ reg, val uint8 }{
-		{RF_PA_MODE_CFG, 0x3A}, {RF_PA_POUT_CFG, RF_PA_POUT_CFG_9DBM},
-		{RF_RSSI_TH1, 0xDD}, {RF_RSSI_TH2, 0xC9}, {RF_RSSI_TH3, 0xB7},
-		{RF_TX_ANA_TIME, 0x34}, {RF_RX_PLL_SETUP, 0x0D}, {RF_PA_RAMP_DLY, 0x20},
-	} {
-		if err := d.registers.Write(rw.reg, rw.val); err != nil {
-			return err
-		}
-	}
-
-	// ── Step 6: RF calibration (Page1) ───────────────────────────────────────
-	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
-		return err
-	}
-	// VCO calibration.
-	if err := d.registers.Write(P1_CAL_CTL, CAL_VCO); err != nil {
-		return err
-	}
-	if err := d.waitBit(P1_CAL_STATUS_VCO, CAL_VCO_DONE_BIT, 10000); err != nil {
-		println("VCO cal timeout")
-		return ErrCalibration
-	}
-	// Thermal calibration: mandatory 55 ms delay.
-	if err := d.registers.Write(P1_CAL_CTL, CAL_THERMAL); err != nil {
-		return err
-	}
-	time.Sleep(55 * time.Millisecond)
-	// Frequency calibration: requires RX mode.
-	if err := d.registers.Write(STATE_CFG, STATE_RX); err != nil {
-		return err
-	}
-	time.Sleep(200 * time.Microsecond)
-	if err := d.registers.Write(P1_CAL_CTL, CAL_FREQ); err != nil {
-		return err
-	}
-	if err := d.waitBit(P1_CAL_STATUS_DONE, CAL_DONE_BIT, 10000); err != nil {
-		println("freq cal timeout")
-		return ErrCalibration
-	}
-	// Phase calibration 1.
-	if err := d.registers.Write(P1_CAL_CTL, CAL_PHASE1); err != nil {
-		return err
-	}
-	if err := d.waitBit(P1_CAL_STATUS_PHASE1, CAL_PHASE1_DONE_BIT, 10000); err != nil {
-		println("phase1 cal timeout")
-		return ErrCalibration
-	}
-	// Phase calibration 2.
-	if err := d.registers.Write(P1_CAL_CTL, CAL_PHASE2); err != nil {
-		return err
-	}
-	if err := d.waitBit(P1_CAL_STATUS_DONE, CAL_DONE_BIT, 10000); err != nil {
-		println("phase2 cal timeout")
-		return ErrCalibration
-	}
-	if err := d.registers.Write(P1_CAL_CTL, CAL_STOP); err != nil {
-		return err
-	}
-	// Back to STB3 and Page0.
-	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
-		return err
-	}
-	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
-		return err
-	}
-
-	// Set operating channel and clear all IRQ flags.
-	if err := d.registers.Write(RF_CHANNEL_CFG, d.cfg.RFChannel); err != nil {
-		return err
-	}
-	if err := d.registers.Write(RFIRQFLG, IRQ_ALL); err != nil {
-		return err
-	}
-
-	// Set TX power to 9 dBm (Page1 registers not written during pre-config).
-	if err := d.registers.Write(PAGE_CFG, 0x01); err != nil {
-		return err
-	}
-	if err := d.registers.Write(P1_TX_PWR_AMP, 0x17); err != nil {
-		return err
-	}
-	if err := d.registers.Write(P1_TX_PWR_CTL, 0x88); err != nil {
-		return err
-	}
-	if err := d.registers.Write(PAGE_CFG, 0x00); err != nil {
-		return err
-	}
-
-	return d.registers.Write(STATE_CFG, STATE_RX)
-}
-
-// waitBit polls register reg until (val & mask) != 0 or maxIter exhausted.
-func (d *Driver) waitBit(reg, mask uint8, maxIter int) error {
-	for i := 0; i < maxIter; i++ {
+// pollBit reads reg until (val & bit) != 0, yielding the scheduler between reads.
+func (d *Driver) pollBit(reg, bit uint8, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
 		v, err := d.registers.Read(reg)
 		if err != nil {
 			return err
 		}
-		if v&mask != 0 {
+		if v&bit != 0 {
 			return nil
 		}
-		runtime.Gosched()
-	}
-	return ErrCalibration
-}
-
-// Send transmits payload to dst. Sets TXADDR to dst before TX so the receiving
-// device's PIPE0_RXADDR filter accepts the packet. Blocks for the transmission.
-// Re-enters RX mode before returning.
-func (d *Driver) Send(dst [4]byte, payload []byte) error {
-	if len(payload) > 128 {
-		return ErrPayloadTooLarge
-	}
-
-	// Enter STB3 before accessing FIFO and address registers (SDK TxStart).
-	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
-		return err
-	}
-
-	// Set TXADDR to destination (4 bytes, little-endian).
-	for i := uint8(0); i < 4; i++ {
-		if err := d.registers.Write(TXADDR0+i, dst[i]); err != nil {
-			return err
-		}
-	}
-
-	// Update TX payload length in case it differs from the init value.
-	if err := d.registers.Write(TXPLLEN_CFG, uint8(len(payload))); err != nil {
-		return err
-	}
-
-	// Write payload into TX FIFO.
-	if err := d.registers.WriteBuffer(TRX_FIFO, payload); err != nil {
-		return err
-	}
-
-	// Clear any stale IRQ flags, then enter TX.
-	if err := d.registers.Write(RFIRQFLG, IRQ_ALL); err != nil {
-		return err
-	}
-	if err := d.registers.Write(STATE_CFG, STATE_TX); err != nil {
-		return err
-	}
-
-	// Poll for TX-complete IRQ. With TxMode=TX_SINGLE, chip returns to STB3 after TX.
-	for i := 0; i < 5000; i++ {
-		flags, err := d.registers.Read(RFIRQFLG)
-		if err != nil {
-			_ = d.enterRX()
-			return err
-		}
-		if flags&IRQ_TX != 0 {
-			_ = d.registers.Write(RFIRQFLG, IRQ_ALL)
-			return d.enterRX()
+		if time.Now().After(deadline) {
+			return ErrTimeout
 		}
 		runtime.Gosched()
 	}
-
-	state, _ := d.registers.Read(STATE_CFG)
-	irqFlags, _ := d.registers.Read(RFIRQFLG)
-	println("TX timeout STATE_CFG:", state, "RFIRQFLG:", irqFlags)
-	_ = d.enterRX()
-	return ErrTimeout
 }
 
-// Receive checks whether a packet has been received. Non-blocking.
-// Fixed-length mode (EnDPL=0): length == PayloadLen == len(buf).
-// RX_GOON=1 means the chip stays in RX automatically after each received packet.
-func (d *Driver) Receive(buf []byte) (n int, ok bool) {
-	flags, err := d.registers.Read(RFIRQFLG)
-	if err != nil || flags&IRQ_RX == 0 {
-		return 0, false
-	}
-	println("RX IRQ fired, flags:", flags)
-	if err := d.registers.ReadBuffer(TRX_FIFO, buf); err != nil {
-		_ = d.registers.Write(RFIRQFLG, IRQ_ALL)
-		return 0, false
-	}
-	_ = d.registers.Write(RFIRQFLG, IRQ_RX)
-	return len(buf), true
-}
-
-// DumpState prints key register values to RTT for debugging.
-// Always operates on page0 (restores page0 after reading).
-func (d *Driver) DumpState() {
-	d.registers.Write(PAGE_CFG, 0x01)
-	pwrAmp, _ := d.registers.Read(P1_TX_PWR_AMP)
-	pwrCtl, _ := d.registers.Read(P1_TX_PWR_CTL)
-	paBias, _ := d.registers.Read(P1_PA_BIAS)
-	d.registers.Write(PAGE_CFG, 0x00)
-	state, _ := d.registers.Read(STATE_CFG)
-	irq, _ := d.registers.Read(RFIRQFLG)
-	irqmask, _ := d.registers.Read(RFIRQ_CFG)
-	wmode0, _ := d.registers.Read(WMODE_CFG0)
-	wmode1, _ := d.registers.Read(WMODE_CFG1)
-	whiten, _ := d.registers.Read(WHITEN_CFG)
-	pktExt, _ := d.registers.Read(PKT_EXT_CFG)
-	trxmode, _ := d.registers.Read(TRXMODE_CFG)
-	txauto, _ := d.registers.Read(TXAUTO_CFG)
-	ch, _ := d.registers.Read(RF_CHANNEL_CFG)
-	dr, _ := d.registers.Read(RF_DATARATE_CFG)
-	rxlen, _ := d.registers.Read(RXPLLEN_CFG)
-	a0, _ := d.registers.Read(PIPE0_RXADDR0)
-	a1, _ := d.registers.Read(PIPE0_RXADDR1)
-	a2, _ := d.registers.Read(PIPE0_RXADDR2)
-	a3, _ := d.registers.Read(PIPE0_RXADDR3)
-	t0, _ := d.registers.Read(TXADDR0)
-	t1, _ := d.registers.Read(TXADDR1)
-	t2, _ := d.registers.Read(TXADDR2)
-	t3, _ := d.registers.Read(TXADDR3)
-	rssiL, _ := d.registers.Read(RT_RSSI_L)
-	rssiH, _ := d.registers.Read(RT_RSSI_H)
-	println("--- STATE_CFG:", state)
-	println("  OPERATE_MODE:", state&0x07, " (4=STB3 5=TX 6=RX)")
-	println("--- RFIRQFLG:", irq, " RFIRQ_CFG(mask):", irqmask)
-	println("  TX_IRQ:", (irq>>7)&1, " TX_MAX_RT:", (irq>>6)&1)
-	println("  RX_ADDR_ERR:", (irq>>5)&1, " RX_CRC_ERR:", (irq>>4)&1)
-	println("  RX_LEN_ERR:", (irq>>3)&1, " RX_PID_ERR:", (irq>>2)&1)
-	println("  RX_TIMEOUT:", (irq>>1)&1, " RX_IRQ:", irq&1)
-	println("--- WMODE_CFG0:", wmode0)
-	println("  CRC_MODE:", (wmode0>>6)&3, " (0=off 1=1B 2=2B 3=3B)")
-	println("  WORK_MODE:", (wmode0>>4)&3, " (0=XN297L 3=BLE)")
-	println("  WHITEN_EN:", (wmode0>>3)&1, " CRC_SKIP_ADDR:", (wmode0>>2)&1)
-	println("  TX_NOACK:", (wmode0>>1)&1, " ENDIAN:", wmode0&1, " (0=LE/BLE 1=BE/XN297L)")
-	println("--- WMODE_CFG1:", wmode1)
-	println("  RX_GOON:", (wmode1>>7)&1, " PRI_EXIT_RX:", (wmode1>>6)&1)
-	println("  FIFO_128:", (wmode1>>5)&1, " DPY_EN:", (wmode1>>4)&1)
-	println("  ENHANCE:", (wmode1>>3)&1, " ADDR_LEN:", wmode1&3, " (0=2B 1=3B 2=4B 3=5B)")
-	println("--- RF")
-	println("  CH:", ch, " (freq=", 2400+uint16(ch), "MHz)")
-	println("  DATARATE[5:4]:", (dr>>4)&3, " (0=1M 1=2M 3=250k)  raw:", dr)
-	println("  RXLEN:", rxlen)
-	println("  WHITEN_CFG:", whiten, " (seed=[6:0], skip_addr=[7])")
-	println("  PKT_EXT_CFG:", pktExt, " TRXMODE_CFG:", trxmode, " TXAUTO_CFG:", txauto)
-	println("  RXADDR:", a0, a1, a2, a3)
-	println("  TXADDR:", t0, t1, t2, t3)
-	println("  RT_RSSI_L:", rssiL, " RT_RSSI_H:", rssiH)
-	println("--- P1 PA (9dBm: PWR_AMP=23 PWR_CTL=136 PA_BIAS=176)")
-	println("  P1_TX_PWR_AMP:", pwrAmp, " P1_TX_PWR_CTL:", pwrCtl, " P1_PA_BIAS:", paBias)
-}
-
-// enterRX enters RX from STB3. Used after TX completes.
 func (d *Driver) enterRX() error {
 	if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
 		return err
@@ -458,5 +72,458 @@ func (d *Driver) enterRX() error {
 	if err := d.registers.Write(RFIRQFLG, IRQ_ALL); err != nil {
 		return err
 	}
-	return d.registers.Write(STATE_CFG, STATE_RX)
+	if err := d.registers.Write(STATE_CFG, STATE_RX); err != nil {
+		return err
+	}
+	d.inRX = true
+	return nil
+}
+
+// ensureSTB3 transitions to STB3 if currently in RX mode.
+func (d *Driver) ensureSTB3() error {
+	if d.inRX {
+		if err := d.registers.Write(STATE_CFG, STATE_STB3); err != nil {
+			return err
+		}
+		d.inRX = false
+	}
+	return nil
+}
+
+// writeAddr writes a 5-byte address as individual register writes starting at startReg.
+func (d *Driver) writeAddr(startReg uint8, addr Address) error {
+	for i, b := range addr {
+		if err := d.registers.Write(startReg+uint8(i), b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// InitXN297L initialises the chip for XN297L Normal mode (fixed payload, no auto-ACK).
+// Crystal: 16 MHz. TX power: 9 dBm. Caller must call SetChannel after this returns.
+func (d *Driver) InitXN297L(cfg ConfigXN297L) error {
+	d.payloadLen = cfg.PayloadLen
+	d.rxPipeMask = PIPE0_EN
+	d.inRX = false
+	r := d.registers
+
+	// Step 1: ensure Page 0.
+	if err := r.Write(PAGE_CFG, 0x00); err != nil {
+		return err
+	}
+
+	// Step 2: enter STB3 with soft reset to bring all Page 0 registers to defaults.
+	if err := r.Write(STATE_CFG, STATE_STB3_INIT); err != nil {
+		return err
+	}
+	time.Sleep(time.Millisecond)
+	if err := r.Write(STATE_CFG, STATE_STB3); err != nil {
+		return err
+	}
+	time.Sleep(time.Millisecond)
+	if err := r.Write(SYS_CFG, SYS_CFG_RESET); err != nil {
+		return err
+	}
+	time.Sleep(time.Millisecond)
+	if err := r.Write(SYS_CFG, SYS_CFG_RELEASE); err != nil {
+		return err
+	}
+	// Required for 16 MHz crystal before any Page 1 access.
+	if err := r.Write(RF_OSC_CFG, RF_OSC_CFG_16MHZ); err != nil {
+		return err
+	}
+
+	// Step 3: read eFuse factory calibration from Page 1.
+	if err := r.Write(PAGE_CFG, 0x01); err != nil {
+		return err
+	}
+	if err := r.Write(P1_OTP_CTL, OTP_CTL_START); err != nil {
+		return err
+	}
+	if err := r.Write(P1_OTP_DATA, OTP_READ_WORD2); err != nil {
+		return err
+	}
+	value2, err := r.Read(P1_OTP_DATA)
+	if err != nil {
+		return err
+	}
+	if err := r.Write(P1_OTP_DATA, OTP_READ_WORD4); err != nil {
+		return err
+	}
+	value4, err := r.Read(P1_OTP_DATA)
+	if err != nil {
+		return err
+	}
+	if err := r.Write(P1_OTP_CTL, OTP_CTL_STOP); err != nil {
+		return err
+	}
+	if value2&OTP_VALID_MASK != OTP_VALID_VAL {
+		return ErrNoDevice
+	}
+	// Apply eFuse-derived trim values while still on Page 1.
+	calBit := uint8(0)
+	if value2&OTP_CAL_MASK == 0 {
+		calBit = 1
+	}
+	if err := r.Write(P1_PA_TUNE_47, 0x83|((value2>>1)&0x70)); err != nil {
+		return err
+	}
+	if err := r.Write(P1_PA_TUNE_43, 0x10|calBit); err != nil {
+		return err
+	}
+
+	// Step 4: Page 1 pre-configuration — XN297L Normal, 16 MHz crystal.
+	if err := r.Write(P1_RF_TUNE_27, 0xAA); err != nil {
+		return err
+	}
+	if err := r.Write(P1_RF_TUNE_32, 0x1E); err != nil {
+		return err
+	}
+	if err := r.Write(P1_RF_TUNE_33, 0x19); err != nil {
+		return err
+	}
+	if err := r.Write(P1_RF_TUNE_37, 0x15); err != nil {
+		return err
+	}
+	p1Tune3A := uint8(0x14)
+	if cfg.BitRate == BitRate250Kbps {
+		p1Tune3A |= P1_RF_TUNE_3A_FLTRTUNE_250K
+	}
+	if err := r.Write(P1_RF_TUNE_3A, p1Tune3A); err != nil {
+		return err
+	}
+	if err := r.Write(P1_RF_TUNE_3E, 0xF1); err != nil {
+		return err
+	}
+	if err := r.Write(P1_RF_TUNE_3F, 0xD2); err != nil { // 16 MHz only
+		return err
+	}
+	if err := r.Write(P1_RF_TUNE_40, 0x20); err != nil { // 16 MHz only
+		return err
+	}
+	if err := r.Write(P1_VCO_PA_CTL, P1_VCO_PA_CTL_16MHZ); err != nil {
+		return err
+	}
+	if err := r.Write(P1_PA_BIAS, PA_BIAS_9DBM); err != nil {
+		return err
+	}
+	switch cfg.BitRate {
+	case BitRate2Mbps:
+		if err := r.Write(P1_TX_DAC, P1_TX_DAC_GC_BIT|P1_TX_DAC_ISEL_4); err != nil {
+			return err
+		}
+		if err := r.Write(P1_RF_TUNE_4C, 0x48|P1_RF_TUNE_4C_TX_DAC_BW); err != nil {
+			return err
+		}
+	case BitRate250Kbps:
+		if err := r.Write(P1_TX_DAC, P1_TX_DAC_ISEL_4); err != nil {
+			return err
+		}
+		if err := r.Write(P1_RF_TUNE_4C, 0x48); err != nil {
+			return err
+		}
+	default: // 1 Mbps
+		if err := r.Write(P1_RF_TUNE_4C, 0x48); err != nil {
+			return err
+		}
+	}
+
+	// Step 5: Page 0 configuration.
+	if err := r.Write(PAGE_CFG, 0x00); err != nil {
+		return err
+	}
+	if err := r.Write(XTAL_CFG, (value4>>4)|0xC0); err != nil {
+		return err
+	}
+	if err := r.Write(LP_CFG, 0x0D); err != nil { // IRQ routed onto SDA (I2C mode)
+		return err
+	}
+	// WMODE_CFG0 = 0x89: 2-byte CRC | XN297L mode | whitening | MSB-first
+	if err := r.Write(WMODE_CFG0, CRC_2B|WORK_MODE_XN297L|WHITEN_EN_BIT|ENDIAN_BIG); err != nil {
+		return err
+	}
+	// WMODE_CFG1 = 0xA3: RX_GOON | 128-byte FIFO | Normal (no ENHANCE) | 5-byte addr
+	if err := r.Write(WMODE_CFG1, RX_GOON_BIT|FIFO_128_BIT|ADDR_5B); err != nil {
+		return err
+	}
+	if err := r.Write(RXPLLEN_CFG, cfg.PayloadLen); err != nil {
+		return err
+	}
+	if err := r.Write(TXPLLEN_CFG, cfg.PayloadLen); err != nil {
+		return err
+	}
+	if err := r.Write(RFIRQ_CFG, 0x7F); err != nil { // unmask TX_IRQ only; RX flag still set in RFIRQFLG
+		return err
+	}
+	if err := r.Write(TXAUTO_CFG, 0x00); err != nil { // no auto-retransmit
+		return err
+	}
+	if err := r.Write(TRXMODE_CFG, TRXMODE_CFG_NORMAL); err != nil { // single TX, continuous RX
+		return err
+	}
+	if err := r.Write(WHITEN_CFG, WHITEN_DEFAULT); err != nil {
+		return err
+	}
+	if err := r.Write(RF_CHANNEL_CFG, RF_CH_CAL); err != nil { // calibration freq; replaced after Step 6
+		return err
+	}
+	// RF_DATARATE_CFG not written — chip defaults to 1 Mbps (ES_Tool omits it on 16 MHz).
+	// RF_PA_MODE_CFG: 16 MHz values (EN_RXADCCLK=0, unlike 32 MHz).
+	switch cfg.BitRate {
+	case BitRate2Mbps:
+		if err := r.Write(RF_PA_MODE_CFG, 0x36); err != nil { // TXPA_MODE=11, FSYNVCO_TXCTK=1, RXFLTR=2
+			return err
+		}
+	case BitRate250Kbps:
+		if err := r.Write(RF_PA_MODE_CFG, 0x03); err != nil { // TXPA_MODE=00, RXFLTR=3
+			return err
+		}
+	default: // 1 Mbps
+		if err := r.Write(RF_PA_MODE_CFG, 0x32); err != nil { // TXPA_MODE=11, RXFLTR=2
+			return err
+		}
+	}
+	if err := r.Write(RF_PA_POUT_CFG, RF_PA_POUT_CFG_9DBM); err != nil {
+		return err
+	}
+	if err := r.Write(RF_RSSI_TH1, 0xDD); err != nil {
+		return err
+	}
+	if err := r.Write(RF_RSSI_TH2, 0xC9); err != nil {
+		return err
+	}
+	if err := r.Write(RF_RSSI_TH3, 0xB7); err != nil {
+		return err
+	}
+	// RF_RSSI_FIX0–3 (0x5A–0x5D) and RF_GAIN_WORD0–3 (0x5E–0x61) are NOT written
+	// on 16 MHz — ES_Tool omits them entirely for this crystal frequency.
+	if err := r.Write(RF_TX_ANA_TIME, 0x64); err != nil { // 16 MHz value
+		return err
+	}
+	if err := r.Write(RF_RX_PLL_SETUP, 0x19); err != nil { // 16 MHz value
+		return err
+	}
+	if err := r.Write(RF_PA_RAMP_DLY, 0x40); err != nil { // 16 MHz value
+		return err
+	}
+
+	// Step 6: RF calibration — 5 phases in strict order on Page 1.
+	if err := r.Write(PAGE_CFG, 0x01); err != nil {
+		return err
+	}
+
+	// Phase 1: VCO calibration.
+	if err := r.Write(P1_CAL_CTL, CAL_VCO); err != nil {
+		return err
+	}
+	if err := d.pollBit(P1_CAL_STATUS_VCO, CAL_VCO_DONE_BIT, 5*time.Millisecond); err != nil {
+		return ErrCalibration
+	}
+
+	// Phase 2: thermal (2-point) calibration — mandatory 55 ms, no status register.
+	if err := r.Write(P1_CAL_CTL, CAL_THERMAL); err != nil {
+		return err
+	}
+	time.Sleep(55 * time.Millisecond)
+
+	// Phase 3: frequency offset calibration.
+	// STATE_CFG is a shared register, writable from Page 1.
+	// The chip must be in RX mode and the RFPLL must lock (≥200 µs) before triggering.
+	if err := r.Write(STATE_CFG, STATE_RX); err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Microsecond)
+	if err := r.Write(P1_CAL_CTL, CAL_FREQ); err != nil {
+		return err
+	}
+	if err := d.pollBit(P1_CAL_STATUS_DONE, CAL_DONE_BIT, 5*time.Millisecond); err != nil {
+		return ErrCalibration
+	}
+
+	// Phase 4: BW / filter calibration.
+	if err := r.Write(P1_CAL_CTL, CAL_PHASE1); err != nil {
+		return err
+	}
+	if err := d.pollBit(P1_CAL_STATUS_PHASE1, CAL_PHASE1_DONE_BIT, 5*time.Millisecond); err != nil {
+		return ErrCalibration
+	}
+
+	// Phase 5: DC offset calibration.
+	if err := r.Write(P1_CAL_CTL, CAL_PHASE2); err != nil {
+		return err
+	}
+	if err := d.pollBit(P1_CAL_STATUS_DONE, CAL_DONE_BIT, 5*time.Millisecond); err != nil {
+		return ErrCalibration
+	}
+
+	// Wrap up: stop FSM, return to STB3 on Page 0, clear all IRQ flags.
+	if err := r.Write(P1_CAL_CTL, CAL_STOP); err != nil {
+		return err
+	}
+	if err := r.Write(STATE_CFG, STATE_STB3); err != nil {
+		return err
+	}
+	if err := r.Write(PAGE_CFG, 0x00); err != nil {
+		return err
+	}
+	return r.Write(RFIRQFLG, IRQ_ALL)
+	// RF_CHANNEL_CFG is still RF_CH_CAL; caller must call SetChannel before use.
+}
+
+// SetChannel sets the RF channel. ch = frequency_MHz − 2400 (valid 0–83).
+// Can be called at any time; temporarily leaves RX mode if active.
+func (d *Driver) SetChannel(channel uint8) error {
+	wasRX := d.inRX
+	if err := d.ensureSTB3(); err != nil {
+		return err
+	}
+	if err := d.registers.Write(RF_CHANNEL_CFG, channel); err != nil {
+		return err
+	}
+	if wasRX {
+		return d.enterRX()
+	}
+	return nil
+}
+
+// EnableRxAddress sets the receive address for pipe pipeIndex (0–5) and enables the pipe.
+// Pipes 0 and 1 use the full 5-byte addr. Pipes 2–5 use only addr[0] (LSB);
+// their upper 4 bytes are shared with pipe 1 and must be set via pipe 1 first.
+func (d *Driver) EnableRxAddress(pipeIndex uint8, addr Address) error {
+	if pipeIndex > 5 {
+		return errors.New("invalid pipe index")
+	}
+	wasRX := d.inRX
+	if err := d.ensureSTB3(); err != nil {
+		return err
+	}
+	switch pipeIndex {
+	case 0:
+		if err := d.writeAddr(PIPE0_RXADDR0, addr); err != nil {
+			return err
+		}
+	case 1:
+		if err := d.writeAddr(PIPE1_RXADDR0, addr); err != nil {
+			return err
+		}
+	default:
+		// Pipes 2–5: only the LSB (addr[0]) is individually configurable.
+		lsbReg := PIPE2_RXADDR0 + pipeIndex - 2
+		if err := d.registers.Write(lsbReg, addr[0]); err != nil {
+			return err
+		}
+	}
+	d.rxPipeMask |= 1 << pipeIndex
+	if err := d.registers.Write(RXPIPE_CFG, d.rxPipeMask); err != nil {
+		return err
+	}
+	if wasRX {
+		return d.enterRX()
+	}
+	return nil
+}
+
+// DisableRxAddress disables the given pipe without changing its stored address.
+func (d *Driver) DisableRxAddress(pipeIndex uint8) error {
+	if pipeIndex > 5 {
+		return errors.New("invalid pipe index")
+	}
+	wasRX := d.inRX
+	if err := d.ensureSTB3(); err != nil {
+		return err
+	}
+	d.rxPipeMask &^= 1 << pipeIndex
+	if err := d.registers.Write(RXPIPE_CFG, d.rxPipeMask); err != nil {
+		return err
+	}
+	if wasRX {
+		return d.enterRX()
+	}
+	return nil
+}
+
+// Send transmits payload to dst. len(payload) must not exceed PayloadLen from config.
+// Blocks until TX complete or ~10 ms timeout, then re-enters RX mode.
+func (d *Driver) Send(dst Address, payload []byte) error {
+	if uint8(len(payload)) > d.payloadLen {
+		return ErrPayloadTooLarge
+	}
+	if err := d.ensureSTB3(); err != nil {
+		return err
+	}
+	if err := d.writeAddr(TXADDR0, dst); err != nil {
+		return err
+	}
+	if err := d.registers.Write(TXPLLEN_CFG, uint8(len(payload))); err != nil {
+		return err
+	}
+	if err := d.registers.WriteBuffer(TRX_FIFO, payload); err != nil {
+		return err
+	}
+	if err := d.registers.Write(RFIRQFLG, IRQ_ALL); err != nil {
+		return err
+	}
+	if err := d.registers.Write(STATE_CFG, STATE_TX); err != nil {
+		return err
+	}
+
+	txErr := d.pollBit(RFIRQFLG, IRQ_TX, 10*time.Millisecond)
+
+	// Always return to STB3 then RX, regardless of TX outcome.
+	_ = d.registers.Write(STATE_CFG, STATE_STB3)
+	d.inRX = false
+	_ = d.enterRX()
+
+	return txErr
+}
+
+// Receive checks for a received packet without blocking.
+// Returns (n, true) if a packet was available and copied into buf, (0, false) otherwise.
+func (d *Driver) Receive(buf []byte) (n int, ok bool) {
+	if !d.inRX {
+		if err := d.enterRX(); err != nil {
+			return 0, false
+		}
+	}
+
+	flags, err := d.registers.Read(RFIRQFLG)
+	if err != nil || flags&IRQ_RX == 0 {
+		return 0, false
+	}
+
+	length, err := d.registers.Read(STATUS3)
+	if err != nil {
+		return 0, false
+	}
+	if int(length) > len(buf) {
+		length = uint8(len(buf))
+	}
+	if err := d.registers.ReadBuffer(TRX_FIFO, buf[:length]); err != nil {
+		return 0, false
+	}
+	_ = d.registers.Write(RFIRQFLG, IRQ_ALL)
+	return int(length), true
+}
+
+// DumpState prints key register values over RTT for debugging.
+func (d *Driver) DumpState() {
+	dump := func(name string, reg uint8) {
+		v, err := d.registers.Read(reg)
+		if err != nil {
+			println(name, "ERR")
+		} else {
+			println(name, v)
+		}
+	}
+	dump("STATE_CFG ", STATE_CFG)
+	dump("WMODE_CFG0", WMODE_CFG0)
+	dump("WMODE_CFG1", WMODE_CFG1)
+	dump("RF_CHANNEL", RF_CHANNEL_CFG)
+	dump("RFIRQFLG  ", RFIRQFLG)
+	dump("RFIRQ_CFG ", RFIRQ_CFG)
+	dump("STATUS0   ", STATUS0)
+	dump("STATUS3   ", STATUS3)
+	dump("RXPIPE_CFG", RXPIPE_CFG)
+	dump("DATARATE  ", RF_DATARATE_CFG)
 }

@@ -19,9 +19,9 @@ const (
 
 const payloadLen = 4
 
-const (
-	nodeAddr pan211x.Address = 0xAA556996
-	hubAddr  pan211x.Address = 0x55AA9669
+var (
+	nodeAddr pan211x.Address = [5]byte{0xAA, 0x55, 0x69, 0x96, 0x00}
+	hubAddr  pan211x.Address = [5]byte{0x55, 0xAA, 0x96, 0x69, 0x00}
 )
 
 func main() {
@@ -39,25 +39,22 @@ func main() {
 	spiMaster := spi.NewMaster(pinSpiSck, pinSpiData)
 	regs := pan211x.NewRegistersSPI(spiMaster, pinSpiCsn)
 
+	pan := pan211x.NewDriver(regs)
+
+	must(pan.InitXN297L(pan211x.ConfigXN297L{BitRate: pan211x.BitRate1Mbps, PayloadLen: payloadLen}))
+
 	isHub := !pinRoleHub.Get()
+
+	must(pan.SetChannel(10))
 
 	addr := nodeAddr
 	if isHub {
 		addr = hubAddr
 	}
+	must(pan.EnableRxAddress(0, addr))
 
-	pan := pan211x.NewDriver(regs, pan211x.Config{
-		OwnAddr:    addr,
-		RFChannel:  10,
-		PayloadLen: payloadLen,
-	})
-
-	if err := pan.Init(); err != nil {
-		println("init error:", err.Error())
-		for {
-		}
-	}
 	println("Radio OK")
+
 	pan.DumpState()
 
 	if isHub {
@@ -83,7 +80,6 @@ func putU32le(b []byte, v uint32) {
 func runHub(pan *pan211x.Driver) {
 	var counter uint32
 	var buf [payloadLen]byte
-	dst := nodeAddr.Bytes()
 
 	for {
 		counter++
@@ -92,7 +88,7 @@ func runHub(pan *pan211x.Driver) {
 			pan.DumpState()
 		}
 
-		if err := pan.Send(dst, buf[:]); err != nil {
+		if err := pan.Send(nodeAddr, buf[:]); err != nil {
 			println("TX err:", err.Error())
 			time.Sleep(500 * time.Millisecond)
 			continue
@@ -120,7 +116,6 @@ func runHub(pan *pan211x.Driver) {
 
 func runNode(pan *pan211x.Driver) {
 	var buf [payloadLen]byte
-	dst := hubAddr.Bytes()
 	var missCount uint32
 
 	for {
@@ -139,10 +134,16 @@ func runNode(pan *pan211x.Driver) {
 		println("RX:", v)
 		pinLedGreen.Set(!pinLedGreen.Get())
 
-		if err := pan.Send(dst, buf[:]); err != nil {
+		if err := pan.Send(hubAddr, buf[:]); err != nil {
 			println("TX err:", err.Error())
 		}
 
 		//pan.DumpState()
+	}
+}
+
+func must(err error) {
+	if err != nil {
+		panic(err)
 	}
 }
