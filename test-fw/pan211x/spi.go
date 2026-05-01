@@ -1,5 +1,7 @@
 package pan211x
 
+import "machine"
+
 // SPIBus is the 3-wire (half-duplex) SPI interface required by RegistersSPI.
 // Writes and reads are separated because the DATA pin is bidirectional:
 // the PAN211x takes over DATA on the 8th SCK falling edge of a read command.
@@ -12,23 +14,18 @@ type SPIBus interface {
 	ReadByte() (byte, error)
 }
 
-// SPIPin is a GPIO output used as chip select.
-type SPIPin interface {
-	High()
-	Low()
-}
-
 // RegistersSPI implements the Registers interface over 3-wire SPI.
 // Protocol per SDK pan211.c: access byte = reg<<1 (read) or reg<<1|1 (write),
 // followed by data bytes. All bytes for one operation share a single CS assertion.
 type RegistersSPI struct {
 	spi SPIBus
-	cs  SPIPin
+	cs  machine.Pin
 }
 
 // NewRegistersSPI creates a RegistersSPI backed by the given SPI bus and chip select pin.
-func NewRegistersSPI(spi SPIBus, cs SPIPin) *RegistersSPI {
+func NewRegistersSPI(spi SPIBus, cs machine.Pin) *RegistersSPI {
 	cs.High()
+	cs.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	return &RegistersSPI{spi: spi, cs: cs}
 }
 
