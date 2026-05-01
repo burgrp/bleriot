@@ -8,7 +8,6 @@ const PAN211xAddressRead = 0x71<<1 | 1
 type MasterI2C interface {
 	Start()
 	Stop()
-
 	Read(last bool) (uint8, error)
 	Write(b uint8) error
 }

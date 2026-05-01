@@ -34,9 +34,18 @@ type Registers interface {
 	ReadBuffer(reg uint8, buf []byte) error
 }
 
+type SerialInterface uint8
+
+const (
+	SerialInterfaceSPI3W SerialInterface = 0
+	SerialInterfaceSPI4W SerialInterface = 1
+	SerialInterfaceI2C   SerialInterface = 2
+)
+
 type ConfigXN297L struct {
-	BitRate    BitRate
-	PayloadLen uint8
+	BitRate         BitRate
+	PayloadLen      uint8
+	SerialInterface SerialInterface
 }
 
 type Driver struct {
@@ -119,9 +128,11 @@ func (d *Driver) InitXN297L(cfg ConfigXN297L) error {
 	}
 	// Soft reset clears SPI_CFG to its default, which has REG_SPI3_REN=0 (reads disabled).
 	// Must re-enable 3-wire SPI reads before any register read operation.
-	// if err := r.Write(SPI_CFG, SPI_CFG_INIT); err != nil {
-	// 	return err
-	// }
+	if cfg.SerialInterface == SerialInterfaceSPI3W {
+		if err := r.Write(SPI_CFG, SPI_CFG_INIT_3W); err != nil {
+			return err
+		}
+	}
 	// Required for 16 MHz crystal before any Page 1 access.
 	if err := r.Write(RF_OSC_CFG, RF_OSC_CFG_16MHZ); err != nil {
 		return err
