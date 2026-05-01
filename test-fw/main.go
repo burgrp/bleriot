@@ -2,9 +2,10 @@ package main
 
 import (
 	"machine"
-	"test-fw/i2c"
-	"test-fw/pan211x"
 	"time"
+
+	"github.com/burgrp/tinygo-drivers/bb/spi"
+	"github.com/burgrp/tinygo-drivers/pan211x"
 )
 
 const (
@@ -20,8 +21,8 @@ const (
 const payloadLen = 4
 
 var (
-	nodeAddr pan211x.Address = [5]byte{0xAA, 0x55, 0x69, 0x96, 0x00}
-	hubAddr  pan211x.Address = [5]byte{0x55, 0xAA, 0x96, 0x69, 0x00}
+	nodeAddr pan211x.AddressXN297L = [5]byte{0xAA, 0x55, 0x69, 0x96, 0x00}
+	hubAddr  pan211x.AddressXN297L = [5]byte{0x55, 0xAA, 0x96, 0x69, 0x00}
 )
 
 func main() {
@@ -34,13 +35,17 @@ func main() {
 	pinLedRed.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	pinRoleHub.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
 
-	// pan := pan211x.NewDriver(pan211x.NewRegistersSPI(spi.NewMaster(pinSpiSck, pinSpiData), pinSpiCsn))
-	// si := pan211x.SerialInterfaceSPI3W
+	pan := pan211x.NewDriverXN297L(pan211x.NewRegistersSPI(spi.NewMaster(pinSpiSck, pinSpiData), pinSpiCsn))
+	si := pan211x.SerialInterfaceSPI3W
 
-	pan := pan211x.NewDriver(pan211x.NewRegistersI2C(i2c.NewMaster(pinSpiSck, pinSpiData)))
-	si := pan211x.SerialInterfaceI2C
+	// pan := pan211x.NewDriver(pan211x.NewRegistersI2C(i2c.NewMaster(pinSpiSck, pinSpiData)))
+	// si := pan211x.SerialInterfaceI2C
 
-	must(pan.InitXN297L(pan211x.ConfigXN297L{BitRate: pan211x.BitRate1Mbps, PayloadLen: payloadLen, SerialInterface: si}))
+	must(pan.InitXN297L(pan211x.ConfigXN297L{
+		BitRate:         pan211x.BitRate1Mbps,
+		PayloadLen:      payloadLen,
+		SerialInterface: si,
+	}))
 
 	isHub := !pinRoleHub.Get()
 
@@ -54,7 +59,7 @@ func main() {
 
 	println("Radio OK")
 
-	pan.DumpState()
+	//pan.DumpState()
 
 	if isHub {
 		println("Role: HUB")
@@ -76,7 +81,7 @@ func putU32le(b []byte, v uint32) {
 	b[3] = byte(v >> 24)
 }
 
-func runHub(pan *pan211x.Driver) {
+func runHub(pan *pan211x.DriverXN297L) {
 	var counter uint32
 	var buf [payloadLen]byte
 
@@ -84,7 +89,7 @@ func runHub(pan *pan211x.Driver) {
 		counter++
 		putU32le(buf[:], counter)
 		if counter%10 == 1 {
-			pan.DumpState()
+			//pan.DumpState()
 		}
 
 		if err := pan.Send(nodeAddr, buf[:]); err != nil {
@@ -113,7 +118,7 @@ func runHub(pan *pan211x.Driver) {
 	}
 }
 
-func runNode(pan *pan211x.Driver) {
+func runNode(pan *pan211x.DriverXN297L) {
 	var buf [payloadLen]byte
 	var missCount uint32
 
@@ -123,8 +128,8 @@ func runNode(pan *pan211x.Driver) {
 			missCount++
 			if missCount%10000 == 0 {
 				pinLedRed.Set(!pinLedRed.Get())
-				println("----------------------------------------")
-				pan.DumpState()
+				// println("----------------------------------------")
+				// pan.DumpState()
 			}
 			continue
 		}
