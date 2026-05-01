@@ -1,6 +1,11 @@
 package i2c
 
-import "machine"
+import (
+	"errors"
+	"machine"
+)
+
+var ErrNoAck = errors.New("no ACK received")
 
 // MasterI2C is a bitbang I2C master with external pull-ups on SCL and SDA.
 // Open-drain is emulated: PinOutput+Low to drive 0, PinInputFloating to release.
