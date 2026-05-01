@@ -2,8 +2,8 @@ package main
 
 import (
 	"machine"
+	"test-fw/i2c"
 	"test-fw/pan211x"
-	"test-fw/spi"
 	"time"
 )
 
@@ -34,10 +34,9 @@ func main() {
 	pinLedRed.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	pinRoleHub.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
 
-	pinSpiCsn.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	pinSpiCsn.High()
-	spiMaster := spi.NewMaster(pinSpiSck, pinSpiData)
-	regs := pan211x.NewRegistersSPI(spiMaster, pinSpiCsn)
+	// regs := pan211x.NewRegistersSPI(spi.NewMaster(pinSpiSck, pinSpiData), pinSpiCsn)
+
+	regs := pan211x.NewRegistersI2C(i2c.NewMaster(pinSpiSck, pinSpiData))
 
 	pan := pan211x.NewDriver(regs)
 
