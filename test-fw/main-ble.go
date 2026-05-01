@@ -44,7 +44,7 @@ func main() {
 	must(pan.Init(pan211x.ConfigBLELongRange{
 		PayloadLen:      payloadLen,
 		SerialInterface: si,
-		SpreadFactor:    pan211x.SpreadFactorS8,
+		SpreadFactor:    pan211x.SpreadFactorS2,
 	}))
 
 	isHub := !pinRoleHub.Get()
