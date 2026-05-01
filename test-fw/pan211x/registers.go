@@ -677,11 +677,11 @@ const (
 
 const (
 	PIPE0_EN = uint8(0x01)
-	PIPE1_EN         = uint8(0x02)
-	PIPE2_EN         = uint8(0x04)
-	PIPE3_EN         = uint8(0x08)
-	PIPE4_EN         = uint8(0x10)
-	PIPE5_EN         = uint8(0x20)
+	PIPE1_EN = uint8(0x02)
+	PIPE2_EN = uint8(0x04)
+	PIPE3_EN = uint8(0x08)
+	PIPE4_EN = uint8(0x10)
+	PIPE5_EN = uint8(0x20)
 )
 
 // ── TRXMODE_CFG bit constants ─────────────────────────────────────────────────
@@ -787,7 +787,6 @@ const (
 
 	// TXPA_LDO_SEL field (bits [3:0]): TX PA LDO voltage select.
 	RF_PA_POUT_CFG_LDO_SEL_MASK = uint8(0x0F)
-
 )
 
 // ── RF_AGC_GAIN_CFG (0x4E) bit constants ─────────────────────────────────────
@@ -940,9 +939,9 @@ const (
 const (
 	// RXFLTRTUNE_OFST field (bits [7:6]): RX filter tuning offset.
 	// 0 = 1 Mbps / 2 Mbps; 1 = 250 kbps.
-	P1_RF_TUNE_3A_FLTRTUNE_MASK  = uint8(0xC0)
-	P1_RF_TUNE_3A_FLTRTUNE_1MHZ  = uint8(0x00) // 1Mbps and 2Mbps
-	P1_RF_TUNE_3A_FLTRTUNE_250K  = uint8(0x40) // 250kbps
+	P1_RF_TUNE_3A_FLTRTUNE_MASK = uint8(0xC0)
+	P1_RF_TUNE_3A_FLTRTUNE_1MHZ = uint8(0x00) // 1Mbps and 2Mbps
+	P1_RF_TUNE_3A_FLTRTUNE_250K = uint8(0x40) // 250kbps
 )
 
 // ── P1_VCO_PA_CTL (0x41) preset values ───────────────────────────────────────

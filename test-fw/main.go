@@ -1,9 +1,10 @@
 package main
 
 import (
+	"device/py32"
 	"machine"
+	"test-fw/i2c"
 	"test-fw/pan211x"
-	"test-fw/spi"
 	"time"
 )
 
@@ -12,9 +13,9 @@ const (
 	pinLedGreen = machine.PB1
 	pinRoleHub  = machine.PA0 // tie to GND = hub, leave floating = node
 
-	pinSpiSck  = machine.PA9  // SCK  → PAN211x pin 2
-	pinSpiData = machine.PA7  // DATA → PAN211x pin 3, bidirectional
-	pinSpiCsn  = machine.PA10 // CSN  → PAN211x pin 1, active-low
+	pinI2cSCL = machine.PA9 // SCK  → PAN211x pin 2
+	pinI2cSDA = machine.PA7 // DATA → PAN211x pin 3, bidirectional
+	//pinSpiCsn  = machine.PA10 // CSN  → PAN211x pin 1, active-low
 )
 
 const payloadLen = 4
@@ -34,10 +35,41 @@ func main() {
 	pinLedRed.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	pinRoleHub.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
 
-	pinSpiCsn.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	pinSpiCsn.High()
-	spiMaster := spi.NewMaster(pinSpiSck, pinSpiData)
-	regs := pan211x.NewRegistersSPI(spiMaster, pinSpiCsn)
+	// pinSpiCsn.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	// pinSpiCsn.High()
+	// spiMaster := spi.NewMaster(pinSpiSck, pinSpiData)
+	// regs := pan211x.NewRegistersSPI(spiMaster, pinSpiCsn)
+
+	// I2C bus recovery per I2C spec §3.1.16: clock SCL up to 9 times until the
+	// slave releases SDA, then issue a STOP condition to reset the slave's state machine.
+	// Needed when the slave was held in reset mid-transaction and is stuck driving SDA low.
+	pinI2cSCL.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	pinI2cSCL.High()
+	pinI2cSDA.Configure(machine.PinConfig{Mode: machine.PinInputPullup})
+	for i := 0; i < 9; i++ {
+		if pinI2cSDA.Get() {
+			break // slave released SDA
+		}
+		pinI2cSCL.Low()
+		time.Sleep(5 * time.Microsecond)
+		pinI2cSCL.High()
+		time.Sleep(5 * time.Microsecond)
+	}
+	// STOP condition: SDA low → high while SCL is high.
+	pinI2cSDA.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	pinI2cSDA.Low()
+	time.Sleep(5 * time.Microsecond)
+	pinI2cSDA.High()
+	time.Sleep(5 * time.Microsecond)
+
+	pinI2cSDA.Configure(machine.PinConfig{Mode: machine.PinAlternate})
+	pinI2cSDA.SetAltFunc(12)
+	pinI2cSCL.Configure(machine.PinConfig{Mode: machine.PinAlternate})
+	pinI2cSCL.SetAltFunc(6)
+	py32.RCC.APBENR1.SetBits(py32.RCC_APBENR1_I2CEN)
+
+	i2cMaster := i2c.NewMaster(py32.I2C, 24_000_000, 100_000)
+	regs := pan211x.NewRegistersI2C(i2cMaster)
 
 	pan := pan211x.NewDriver(regs)
 

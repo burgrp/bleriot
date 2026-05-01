@@ -1,17 +1,14 @@
 package pan211x
 
-// PAN211xAddress is the 7-bit I2C address of the PAN211x chip.
-const PAN211xAddressWrite = 0x71 << 1
-const PAN211xAddressRead = 0x71<<1 | 1
-
 // MasterI2C is the interface required by RegistersI2C.
 type MasterI2C interface {
-	Start()
-	Restart()
-	Stop()
-	Read() (uint8, error)
-	Write(b uint8) error
+	Write(addr uint8, data []byte) error
+	Read(addr uint8, buf []byte) error
+	Exchange(addr uint8, write, read []byte) error
 }
+
+// PAN211xAddress is the 7-bit I2C address of the PAN211x chip.
+const PAN211xAddress uint8 = 0x71
 
 // RegistersI2C implements the Registers interface over I2C.
 // The PAN211x I2C protocol uses an 8-bit register access byte: bits[7:1] = register
@@ -25,90 +22,36 @@ func NewRegistersI2C(i2c MasterI2C) *RegistersI2C {
 	return &RegistersI2C{i2c: i2c}
 }
 
-// accessWrite forms the 8-bit register access byte for a write operation.
 func accessWrite(reg uint8) uint8 { return reg << 1 }
-
-// accessRead forms the 8-bit register access byte for a read operation.
-func accessRead(reg uint8) uint8 { return reg<<1 | 1 }
+func accessRead(reg uint8) uint8  { return (reg << 1) | 1 }
 
 // Read reads one byte from the given register.
 func (r *RegistersI2C) Read(reg uint8) (uint8, error) {
-	r.i2c.Start()
-	defer r.i2c.Stop()
-
-	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
+	req := [1]byte{accessRead(reg)}
+	var buf [1]byte
+	if err := r.i2c.Exchange(PAN211xAddress, req[:], buf[:]); err != nil {
 		return 0, err
 	}
-
-	if err := r.i2c.Write(accessRead(reg)); err != nil {
-		return 0, err
-	}
-
-	r.i2c.Restart()
-
-	if err := r.i2c.Write(PAN211xAddressRead); err != nil {
-		return 0, err
-	}
-
-	return r.i2c.Read()
+	return buf[0], nil
 }
 
 // Write writes one byte to the given register.
 func (r *RegistersI2C) Write(reg uint8, value uint8) error {
-	r.i2c.Start()
-	defer r.i2c.Stop()
-
-	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
-		return err
-	}
-
-	if err := r.i2c.Write(accessWrite(reg)); err != nil {
-		return err
-	}
-
-	if err := r.i2c.Write(value); err != nil {
-		return err
-	}
-
-	return nil
+	req := [2]byte{accessWrite(reg), value}
+	return r.i2c.Write(PAN211xAddress, req[:])
 }
 
 // WriteBuffer writes data to the given register.
+// Uses a fixed-size stack buffer to avoid heap allocation on repeated calls.
 func (r *RegistersI2C) WriteBuffer(reg uint8, data []byte) error {
-
-	r.i2c.Start()
-	defer r.i2c.Stop()
-
-	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
-		return err
-	}
-
-	if err := r.i2c.Write(accessWrite(reg)); err != nil {
-		return err
-	}
-
-	for _, b := range data {
-		if err := r.i2c.Write(b); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	var buf [64]byte
+	buf[0] = accessWrite(reg)
+	n := copy(buf[1:], data)
+	return r.i2c.Write(PAN211xAddress, buf[:1+n])
 }
 
-// ReadBuffer reads len(buf) bytes from reg into buf using separate single-byte
-// transactions. Each Read() is a complete START…STOP cycle, which avoids the
-// STM32-family I2C hardware's ACK/STOP race that can leave the bus stuck BUSY
-// when reading more than one byte in a single burst transaction.
-// For FIFO registers (reg 0x01) the PAN211x advances its read pointer on each
-// transaction, so successive calls return successive bytes.
+// ReadBuffer reads len(buf) bytes from the given register into buf.
 func (r *RegistersI2C) ReadBuffer(reg uint8, buf []byte) error {
-	for i := range buf {
-		b, err := r.Read(reg)
-		if err != nil {
-			return err
-		}
-		buf[i] = b
-	}
-	return nil
+	req := [1]byte{accessRead(reg)}
+	return r.i2c.Exchange(PAN211xAddress, req[:], buf)
 }
