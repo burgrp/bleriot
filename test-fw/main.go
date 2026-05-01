@@ -41,7 +41,7 @@ func main() {
 	// pan := pan211x.NewDriver(pan211x.NewRegistersI2C(i2c.NewMaster(pinSpiSck, pinSpiData)))
 	// si := pan211x.SerialInterfaceI2C
 
-	must(pan.InitXN297L(pan211x.ConfigXN297L{
+	must(pan.Init(pan211x.ConfigXN297L{
 		BitRate:         pan211x.BitRate1Mbps,
 		PayloadLen:      payloadLen,
 		SerialInterface: si,
