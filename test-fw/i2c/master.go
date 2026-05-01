@@ -1,91 +1,99 @@
 package i2c
 
-import (
-	"device/py32"
-	"runtime"
-)
+import "machine"
 
-type Master struct {
-	peri *py32.I2C_Type
+// MasterI2C is a bitbang I2C master with external pull-ups on SCL and SDA.
+// Open-drain is emulated: PinOutput+Low to drive 0, PinInputFloating to release.
+// Implements pan211x.MasterI2C (Start/Stop/Write/Read).
+type MasterI2C struct {
+	scl machine.Pin
+	sda machine.Pin
 }
 
-func NewMaster(peri *py32.I2C_Type, apbClockHz int, i2cClockHz int) *Master {
-
-	peri.SetCR2_FREQ(uint32(apbClockHz / 1e6))
-	peri.SetCCR(uint32(apbClockHz / (i2cClockHz * 2)))
-
-	apbClockkTns := 1e9 / apbClockHz
-	tRiseMaxNs := 1000 // I2C protocol specification
-	trise := uint32((tRiseMaxNs / apbClockkTns) + 1)
-	peri.SetTRISE(trise)
-
-	peri.SetCR1_PE(1)
-
-	return &Master{peri: peri}
+// NewMaster initialises both pins released (bus idle, pull-ups hold lines high).
+func NewMaster(scl, sda machine.Pin) *MasterI2C {
+	scl.Configure(machine.PinConfig{Mode: machine.PinInputFloating})
+	sda.Configure(machine.PinConfig{Mode: machine.PinInputFloating})
+	return &MasterI2C{scl: scl, sda: sda}
 }
 
-func (i2c *Master) Start() {
-	for i2c.peri.SR2.HasBits(py32.I2C_SR2_BUSY) {
-		runtime.Gosched()
-	}
-
-	i2c.Restart()
+func (m *MasterI2C) sclLow() {
+	m.scl.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	m.scl.Low()
 }
 
-func (i2c *Master) Restart() {
-	i2c.peri.CR1.SetBits(py32.I2C_CR1_START)
-	for !i2c.peri.SR1.HasBits(py32.I2C_SR1_SB) {
-		runtime.Gosched()
+// sclHigh releases SCL and spins until it reads high (supports clock stretching).
+func (m *MasterI2C) sclHigh() {
+	m.scl.Configure(machine.PinConfig{Mode: machine.PinInputFloating})
+	for !m.scl.Get() {
 	}
 }
 
-func (i2c *Master) Stop() {
-	i2c.peri.CR1.SetBits(py32.I2C_CR1_STOP)
-	clearErrors(i2c.peri)
+func (m *MasterI2C) sdaLow() {
+	m.sda.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	m.sda.Low()
 }
 
-
-func (i2c *Master) Read() (uint8, error) {
-
-	for {
-		sr1 := i2c.peri.SR1.Get()
-		_ = i2c.peri.SR2.Get()
-
-		if sr1&py32.I2C_SR1_RXNE != 0 {
-			return uint8(i2c.peri.DR.Get()), nil
-		}
-
-		if err := checkErrors(i2c.peri); err != nil {
-			return 0, err
-		}
-
-		runtime.Gosched()
-	}
-
+func (m *MasterI2C) sdaHigh() {
+	m.sda.Configure(machine.PinConfig{Mode: machine.PinInputFloating})
 }
 
-func (i2c *Master) Write(b uint8) error {
-	i2c.peri.DR.Set(uint32(b))
+// Start generates a START or Repeated START condition.
+// Safe to call from bus-idle (both lines high) or mid-transaction (SCL low after ACK).
+func (m *MasterI2C) Start() {
+	m.sdaHigh()
+	m.sclHigh()
+	m.sdaLow() // SDA falls while SCL high → START / Repeated START
+	m.sclLow()
+}
 
-	for {
-		sr1 := i2c.peri.SR1.Get()
-		_ = i2c.peri.SR2.Get()
+// Stop generates a STOP condition (SDA rises while SCL high).
+func (m *MasterI2C) Stop() {
+	m.sdaLow()
+	m.sclHigh()
+	m.sdaHigh()
+}
 
-		err := checkErrors(i2c.peri)
-		if err != nil {
-			return err
+// Write sends b MSB-first and returns ErrNoAck if the slave does not ACK.
+func (m *MasterI2C) Write(b uint8) error {
+	for i := 7; i >= 0; i-- {
+		if b>>uint(i)&1 != 0 {
+			m.sdaHigh()
+		} else {
+			m.sdaLow()
 		}
-
-		if sr1&py32.I2C_SR1_TXE != 0 {
-			break
-		}
-
-		if sr1&py32.I2C_SR1_RXNE != 0 {
-			break
-		}
-
-		runtime.Gosched()
+		m.sclHigh()
+		m.sclLow()
 	}
-
+	m.sdaHigh() // release SDA for ACK
+	m.sclHigh()
+	ack := !m.sda.Get() // ACK = slave pulls SDA low
+	m.sclLow()
+	if !ack {
+		return ErrNoAck
+	}
 	return nil
+}
+
+// Read clocks in one byte MSB-first.
+// Sends NACK after the byte if last is true, ACK otherwise.
+func (m *MasterI2C) Read(last bool) (uint8, error) {
+	var b uint8
+	m.sdaHigh() // release SDA so slave can drive it
+	for i := 7; i >= 0; i-- {
+		m.sclHigh()
+		if m.sda.Get() {
+			b |= 1 << uint(i)
+		}
+		m.sclLow()
+	}
+	if last {
+		m.sdaHigh() // NACK
+	} else {
+		m.sdaLow() // ACK
+	}
+	m.sclHigh()
+	m.sclLow()
+	m.sdaHigh() // release SDA after ACK/NACK
+	return b, nil
 }

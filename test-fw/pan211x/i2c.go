@@ -7,9 +7,9 @@ const PAN211xAddressRead = 0x71<<1 | 1
 // MasterI2C is the interface required by RegistersI2C.
 type MasterI2C interface {
 	Start()
-	Restart()
 	Stop()
-	Read() (uint8, error)
+
+	Read(last bool) (uint8, error)
 	Write(b uint8) error
 }
 
@@ -44,13 +44,13 @@ func (r *RegistersI2C) Read(reg uint8) (uint8, error) {
 		return 0, err
 	}
 
-	r.i2c.Restart()
+	r.i2c.Start()
 
 	if err := r.i2c.Write(PAN211xAddressRead); err != nil {
 		return 0, err
 	}
 
-	return r.i2c.Read()
+	return r.i2c.Read(true)
 }
 
 // Write writes one byte to the given register.
@@ -96,19 +96,33 @@ func (r *RegistersI2C) WriteBuffer(reg uint8, data []byte) error {
 	return nil
 }
 
-// ReadBuffer reads len(buf) bytes from reg into buf using separate single-byte
-// transactions. Each Read() is a complete START…STOP cycle, which avoids the
-// STM32-family I2C hardware's ACK/STOP race that can leave the bus stuck BUSY
-// when reading more than one byte in a single burst transaction.
-// For FIFO registers (reg 0x01) the PAN211x advances its read pointer on each
-// transaction, so successive calls return successive bytes.
+// ReadBuffer reads len(buf) bytes from reg.
 func (r *RegistersI2C) ReadBuffer(reg uint8, buf []byte) error {
+	r.i2c.Start()
+	defer r.i2c.Stop()
+
+	if err := r.i2c.Write(PAN211xAddressWrite); err != nil {
+		return err
+	}
+
+	if err := r.i2c.Write(accessRead(reg)); err != nil {
+		return err
+	}
+
+	r.i2c.Start()
+
+	if err := r.i2c.Write(PAN211xAddressRead); err != nil {
+		return err
+	}
+
+	li := len(buf) - 1
 	for i := range buf {
-		b, err := r.Read(reg)
+		b, err := r.i2c.Read(i == li)
 		if err != nil {
 			return err
 		}
 		buf[i] = b
 	}
+
 	return nil
 }
