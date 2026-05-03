@@ -108,8 +108,33 @@ func main() {
 		led:        pinLedGreen,
 	}
 
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	println("-------------------")
+	println("Alloc:", m.Alloc)
+	println("Sys:", m.Sys)
+	println("Mallocs:", m.Mallocs)
+
 	go hub.start()
-	node.start()
+
+	runtime.ReadMemStats(&m)
+	println("-------------------")
+	println("Alloc:", m.Alloc)
+	println("Sys:", m.Sys)
+	println("Mallocs:", m.Mallocs)
+
+	go node.start()
+
+	for {
+		time.Sleep(500 * time.Millisecond)
+
+		runtime.ReadMemStats(&m)
+		println("-------------------")
+		println("Alloc:", m.Alloc)
+		println("Sys:", m.Sys)
+		println("Mallocs:", m.Mallocs)
+	}
+
 }
 
 func must(err error) {
