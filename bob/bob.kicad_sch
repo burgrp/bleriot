@@ -4249,6 +4249,17 @@
 		)
 		(uuid "9c48ba95-87f7-4fa6-9043-55d6dfc5e58f")
 	)
+	(text "do verze 1.4 \n- chyba v pojmenování pinů B4, B5 - již opraveno\n- jak s SPI/I2C přepínáním - je potřeba?"
+		(exclude_from_sim no)
+		(at 186.69 173.482 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "df15d082-86a0-4d5c-b557-237480f2d669")
+	)
 	(junction
 		(at 115.57 29.21)
 		(diameter 0)
@@ -6325,7 +6336,7 @@
 			(uuid "b1491177-c30c-4b1f-b624-900972f5e060")
 		)
 		(instances
-			(project ""
+			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "U1")
 					(unit 1)
@@ -6411,7 +6422,7 @@
 			(uuid "0ac88917-c453-4286-854f-2c881c5164ff")
 		)
 		(instances
-			(project ""
+			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "D1")
 					(unit 1)
@@ -6808,7 +6819,7 @@
 			(uuid "4a27b9ab-b186-4b3e-a74f-682697c09be1")
 		)
 		(instances
-			(project ""
+			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "A1")
 					(unit 1)
@@ -6900,7 +6911,7 @@
 			(uuid "eb0fbded-e4e1-4a9f-a127-ec37dd9236ac")
 		)
 		(instances
-			(project ""
+			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "J1")
 					(unit 1)
@@ -7845,7 +7856,7 @@
 			(uuid "99997a82-9ab3-468b-b388-212612542f9c")
 		)
 		(instances
-			(project ""
+			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "JP1")
 					(unit 1)
@@ -8072,7 +8083,7 @@
 			(uuid "5f6e1a11-3b61-4bf8-a2eb-2add8c200714")
 		)
 		(instances
-			(project ""
+			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "U3")
 					(unit 1)
@@ -8277,7 +8288,7 @@
 			(uuid "9289ff4f-cb42-4637-a421-581e59871c00")
 		)
 		(instances
-			(project ""
+			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "J3")
 					(unit 1)
