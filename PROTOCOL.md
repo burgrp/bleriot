@@ -6,7 +6,7 @@ Hardware-independent specification for the BleRiot IoT register protocol.
 
 ## 1. Overview
 
-BleRiot is a simple request/response protocol for reading and writing named integer registers on IoT nodes. A single hub polls one or more nodes. Nodes never initiate communication unless explicitly subscribed.
+BleRiot is a simple request/response protocol for reading and writing named integer registers on IoT nodes. A single hub polls one or more nodes. Nodes send unsolicited IS packets only for registers the hub has subscribed to via WATCH.
 
 - **Topology:** star — one hub, many nodes
 - **Initiator:** hub only (except subscribed push packets)
@@ -25,7 +25,7 @@ These parameters are mandatory for all BleRiot-compatible radio implementations:
 | Data rate        | 250 kbps                                                                |
 | Modulation       | GFSK                                                                    |
 | Packet format    | BLE-compatible (preamble, sync word, PDU, 3-byte CRC, whitening)       |
-| PDU size         | 12 bytes (fixed)                                                        |
+| PDU size         | 20 bytes (fixed)                                                        |
 
 The RF sync word for each transmission is set to the 4-byte destination device address. Radio hardware that supports address/pipe filtering must configure its receive address to the device's own address, so only packets destined for that device are passed to the protocol layer. The 32-bit address space makes accidental collision with foreign RF traffic negligible.
 
@@ -41,111 +41,109 @@ Reserved address: `0x00000000` — must not be assigned to any device.
 
 ## 4. Packet Format
 
-All packets share the same fixed 12-byte structure:
+All packets share the same fixed 20-byte structure:
 
 ```
 Offset  Size  Field
 ──────  ────  ─────────────────────────────────────────────────
-0       4     SRC   — source device address (little-endian)
-4       1     FLAGS — operation and options (see §5)
-5       1     SEQ   — sequence number
-6       2     REG   — register address (little-endian, uint16)
-8       4     VALUE — int32, little-endian (zero in read requests)
+0       4     SRC   — source device address (little-endian, plaintext)
+4       16    BLOCK — AES-128-ECB encrypted block (see §5):
+                        TYPE  (1 byte)  — packet type (see §6)
+                        FLAGS (1 byte)  — options (see §7)
+                        REG   (2 bytes) — register address (uint16, little-endian)
+                        VALUE (4 bytes) — int32, little-endian (zero in GET/WATCH)
+                        NONCE (8 bytes) — random, prevents ECB ciphertext reuse
 ──────  ────
-Total: 12 bytes
+Total: 20 bytes
 ```
 
 The destination is not carried in the payload. It is encoded as the RF sync word (§2), which the receiver's hardware uses for filtering. A received packet is therefore always addressed to the receiving device.
 
-All multi-byte fields are **little-endian**.
+SRC is plaintext so the receiver can look up the sender's AES key before decrypting BLOCK.
+
+All multi-byte fields inside BLOCK are **little-endian**.
 
 ---
 
-## 5. FLAGS Byte
+## 5. Security
 
-```
-Bit 7     — reserved, must be 0
-Bit 6     — reserved, must be 0
-Bit 5     — reserved, must be 0
-Bit 4     — reserved, must be 0
-Bit 3     — reserved, must be 0
-Bit 2     — PUSH:  0 = one-shot,  1 = subscribe to changes
-Bit 1     — DIR:   0 = request,   1 = response
-Bit 0     — OP:    0 = read,      1 = write
-```
+All packets are encrypted with **AES-128-ECB** using the node's shared key (provisioned via §10). The 16-byte BLOCK field contains the payload and an 8-byte random NONCE. The NONCE ensures that repeated identical payloads produce different ciphertexts.
 
-Defined FLAGS combinations:
-
-| Name            | FLAGS | Description                                      |
-|-----------------|-------|--------------------------------------------------|
-| READ_REQ        | 0x00  | Hub reads a register (one-shot)                  |
-| READ_REQ_PUSH   | 0x04  | Hub reads + subscribes to changes                |
-| WRITE_REQ       | 0x01  | Hub writes a register                            |
-| READ_RESP       | 0x02  | Node replies to read (or push notification)      |
-| WRITE_RESP      | 0x03  | Node confirms write (echoes actual value)        |
-| PUSH            | 0x06  | Node unsolicited push (SEQ = 0xFF)               |
-
-Receivers must ignore packets with unknown FLAGS values.
+The hub decrypts each received packet using the AES key associated with the SRC address. Packets from unknown addresses are silently discarded.
 
 ---
 
-## 6. Transactions
-
-### 6.1 Read (one-shot)
+## 6. FLAGS Byte
 
 ```
-Hub  →  Node    FLAGS=0x00  SEQ=N  REG=R  VALUE=0
-Node →  Hub     FLAGS=0x02  SEQ=N  REG=R  VALUE=<current value>
+Bit 7–1  — reserved, must be 0
+Bit 0    — NULL: VALUE field is absent; register has no value
 ```
 
-### 6.2 Write
-
-```
-Hub  →  Node    FLAGS=0x01  SEQ=N  REG=R  VALUE=<requested value>
-Node →  Hub     FLAGS=0x03  SEQ=N  REG=R  VALUE=<actual value>
-```
-
-The node always responds with the *actual* register value after applying the write. If the register is read-only, or the value was clamped, the hub learns the true state from the response.
-
-### 6.3 Subscribe
-
-```
-Hub  →  Node    FLAGS=0x04  SEQ=N  REG=R  VALUE=0   (subscribe)
-Node →  Hub     FLAGS=0x02  SEQ=N  REG=R  VALUE=<current value>  (immediate reply)
-Node →  Hub     FLAGS=0x06  SEQ=0xFF REG=R VALUE=<new value>     (on change, repeated)
-```
-
-### 6.4 Unsubscribe
-
-```
-Hub  →  Node    FLAGS=0x00  SEQ=N  REG=R  VALUE=0   (plain read, PUSH=0)
-Node →  Hub     FLAGS=0x02  SEQ=N  REG=R  VALUE=<current value>
-```
-
-Sending a one-shot read for a subscribed register cancels the subscription.
+When NULL=1 the VALUE field is undefined and must be ignored by the receiver.
 
 ---
 
-## 7. Sequence Numbers
+## 7. TYPE Byte
 
-- The hub maintains a per-node SEQ counter, incrementing with each new request (wraps 0x00–0xFE).
-- The node echoes SEQ from the request into its response.
-- `0xFF` is reserved for unsolicited PUSH packets and must not be used by the hub.
-- The hub uses SEQ to correlate responses with pending requests and to discard stale duplicates from retries.
+| Value | Name  | Sender | Description                                        |
+|-------|-------|--------|----------------------------------------------------|
+| 0x00  | GET   | hub    | Read current register value (one-shot)             |
+| 0x01  | SET   | hub    | Write register value                               |
+| 0x02  | IS    | node   | Current register value (reply to any hub packet)   |
+| 0x03  | WATCH | hub    | Subscribe (VALUE=1) or unsubscribe (VALUE=0)       |
+
+Receivers must ignore packets with unknown TYPE values.
+
+A node sends IS with FLAGS.NULL=1 when a register has no value (e.g. sensor not yet ready, hardware fault, or explicitly unset).
 
 ---
 
-## 8. Reliability
+## 8. Transactions
+
+### 8.1 Read
+
+```
+Hub  →  Node    TYPE=GET    REG=R  VALUE=0
+Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
+```
+
+### 8.2 Write
+
+```
+Hub  →  Node    TYPE=SET    REG=R  VALUE=<requested value>
+Node →  Hub     TYPE=IS     REG=R  VALUE=<actual value>
+```
+
+The node always responds with the *actual* register value after applying the write. If the register is read-only or the value was clamped, the hub learns the true state from the response.
+
+### 8.3 Subscribe
+
+```
+Hub  →  Node    TYPE=WATCH  REG=R  VALUE=1
+Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>   (immediate reply)
+Node →  Hub     TYPE=IS     REG=R  VALUE=<new value>       (on each change)
+```
+
+### 8.4 Unsubscribe
+
+```
+Hub  →  Node    TYPE=WATCH  REG=R  VALUE=0
+Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
+```
+
+---
+
+## 9. Reliability
 
 The protocol is **best-effort at the RF layer**. Reliability is the hub's responsibility:
 
-- After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `SEQ == sent SEQ`).
-- If no response arrives within `T_timeout`, the hub may retransmit the same request (same SEQ) up to `N_retry` times (recommended: 3).
-- The node ignores duplicate requests (same SEQ from same SRC) while its response is still pending. Once a response has been sent, a repeated request is processed again.
+- After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `REG == sent REG`).
+- If no response arrives within `T_timeout`, the hub may retransmit the same request up to `N_retry` times (recommended: 3).
 
 ---
 
-## 9. Push Subscription Lifecycle
+## 10. Push Subscription Lifecycle
 
 - A node keeps at most one subscription per register per hub.
 - A subscription expires if the node receives no packet from that hub for `T_idle` (recommended: 60 s). After expiry, push stops silently.
@@ -153,16 +151,84 @@ The protocol is **best-effort at the RF layer**. Reliability is the hub's respon
 
 ---
 
-## 10. Radio Interface (implementation contract)
+## 11. Provisioning
+
+Node provisioning is a one-time, one-way transfer that delivers a **node descriptor** to the hub over a side-channel (SWD/RTT, UART, IrDa, or similar). The descriptor is encoded as YAML.
+
+### 11.1 Framing
+
+The descriptor is delimited by a sentinel line and a trailing empty line, so the hub can extract it from a noisy output stream (e.g. mixed RTT debug output):
+
+```
+--- bleriot-node
+address: 0xA3F2B841
+key: 9f3c1e8a2b7d4f06e5a0c3d1b8f92e47
+...
+
+```
+
+- **Start sentinel:** a line equal to `--- bleriot-node`
+- **End:** the first empty line after the sentinel
+- The captured block (sentinel line through the last non-empty line) is valid YAML and can be fed directly to any YAML parser.
+
+### 11.2 Node Descriptor
+
+| Field      | Type               | Description                                                   |
+|------------|--------------------|---------------------------------------------------------------|
+| address    | uint32             | Node RF address (§3), hex-encoded (e.g. `0xA3F2B841`)        |
+| key        | bytes[16]          | AES-128 shared secret, hex-encoded (32 hex chars)             |
+| metadata   | map<string,string> | Key-value pairs merged into the hub's node record             |
+| registers  | list<Register>     | Register descriptors (see §11.3)                              |
+
+### 11.3 Register Descriptor
+
+| Field      | Type               | Description                                                   |
+|------------|--------------------|---------------------------------------------------------------|
+| id         | uint16             | Register address used in RF packets (REG field, §4)           |
+| name       | string             | Human-readable name (e.g. `temperature`)                      |
+| type       | enum               | `int`, `float`, or `bool`                                     |
+| multiplier | int32              | Hub scaling: `display = wire × multiplier / divider`          |
+| divider    | int32              | See multiplier; must not be zero                              |
+| metadata   | map<string,string> | Key-value pairs merged into the hub's register record         |
+
+All registers carry `int32` on the wire (§8). `type`, `multiplier`, and `divider` are hub-side hints only — the node always sends raw `int32`.
+
+- **`int`** — no scaling; multiplier=1, divider=1 is the identity.
+- **`float`** — wire value is scaled: e.g. multiplier=1, divider=100 means wire value `1234` displays as `12.34`.
+- **`bool`** — wire value 0 = false, 1 = true; multiplier/divider are ignored.
+
+### 11.4 Example
+
+```yaml
+--- bleriot-node
+address: 0xA3F2B841
+key: 9f3c1e8a2b7d4f06e5a0c3d1b8f92e47
+metadata:
+  location: garage
+  hw_rev: "1.3"
+registers:
+  - id: 0x0001
+    name: temperature
+    type: float
+    multiplier: 1
+    divider: 100
+    metadata:
+      unit: celsius
+  - id: 0x0002
+    name: relay
+    type: bool
+    multiplier: 1
+    divider: 1
+
+```
+
+---
+
+## 12. Radio Interface (implementation contract)
 
 Any radio backend must provide these three operations to the protocol layer. All operations are **non-blocking** from the protocol layer's perspective:
 
 ```
-Init() error
-    Configure the radio with the BleRiot RF parameters (§2),
-    set the hardware receive address to this device's own address,
-    and enter receive mode.
-
 Send(dst [4]byte, payload []byte) error
     Set the RF sync word to dst (the destination device address),
     then transmit one packet. Blocks only for the duration of the
