@@ -2,6 +2,7 @@ package main
 
 import (
 	"machine"
+	"test-fw/bleriot"
 	"time"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
@@ -27,6 +28,16 @@ var (
 
 func main() {
 	println("BleRiot starting...")
+
+	k := [16]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F}
+	c, err := bleriot.NewCodec(k)
+	if err != nil {
+		panic(err)
+	}
+	b := make([]byte, bleriot.PacketLen)
+	c.Encode(b, nodeAddr, bleriot.TypeGET, 0, 0x1234, 0x56789ABC)
+	c.Decode(b)
+	println("Encoded packet:", b)
 
 	machine.ConfigureUARTPin(machine.PB6, 0)
 	machine.ConfigureUARTPin(machine.PB7, 0)
