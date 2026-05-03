@@ -19,8 +19,20 @@ const (
 	// pinSpiCsn  = machine.PA10 // CSN  → PAN211x pin 1, active-low
 )
 
+type Role bool
+
+const (
+	RoleHub  Role = false
+	RoleNode Role = true
+)
+
+var roleNames = map[Role]string{
+	RoleHub:  "Hub",
+	RoleNode: "Node",
+}
+
 type Device struct {
-	role       string
+	role       Role
 	myAddr     [4]byte
 	peerAddr   [4]byte
 	pinSpiSck  machine.Pin
@@ -30,52 +42,53 @@ type Device struct {
 }
 
 func (d *Device) start() {
-	println("Initializing", d.role)
+	println("Initializing", roleNames[d.role])
 
 	d.led.High()
 	time.Sleep(500 * time.Millisecond)
 	d.led.Low()
 
-	driver := pan211x.NewDriverBLELongRange(pan211x.NewRegistersSPI(spi.NewMaster(d.pinSpiSck, d.pinSpiData), d.pinSpiCsn))
+	radio := pan211x.NewDriverBLELongRange(pan211x.NewRegistersSPI(spi.NewMaster(d.pinSpiSck, d.pinSpiData), d.pinSpiCsn))
 
-	d.must(driver.Init(pan211x.ConfigBLELongRange{
+	d.must(radio.Init(pan211x.ConfigBLELongRange{
 		PayloadLen:      bleriot.PacketLen,
 		SerialInterface: pan211x.SerialInterfaceSPI3W,
 		SpreadFactor:    pan211x.SpreadFactorS8,
 	}))
 
-	d.must(driver.SetChannel(11))
-	d.must(driver.EnableRxAddress(0, d.myAddr))
+	d.must(radio.SetChannel(11))
+	d.must(radio.EnableRxAddress(0, d.myAddr))
 
-	println(d.role, "initialized")
+	println(roleNames[d.role], "initialized")
 
-	nextPacket := time.Now().Add(1 * time.Second)
+	nextPacket := time.Now()
 
 	var buf [bleriot.PacketLen]byte
 	for {
-		n, ok := driver.Receive(buf[:])
+		n, ok := radio.Receive(buf[:])
 		if ok {
-			println(d.role, "received", n, "bytes:", buf[:n])
+			println(roleNames[d.role], "received", n, "bytes:", buf[:n])
 			d.led.Set(!d.led.Get())
 		}
 
 		if time.Now().After(nextPacket) {
-			err := driver.Send(d.peerAddr, []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF})
+			err := radio.Send(d.peerAddr, []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF, 0xDE, 0xAD, 0xBE, 0xEF})
 			if err != nil {
-				println(d.role, "transmit error:", err.Error())
+				println(roleNames[d.role], "transmit error:", err.Error())
 			} else {
-				println(d.role, "transmitted packet")
+				println(roleNames[d.role], "transmitted packet")
 			}
-			nextPacket = time.Now().Add(1 * time.Second)
+			nextPacket = time.Now().Add(500 * time.Millisecond)
 		}
 
 		runtime.Gosched()
 	}
+
 }
 
 func (d *Device) must(err error) {
 	if err != nil {
-		panic(d.role + ": " + err.Error())
+		panic(roleNames[d.role] + ": " + err.Error())
 	}
 }
 
@@ -88,53 +101,37 @@ func main() {
 	hubAddr := [4]byte{0x00, 0x00, 0x00, 0x00}
 	nodeAddr := [4]byte{0x00, 0x00, 0x00, 0x01}
 
-	hub := Device{
-		role:       "hub",
+	go (&Device{
+		role:       RoleHub,
 		myAddr:     hubAddr,
 		peerAddr:   nodeAddr,
 		pinSpiSck:  machine.PA9,
 		pinSpiData: machine.PA7,
 		pinSpiCsn:  machine.PA10,
 		led:        pinLedRed,
-	}
+	}).start()
 
-	node := Device{
-		role:       "node",
+	go (&Device{
+		role:       RoleNode,
 		myAddr:     nodeAddr,
 		peerAddr:   hubAddr,
 		pinSpiSck:  machine.PB4,
 		pinSpiData: machine.PB3,
 		pinSpiCsn:  machine.PB5,
 		led:        pinLedGreen,
-	}
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	println("-------------------")
-	println("Alloc:", m.Alloc)
-	println("Sys:", m.Sys)
-	println("Mallocs:", m.Mallocs)
-
-	go hub.start()
-
-	runtime.ReadMemStats(&m)
-	println("-------------------")
-	println("Alloc:", m.Alloc)
-	println("Sys:", m.Sys)
-	println("Mallocs:", m.Mallocs)
-
-	go node.start()
+	}).start()
 
 	for {
-		time.Sleep(500 * time.Millisecond)
-
-		runtime.ReadMemStats(&m)
-		println("-------------------")
-		println("Alloc:", m.Alloc)
-		println("Sys:", m.Sys)
-		println("Mallocs:", m.Mallocs)
+		printMemoryStats()
+		time.Sleep(5000 * time.Millisecond)
 	}
 
+}
+
+func printMemoryStats() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	println("RAM:", m.HeapAlloc, "/", m.HeapSys, "bytes, Mallocs:", m.Mallocs)
 }
 
 func must(err error) {
