@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"hub/engine"
+	"hub/node"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -18,7 +21,7 @@ func TestLoadConfig(t *testing.T) {
 	  "ttlSeconds": 30,
 	  "baud": 115200,
 	  "ports": [{ "device": "/dev/ttyACM0", "channel": 37 }],
-	  "nodes": [{ "descriptor": "nodes/thermo.json", "address": "CCA00002", "key": "00112233445566778899AABBCCDDEEFF" }]
+	  "nodesDir": "nodes"
 	}`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -37,8 +40,8 @@ func TestLoadConfig(t *testing.T) {
 	if len(cfg.Ports) != 1 || cfg.Ports[0].Device != "/dev/ttyACM0" || cfg.Ports[0].Channel != 37 {
 		t.Errorf("unexpected ports: %+v", cfg.Ports)
 	}
-	if len(cfg.Nodes) != 1 || cfg.Nodes[0].Descriptor != "nodes/thermo.json" {
-		t.Errorf("unexpected nodes: %+v", cfg.Nodes)
+	if cfg.NodesDir != "nodes" {
+		t.Errorf("unexpected nodesDir: %q", cfg.NodesDir)
 	}
 	if baseDir != dir {
 		t.Errorf("baseDir = %q, want %q", baseDir, dir)
@@ -102,6 +105,83 @@ func TestNewRegistry(t *testing.T) {
 	t.Run("invalid scheme", func(t *testing.T) {
 		if _, _, err := newRegistry("ftp://nope"); err == nil {
 			t.Fatal("expected error for unsupported scheme")
+		}
+	})
+}
+
+const sampleDescriptor = `{
+  "channel": 37,
+  "version": "0x1A2B3C4D",
+  "metadata": {},
+  "registers": [
+    { "id": 4660, "name": "outdoor.temperature", "class": "thermometer", "instance": "outdoor",
+      "type": "float", "multiplier": 1, "divider": 100, "metadata": {} }
+  ]
+}`
+
+func TestLoadNodes(t *testing.T) {
+	base := t.TempDir()
+	if err := os.Mkdir(filepath.Join(base, "descriptors"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(base, "nodes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, content string) {
+		if err := os.WriteFile(filepath.Join(base, rel), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("descriptors/thermo.json", sampleDescriptor)
+	write("nodes/outdoor.json", `{ "descriptor": "../descriptors/thermo.json", "address": "CCA00002", "key": "00112233445566778899AABBCCDDEEFF" }`)
+	write("nodes/garage.json", `{ "descriptor": "../descriptors/thermo.json", "address": "CCA00003", "key": "00112233445566778899AABBCCDDEEFF" }`)
+	// A non-JSON file in the directory must be ignored.
+	write("nodes/README.txt", "ignore me")
+
+	eng := engine.New(engine.Options{HubAddr: [node.AddrLen]byte{0xFF, 0xFF, 0xFF, 0x01}})
+	nodes, err := loadNodes(config{NodesDir: "nodes"}, base, eng)
+	if err != nil {
+		t.Fatalf("loadNodes: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("got %d nodes, want 2", len(nodes))
+	}
+	names := map[string]bool{}
+	for _, n := range nodes {
+		names[n.Name] = true
+		if n.Channel != 37 || len(n.Registers) != 1 {
+			t.Errorf("node %q: channel=%d registers=%d", n.Name, n.Channel, len(n.Registers))
+		}
+	}
+	if !names["outdoor"] || !names["garage"] {
+		t.Errorf("node names = %v, want outdoor and garage", names)
+	}
+}
+
+func TestLoadNodes_Errors(t *testing.T) {
+	eng := func() *engine.Engine {
+		return engine.New(engine.Options{HubAddr: [node.AddrLen]byte{0xFF, 0xFF, 0xFF, 0x01}})
+	}
+
+	t.Run("missing nodesDir", func(t *testing.T) {
+		if _, err := loadNodes(config{}, t.TempDir(), eng()); err == nil {
+			t.Fatal("expected error when nodesDir is empty")
+		}
+	})
+
+	t.Run("directory not found", func(t *testing.T) {
+		if _, err := loadNodes(config{NodesDir: "nope"}, t.TempDir(), eng()); err == nil {
+			t.Fatal("expected error for missing directory")
+		}
+	})
+
+	t.Run("empty directory", func(t *testing.T) {
+		base := t.TempDir()
+		if err := os.Mkdir(filepath.Join(base, "nodes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadNodes(config{NodesDir: "nodes"}, base, eng()); err == nil {
+			t.Fatal("expected error for empty directory")
 		}
 	})
 }

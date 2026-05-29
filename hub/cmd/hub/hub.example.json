@@ -9,11 +9,5 @@
   "ports": [
     { "device": "/dev/ttyACM0", "channel": 37 }
   ],
-  "nodes": [
-    {
-      "descriptor": "nodes/thermo.json",
-      "address": "CCA00002",
-      "key": "00112233445566778899AABBCCDDEEFF"
-    }
-  ]
+  "nodesDir": "nodes"
 }

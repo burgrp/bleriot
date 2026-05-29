@@ -106,8 +106,8 @@ func TestGenerateDescriptorJSON_Shape(t *testing.T) {
 	if err := json.Unmarshal(data, &jd); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
 	}
-	if jd.Node != "garage-controller" || jd.Channel != 10 {
-		t.Errorf("node/channel wrong: %q %d", jd.Node, jd.Channel)
+	if jd.Channel != 10 {
+		t.Errorf("channel wrong: %d", jd.Channel)
 	}
 	if !strings.HasPrefix(jd.Version, "0x") {
 		t.Errorf("version not hex string: %q", jd.Version)

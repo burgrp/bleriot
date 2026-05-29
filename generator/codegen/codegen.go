@@ -82,9 +82,10 @@ type jsonRegister struct {
 	Metadata   map[string]string `json:"metadata"`
 }
 
-// jsonDescriptor is the on-disk shape of the node descriptor (§11.7).
+// jsonDescriptor is the on-disk shape of the node descriptor (§11.7). It carries
+// no node name: a node's name comes from its per-device instance file on the hub
+// (the descriptor is a shared, per-type artifact).
 type jsonDescriptor struct {
-	Node      string            `json:"node"`
 	Channel   uint8             `json:"channel"`
 	Version   string            `json:"version"`
 	Metadata  map[string]string `json:"metadata"`
@@ -95,7 +96,6 @@ type jsonDescriptor struct {
 // resolved node (§11.7). Registers appear in canonical order.
 func GenerateDescriptorJSON(res descriptor.Resolved) ([]byte, error) {
 	jd := jsonDescriptor{
-		Node:      res.Node,
 		Channel:   res.Channel,
 		Version:   fmt.Sprintf("0x%08X", res.Version),
 		Metadata:  emptyIfNil(res.Metadata),

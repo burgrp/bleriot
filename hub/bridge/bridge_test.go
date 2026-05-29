@@ -86,7 +86,7 @@ func serve(t *testing.T, tx Transactor, reg Registry, r *node.Register) context.
 	t.Helper()
 	b := New(tx, reg, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
-	n := node.NewNode(&node.Descriptor{Channel: 10, Registers: []node.Register{*r}}, node.Identity{Address: nodeAddr})
+	n := node.NewNode("test", &node.Descriptor{Channel: 10, Registers: []node.Register{*r}}, node.Identity{Address: nodeAddr})
 	b.ServeNode(ctx, n)
 	return cancel
 }

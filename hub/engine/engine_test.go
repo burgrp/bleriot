@@ -89,7 +89,8 @@ func newEngine(t *testing.T) (*Engine, *fakeRadio, bleriot.Codec, context.Cancel
 	e.AddRadio(ctx, testChannel, f)
 
 	n := node.NewNode(
-		&node.Descriptor{Node: "t", Channel: testChannel},
+		"t",
+		&node.Descriptor{Channel: testChannel},
 		node.Identity{Address: nodeAddr, Key: testKey},
 	)
 	if err := e.AddNode(n); err != nil {
@@ -247,7 +248,8 @@ func TestEngine_RefreshReWatches(t *testing.T) {
 	defer cancel()
 	e.AddRadio(ctx, testChannel, f)
 	n := node.NewNode(
-		&node.Descriptor{Node: "t", Channel: testChannel},
+		"t",
+		&node.Descriptor{Channel: testChannel},
 		node.Identity{Address: nodeAddr, Key: testKey},
 	)
 	if err := e.AddNode(n); err != nil {

@@ -311,9 +311,13 @@ The hub is a generic bridge: it reads this descriptor and maps every BleRiot
 register to a register in the external Registry service, without any
 class-specific logic.
 
+The descriptor is a **shared, per-type** artifact and carries **no node name**.
+A node's name and its provisioned identity live in a separate per-device
+instance file on the hub (§11.9), so one descriptor can back many physical
+devices.
+
 ```json
 {
-  "node": "garage-controller",
   "channel": 10,
   "version": "0x9F3C1E8A",
   "metadata": { "hw_rev": "1.3" },
@@ -372,6 +376,36 @@ The generator collects qualified names `aux.relay`, `main.relay`,
 interfaces + wiring table) and the JSON node descriptor above. Two `switch`
 instances coexist because their qualified names differ — the wire never sees the
 instance concept.
+
+### 11.9 Hub Node Files
+
+The hub does not list nodes in its main config. Instead the config names a
+**nodes directory** (`nodesDir`), and every `*.json` file in it is one physical
+node. This keeps provisioning a new device to a single file drop — the hub
+config is never edited.
+
+A node file is a thin **instance file**: it references a shared descriptor
+(§11.7) and carries the device's provisioned identity (§11.5). The file's base
+name is the node name (so the descriptor itself needs no name field). The
+`descriptor` path is resolved relative to the node file's own directory.
+
+```
+hub.json                     # nodesDir: "nodes"
+descriptors/
+  thermo.json                # shared per-type descriptor (generated, §11.7)
+nodes/
+  outdoor.json               # node "outdoor"
+  garage.json                # node "garage"  (same descriptor, different identity)
+```
+
+```json
+// nodes/outdoor.json
+{
+  "descriptor": "../descriptors/thermo.json",
+  "address": "CCA00002",
+  "key": "00112233445566778899AABBCCDDEEFF"
+}
+```
 
 ---
 

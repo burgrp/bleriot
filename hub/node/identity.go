@@ -58,14 +58,17 @@ func ParseAddress(s string) ([AddrLen]byte, error) {
 	return a, nil
 }
 
-// Node couples a node's descriptor with its provisioned identity. It is the
-// host's complete view of one node.
+// Node couples a node's descriptor with its provisioned identity and its name.
+// It is the host's complete view of one node. The name identifies the physical
+// device (on the hub it comes from the instance file name) and is distinct from
+// the shared, per-type descriptor.
 type Node struct {
+	Name string
 	*Descriptor
 	Identity
 }
 
-// NewNode pairs a descriptor with an identity.
-func NewNode(d *Descriptor, id Identity) *Node {
-	return &Node{Descriptor: d, Identity: id}
+// NewNode pairs a descriptor with an identity under the given node name.
+func NewNode(name string, d *Descriptor, id Identity) *Node {
+	return &Node{Name: name, Descriptor: d, Identity: id}
 }

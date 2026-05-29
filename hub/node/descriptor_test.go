@@ -6,7 +6,6 @@ import (
 )
 
 const sampleJSON = `{
-  "node": "garage-controller",
   "channel": 10,
   "version": "0x0E9FC8AD",
   "metadata": { "hw_rev": "1.3" },
@@ -31,8 +30,8 @@ func loadSample(t *testing.T) *Descriptor {
 
 func TestLoadDescriptor_Indexes(t *testing.T) {
 	d := loadSample(t)
-	if d.Node != "garage-controller" || d.Channel != 10 {
-		t.Fatalf("header wrong: %q %d", d.Node, d.Channel)
+	if d.Channel != 10 {
+		t.Fatalf("header wrong: channel=%d", d.Channel)
 	}
 	if len(d.Registers) != 3 {
 		t.Fatalf("got %d registers, want 3", len(d.Registers))
