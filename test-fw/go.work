@@ -1,6 +1,7 @@
 go 1.25.2
 
 use .
+use ../bleriot
 use ../../tinygo-drivers/bb/spi
 use ../../tinygo-drivers/bb/i2c
 use ../../tinygo-drivers/pan211x

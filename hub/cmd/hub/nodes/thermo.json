@@ -1,0 +1,34 @@
+{
+  "node": "thermo",
+  "channel": 37,
+  "version": "0x1A2B3C4D",
+  "metadata": {
+    "model": "bleriot-thermo-v1"
+  },
+  "registers": [
+    {
+      "id": 4660,
+      "name": "outdoor.temperature",
+      "class": "thermometer",
+      "instance": "outdoor",
+      "type": "float",
+      "multiplier": 1,
+      "divider": 100,
+      "metadata": {
+        "unit": "celsius"
+      }
+    },
+    {
+      "id": 4661,
+      "name": "outdoor.humidity",
+      "class": "hygrometer",
+      "instance": "outdoor",
+      "type": "float",
+      "multiplier": 1,
+      "divider": 10,
+      "metadata": {
+        "unit": "percent"
+      }
+    }
+  ]
+}

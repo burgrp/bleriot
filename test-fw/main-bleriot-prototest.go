@@ -5,8 +5,9 @@ package main
 import (
 	"machine"
 	"runtime"
-	"test-fw/bleriot"
 	"time"
+
+	"bleriot"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
 	"github.com/burgrp/tinygo-drivers/pan211x"

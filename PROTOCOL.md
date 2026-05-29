@@ -151,80 +151,227 @@ The protocol is **best-effort at the RF layer**. Reliability is the hub's respon
 
 - A node keeps at most one subscription per register per hub.
 - A subscription expires if the node receives no packet from that hub for `T_idle` (recommended: 60 s). After expiry, push stops silently.
+- To keep subscriptions alive, the hub periodically re-sends `WATCH` for every active subscription well within `T_idle` (the reference host hub uses a 15 s refresh interval). Re-`WATCH` also re-establishes any subscription a node may have dropped (e.g. after a reboot).
 - Change detection is implementation-defined. The hub may fall back to polling if a node pushes too frequently.
 
 ---
 
-## 11. Provisioning
+## 11. Register Model, Descriptors, and Code Generation
 
-Node provisioning is a one-time, one-way transfer that delivers a **node descriptor** to the hub over a side-channel (SWD/RTT, UART, IrDa, or similar). The descriptor is encoded as YAML.
+The protocol carries registers as bare `uint16` IDs on the wire (§4). Names,
+types, scaling, and metadata are **hub-side knowledge** and are deliberately
+absent from the wire format for performance and memory reasons. The mapping
+between wire IDs and named, typed registers is produced by an offline
+**code-generation** step, not transmitted by the node at runtime.
 
-### 11.1 Framing
+This section defines the authoring model (class descriptors, node specs), the
+generated artifacts (node code, node descriptor), the deterministic ID
+allocation algorithm, and the separate node-identity provisioning path.
 
-The descriptor is delimited by a sentinel line and a trailing empty line, so the hub can extract it from a noisy output stream (e.g. mixed RTT debug output):
+### 11.1 Concepts
+
+| Concept | Role | Source of truth | Carries wire IDs? |
+|---------|------|-----------------|-------------------|
+| **Class descriptor** | A reusable, named set of registers (a "register profile"). Defines register *names*, types, scaling, and metadata only. | Hand-authored library | No |
+| **Node spec** | Composition of one or more class *instances*, plus channel and node metadata. Describes *what a node is*. | Hand-authored, per node-type | No |
+| **Generated node code** | Per-node firmware artifact: `const` wire IDs, one interface per class, and a wiring table. | Code generator | Yes (assigned) |
+| **Generated node descriptor** | Per-node hub artifact: the resolved flat list of `id → {name, type, scaling, metadata}`. | Code generator | Yes (assigned) |
+| **Node identity** | The node's `address` (§3) and shared `key` (§5). Per-chip, secret. | Runtime / provisioning tool | n/a |
+
+The single most important rule: **the code generator is the sole authority that
+assigns wire IDs.** Class descriptors and node specs never contain IDs. Both
+generated artifacts are produced from the same generator run, so the firmware
+and the hub descriptor cannot drift.
 
 ```
---- bleriot-node
-address: 0xA3F2B841
-key: 9f3c1e8a2b7d4f06e5a0c3d1b8f92e47
-...
-
+class descriptors          ──┐
+ (names only, NO wire IDs)   │
+                             ├─► codegen ──┬─► node code (const IDs + interfaces + wiring)
+node spec                    │             │
+ (which classes/instances) ──┘             └─► node descriptor (resolved id→name/meta)
+                                                      │
+                                                      └─► consumed by hub
 ```
 
-- **Start sentinel:** a line equal to `--- bleriot-node`
-- **End:** the first empty line after the sentinel
-- The captured block (sentinel line through the last non-empty line) is valid YAML and can be fed directly to any YAML parser.
+The wire format (§4) and the node-side protocol logic are **unchanged** by this
+model — they still operate on a flat `uint16` REG. All class/instance/offset
+resolution happens at generation time on the host, never on the MCU.
 
-### 11.2 Node Descriptor
+### 11.2 Class Descriptor
 
-| Field      | Type               | Description                                                   |
-|------------|--------------------|---------------------------------------------------------------|
-| address    | uint32             | Node RF address (§3), hex-encoded (e.g. `0xA3F2B841`)        |
-| channel    | uint8              | RF channel the node listens and transmits on                  |
-| key        | bytes[16]          | 16-byte shared secret, hex-encoded (32 hex chars)             |
-| metadata   | map<string,string> | Key-value pairs merged into the hub's node record             |
-| registers  | list<Register>     | Register descriptors (see §11.3)                              |
+A class descriptor is a reusable register profile. It is authored as Go source
+(values consumed by the generator). Register names are unique within the class.
+
+| Field      | Type                 | Description                                                  |
+|------------|----------------------|-------------------------------------------------------------|
+| name       | string               | Class name (e.g. `thermometer`), unique within the library  |
+| registers  | list<Register>       | Register descriptors (see §11.3)                            |
+| metadata   | map<string,string>   | Key-value pairs merged into every instance's hub record     |
 
 ### 11.3 Register Descriptor
 
+Note: there is **no `id` field**. The wire ID is assigned by the generator
+(§11.6).
+
 | Field      | Type               | Description                                                   |
 |------------|--------------------|---------------------------------------------------------------|
-| id         | uint16             | Register address used in RF packets (REG field, §4)           |
-| name       | string             | Human-readable name (e.g. `temperature`)                      |
+| name       | string             | Register name, unique within its class (e.g. `temperature`)   |
 | type       | enum               | `int`, `float`, or `bool`                                     |
 | multiplier | int32              | Hub scaling: `display = wire × multiplier / divider`          |
 | divider    | int32              | See multiplier; must not be zero                              |
 | metadata   | map<string,string> | Key-value pairs merged into the hub's register record         |
 
-All registers carry `int32` on the wire (§8). `type`, `multiplier`, and `divider` are hub-side hints only — the node always sends raw `int32`.
+All registers carry `int32` on the wire (§8). `type`, `multiplier`, and
+`divider` are hub-side hints only — the node always sends raw `int32`.
 
 - **`int`** — no scaling; multiplier=1, divider=1 is the identity.
 - **`float`** — wire value is scaled: e.g. multiplier=1, divider=100 means wire value `1234` displays as `12.34`.
 - **`bool`** — wire value 0 = false, 1 = true; multiplier/divider are ignored.
 
-### 11.4 Example
+### 11.4 Node Spec
 
-```yaml
---- bleriot-node
-address: 0xA3F2B841
-channel: 10
-key: 9f3c1e8a2b7d4f06e5a0c3d1b8f92e47
-metadata:
-  location: garage
-  hw_rev: "1.3"
-registers:
-  - id: 0x0001
-    name: temperature
-    type: float
-    multiplier: 1
-    divider: 100
-    metadata:
-      unit: celsius
-  - id: 0x0002
-    name: relay
-    type: bool
+A node spec composes class instances into a concrete node-type. A class may be
+instantiated more than once; each instance has a name unique within the node.
+
+| Field      | Type                 | Description                                                       |
+|------------|----------------------|------------------------------------------------------------------|
+| name       | string               | Node-type name (used to name generated artifacts)                |
+| channel    | uint8                | RF channel the node listens and transmits on (§2)                |
+| metadata   | map<string,string>   | Key-value pairs merged into the hub's node record                |
+| instances  | list<ClassInstance>  | Class instances composed onto this node (see below)              |
+
+**ClassInstance**
+
+| Field    | Type   | Description                                                          |
+|----------|--------|---------------------------------------------------------------------|
+| class    | string | Name of a class descriptor (§11.2)                                  |
+| name     | string | Instance name, unique within the node (e.g. `outdoor`, `relay_a`)  |
+
+The **qualified register name** is `instanceName + "." + registerName`
+(e.g. `outdoor.temperature`). Qualified names are unique within a node and are
+the keys used by both ID allocation (§11.6) and the hub.
+
+### 11.5 Node Identity Provisioning
+
+`address` (§3) and `key` (§5) are **not** part of any descriptor file. They are
+per-chip and the key is secret, so they are delivered to the hub by the
+provisioning tooling out of band — for example, read/derived over SWD at flash
+time (`address = CRC32(MCU_UID)`), with the key injected during the same step.
+
+The node firmware therefore emits **no descriptor at runtime**. The hub obtains
+the generated node descriptor (§11.7) directly as a file and merges in the
+identity record produced by the provisioning tool.
+
+### 11.6 Wire ID Allocation (generator algorithm)
+
+The generator assigns a `uint16` to every qualified register name
+deterministically:
+
+1. **Collect** all qualified names across every instance in the node spec.
+2. **Canonical order:** sort qualified names lexicographically. Allocation is
+   performed in this order so the result is independent of the authoring order
+   of classes or instances in the node spec.
+3. **Primary slot:** `id = fnv1a32(qualifiedName) & 0xFFFF`. The reserved value
+   `0x0000` is never assigned; if the hash yields `0x0000`, treat it as a
+   collision.
+4. **Collision resolution:** if the slot is already taken (or reserved), linear
+   probe `(id + 1) & 0xFFFF`, skipping `0x0000`, until a free slot is found.
+5. **Version hash:** the generator computes a descriptor version hash over the
+   full resolved set of `(id, qualifiedName, type, multiplier, divider)` tuples
+   in canonical order. This hash is embedded in both the generated node code and
+   the generated node descriptor so the hub can detect a firmware/descriptor
+   mismatch.
+
+> **Stability note.** Hash-based allocation is stable across reordering the node
+> spec. Adding a register can still shift the IDs of later-probed entries that
+> collide with the newcomer's slot. The version hash makes such a shift
+> detectable; pinning IDs across firmware versions (e.g. via a checked-in
+> lockfile) is a possible future hardening and is out of scope here.
+
+### 11.7 Generated Artifacts
+
+Both artifacts are produced by one generator run and are **checked into version
+control**.
+
+**Node code** (Go, compiled into firmware) provides, per node:
+
+- A `const` for each qualified register's wire ID, e.g.
+  `RegOutdoorTemperature uint16 = 0x1A3F`.
+- A slice of all wire IDs (`RegisterIDs`) for iteration / table setup.
+- The descriptor version hash as a `const`.
+
+No per-class wrappers or interfaces are generated. The firmware backs registers
+generically, keyed by `uint16` wire ID; classes and instances exist only at
+generation time. No register names, types, scaling, or metadata appear in
+firmware — only IDs. This keeps flash/RAM cost minimal.
+
+**Node descriptor** (consumed by the hub) is the resolved flat list. It is
+emitted as a data file (JSON) so the hub need not import generator packages.
+The hub is a generic bridge: it reads this descriptor and maps every BleRiot
+register to a register in the external Registry service, without any
+class-specific logic.
+
+```json
+{
+  "node": "garage-controller",
+  "channel": 10,
+  "version": "0x9F3C1E8A",
+  "metadata": { "hw_rev": "1.3" },
+  "registers": [
+    {
+      "id": 6719,
+      "name": "outdoor.temperature",
+      "class": "thermometer",
+      "instance": "outdoor",
+      "type": "float",
+      "multiplier": 1,
+      "divider": 100,
+      "metadata": { "unit": "celsius" }
+    },
+    {
+      "id": 2048,
+      "name": "main.relay",
+      "class": "switch",
+      "instance": "main",
+      "type": "bool",
+      "multiplier": 1,
+      "divider": 1,
+      "metadata": {}
+    }
+  ]
+}
+```
+
+### 11.8 Worked Example
+
+Authored classes (names only, no IDs):
 
 ```
+class "thermometer":
+  registers:
+    - name: temperature   type: float   multiplier: 1  divider: 100  metadata: {unit: celsius}
+    - name: humidity       type: int      multiplier: 1  divider: 1
+
+class "switch":
+  registers:
+    - name: relay          type: bool
+```
+
+Authored node spec (`garage-controller`, channel 10):
+
+```
+instances:
+  - class: thermometer  name: outdoor
+  - class: switch        name: main
+  - class: switch        name: aux
+```
+
+The generator collects qualified names `aux.relay`, `main.relay`,
+`outdoor.humidity`, `outdoor.temperature`, allocates a `uint16` to each per
+§11.6, then emits the node code (const IDs + `Thermometer` and `Switch`
+interfaces + wiring table) and the JSON node descriptor above. Two `switch`
+instances coexist because their qualified names differ — the wire never sees the
+instance concept.
 
 ---
 
