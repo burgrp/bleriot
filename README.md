@@ -16,11 +16,30 @@ the reference hardware design.
 ## Architecture at a glance
 
 ```
-┌──────────────┐   Registry    ┌───────────────────────────────┐  COBS/UART  ┌────────────┐   RF    ┌───────┐
-│   Registry   │◀────────────▶│           hub/host            │◀──────────▶│   hub/fw   │◀──────▶│ node  │
-│   service    │   provide/    │  (Linux SBC: protocol logic,  │   link      │ (MCU "dumb │  250kbps│ (×N)  │
-│              │   consume     │   XTEA keys, retries, watch)  │   protocol  │  modem")   │ GFSK    │       │
-└──────────────┘               └───────────────────────────────┘             └────────────┘         └───────┘
+┌─────────────────────────────┐
+│        Registry service     │
+└─────────────────────────────┘
+              ▲
+              │  provide / consume
+              ▼
+┌─────────────────────────────┐
+│           hub/host          │
+│  Linux SBC: protocol logic, │
+│  XTEA keys, retries, watch  │
+└─────────────────────────────┘
+              ▲
+              │  link protocol (COBS / UART)
+              ▼
+┌─────────────────────────────┐
+│            hub/fw           │
+│   MCU "dumb radio modem"    │
+└─────────────────────────────┘
+              ▲
+              │  RF · 250 kbps GFSK
+              ▼
+┌─────────────────────────────┐
+│          node (×N)          │
+└─────────────────────────────┘
 ```
 
 The hub is deliberately split in two:
