@@ -41,6 +41,7 @@ import (
 
 	"github.com/burgrp/reg/pkg/client"
 	clientfactory "github.com/burgrp/reg/pkg/client/factory"
+	"github.com/lmittmann/tint"
 	"go.bug.st/serial"
 
 	"hub/bridge"
@@ -82,7 +83,10 @@ func main() {
 	if *debug {
 		level = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
+		Level:      level,
+		TimeFormat: time.TimeOnly,
+	}))
 	slog.SetDefault(logger)
 
 	if err := run(*cfgPath, logger); err != nil {

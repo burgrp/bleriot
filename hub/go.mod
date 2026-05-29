@@ -20,6 +20,7 @@ go 1.25.2
 require (
 	bleriot v0.0.0
 	github.com/burgrp/reg v0.0.0-00010101000000-000000000000
+	github.com/lmittmann/tint v1.1.2
 	go.bug.st/serial v1.6.4
 )
 
