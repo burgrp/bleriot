@@ -257,6 +257,9 @@ the keys used by both ID allocation (§11.6) and the hub.
 per-chip and the key is secret, so they are delivered to the hub by the
 provisioning tooling out of band — for example, read/derived over SWD at flash
 time (`address = CRC32(MCU_UID)`), with the key injected during the same step.
+The node's **RF channel** (§2) is likewise a per-device deployment fact, not a
+property of the node type, so it too is provisioned per device rather than
+baked into the descriptor.
 
 The node firmware therefore emits **no descriptor at runtime**. The hub obtains
 the generated node descriptor (§11.7) directly as a file and merges in the
@@ -311,14 +314,13 @@ The hub is a generic bridge: it reads this descriptor and maps every BleRiot
 register to a register in the external Registry service, without any
 class-specific logic.
 
-The descriptor is a **shared, per-type** artifact and carries **no node name**.
-A node's name and its provisioned identity live in a separate per-device
-instance file on the hub (§11.9), so one descriptor can back many physical
-devices.
+The descriptor is a **shared, per-type** artifact and carries **no node name**
+and **no RF channel**. A node's name, its RF channel, and its provisioned
+identity all live in a separate per-device instance file on the hub (§11.9), so
+one descriptor can back many physical devices on different channels.
 
 ```json
 {
-  "channel": 10,
   "version": "0x9F3C1E8A",
   "metadata": { "hw_rev": "1.3" },
   "registers": [
@@ -385,23 +387,25 @@ node. This keeps provisioning a new device to a single file drop — the hub
 config is never edited.
 
 A node file is a thin **instance file**: it references a shared descriptor
-(§11.7) and carries the device's provisioned identity (§11.5). The file's base
-name is the node name (so the descriptor itself needs no name field). The
-`descriptor` path is resolved relative to the node file's own directory.
+(§11.7) and carries the device's RF channel and provisioned identity (§11.5).
+The file's base name is the node name (so the descriptor itself needs no name
+field). The `descriptor` path is resolved relative to the node file's own
+directory.
 
 ```
 hub.json                     # nodesDir: "nodes"
 descriptors/
   thermo.json                # shared per-type descriptor (generated, §11.7)
 nodes/
-  outdoor.json               # node "outdoor"
-  garage.json                # node "garage"  (same descriptor, different identity)
+  outdoor.json               # node "outdoor" on channel 37
+  garage.json                # node "garage"  (same descriptor, own channel + identity)
 ```
 
 ```json
 // nodes/outdoor.json
 {
   "descriptor": "../descriptors/thermo.json",
+  "channel": 37,
   "address": "CCA00002",
   "key": "00112233445566778899AABBCCDDEEFF"
 }

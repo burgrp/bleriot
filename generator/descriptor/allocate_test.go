@@ -21,8 +21,7 @@ func library() map[string]ClassDescriptor {
 // §11.8 worked example.
 func garageSpec() NodeSpec {
 	return NodeSpec{
-		Name:    "garage-controller",
-		Channel: 10,
+		Name: "garage-controller",
 		Instances: []ClassInstance{
 			{Class: "thermometer", Name: "outdoor"},
 			{Class: "switch", Name: "main"},

@@ -110,7 +110,6 @@ func TestNewRegistry(t *testing.T) {
 }
 
 const sampleDescriptor = `{
-  "channel": 37,
   "version": "0x1A2B3C4D",
   "metadata": {},
   "registers": [
@@ -133,8 +132,8 @@ func TestLoadNodes(t *testing.T) {
 		}
 	}
 	write("descriptors/thermo.json", sampleDescriptor)
-	write("nodes/outdoor.json", `{ "descriptor": "../descriptors/thermo.json", "address": "CCA00002", "key": "00112233445566778899AABBCCDDEEFF" }`)
-	write("nodes/garage.json", `{ "descriptor": "../descriptors/thermo.json", "address": "CCA00003", "key": "00112233445566778899AABBCCDDEEFF" }`)
+	write("nodes/outdoor.json", `{ "descriptor": "../descriptors/thermo.json", "channel": 37, "address": "CCA00002", "key": "00112233445566778899AABBCCDDEEFF" }`)
+	write("nodes/garage.json", `{ "descriptor": "../descriptors/thermo.json", "channel": 11, "address": "CCA00003", "key": "00112233445566778899AABBCCDDEEFF" }`)
 	// A non-JSON file in the directory must be ignored.
 	write("nodes/README.txt", "ignore me")
 
@@ -146,15 +145,15 @@ func TestLoadNodes(t *testing.T) {
 	if len(nodes) != 2 {
 		t.Fatalf("got %d nodes, want 2", len(nodes))
 	}
-	names := map[string]bool{}
+	channels := map[string]uint8{}
 	for _, n := range nodes {
-		names[n.Name] = true
-		if n.Channel != 37 || len(n.Registers) != 1 {
-			t.Errorf("node %q: channel=%d registers=%d", n.Name, n.Channel, len(n.Registers))
+		channels[n.Name] = n.Channel
+		if len(n.Registers) != 1 {
+			t.Errorf("node %q: registers=%d, want 1", n.Name, len(n.Registers))
 		}
 	}
-	if !names["outdoor"] || !names["garage"] {
-		t.Errorf("node names = %v, want outdoor and garage", names)
+	if channels["outdoor"] != 37 || channels["garage"] != 11 {
+		t.Errorf("channels = %v, want outdoor=37 garage=11", channels)
 	}
 }
 

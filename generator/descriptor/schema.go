@@ -44,11 +44,10 @@ type ClassInstance struct {
 }
 
 // NodeSpec describes a concrete node-type as a composition of class instances
-// (§11.4). It carries no address or key — those are node identity, provisioned
-// separately (§11.5).
+// (§11.4). It carries no per-device provisioning data: address, key, and RF
+// channel are all assigned per device at provisioning time (§11.5), not here.
 type NodeSpec struct {
-	Name      string            // node-type name; names generated artifacts
-	Channel   uint8             // RF channel (§2)
+	Name      string            // node-type name; names the generated artifacts (not a per-device node name)
 	Metadata  map[string]string // merged into the hub's node record
 	Instances []ClassInstance   // class instances composed onto this node
 }

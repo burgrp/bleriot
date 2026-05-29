@@ -27,7 +27,6 @@ func library() map[string]descriptor.ClassDescriptor {
 func garage() descriptor.Resolved {
 	spec := descriptor.NodeSpec{
 		Name:     "garage-controller",
-		Channel:  10,
 		Metadata: map[string]string{"hw_rev": "1.3"},
 		Instances: []descriptor.ClassInstance{
 			{Class: "thermometer", Name: "outdoor"},
@@ -105,9 +104,6 @@ func TestGenerateDescriptorJSON_Shape(t *testing.T) {
 	var jd jsonDescriptor
 	if err := json.Unmarshal(data, &jd); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
-	}
-	if jd.Channel != 10 {
-		t.Errorf("channel wrong: %d", jd.Channel)
 	}
 	if !strings.HasPrefix(jd.Version, "0x") {
 		t.Errorf("version not hex string: %q", jd.Version)

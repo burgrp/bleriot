@@ -51,8 +51,7 @@ func run(outDir string) error {
 
 	spec := descriptor.NodeSpec{
 		Name:     "garage-controller",
-		Channel:  10,
-		Metadata: map[string]string{"hw_rev": "1.3", "location": "garage"},
+		Metadata: map[string]string{"hw_rev": "1.3"},
 		Instances: []descriptor.ClassInstance{
 			{Class: "thermometer", Name: "outdoor"},
 			{Class: "thermometer", Name: "indoor"},

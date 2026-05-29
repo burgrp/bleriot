@@ -25,6 +25,7 @@
 //
 //	{
 //	  "descriptor": "../descriptors/thermo.json",
+//	  "channel": 37,
 //	  "address": "CCA00002",
 //	  "key": "00112233445566778899AABBCCDDEEFF"
 //	}
@@ -83,6 +84,7 @@ type portConfig struct {
 // is the file's base name, not stored inside the file.
 type nodeFile struct {
 	Descriptor string `json:"descriptor"`
+	Channel    uint8  `json:"channel"`
 	Address    string `json:"address"`
 	Key        string `json:"key"`
 }
@@ -204,9 +206,9 @@ func startPorts(ctx context.Context, cfg config, eng *engine.Engine, hubAddr [no
 }
 
 // loadNodes reads every *.json instance file in the configured nodes directory.
-// Each file names a shared descriptor plus the device's identity; the file's
-// base name (without ".json") is the node name. The descriptor path is resolved
-// relative to the instance file's own directory.
+// Each file names a shared descriptor plus the device's RF channel and identity;
+// the file's base name (without ".json") is the node name. The descriptor path
+// is resolved relative to the instance file's own directory.
 func loadNodes(cfg config, baseDir string, eng *engine.Engine) ([]*node.Node, error) {
 	if cfg.NodesDir == "" {
 		return nil, fmt.Errorf("config: nodesDir is required")
@@ -243,7 +245,7 @@ func loadNodes(cfg config, baseDir string, eng *engine.Engine) ([]*node.Node, er
 		if err != nil {
 			return nil, fmt.Errorf("node %s identity: %w", name, err)
 		}
-		n := node.NewNode(name, desc, id)
+		n := node.NewNode(name, nf.Channel, desc, id)
 		if err := eng.AddNode(n); err != nil {
 			return nil, err
 		}

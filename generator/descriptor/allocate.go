@@ -24,7 +24,6 @@ type ResolvedRegister struct {
 // hash (§11.6 step 5) used for firmware/descriptor mismatch detection.
 type Resolved struct {
 	Node      string
-	Channel   uint8
 	Metadata  map[string]string
 	Version   uint32
 	Registers []ResolvedRegister
@@ -92,7 +91,6 @@ func AllocateIDs(spec NodeSpec, library map[string]ClassDescriptor) (Resolved, e
 
 	return Resolved{
 		Node:      spec.Name,
-		Channel:   spec.Channel,
 		Metadata:  spec.Metadata,
 		Version:   versionHash(regs),
 		Registers: regs,

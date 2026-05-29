@@ -76,9 +76,9 @@ func TestParseIdentity(t *testing.T) {
 }
 
 func TestNewNode(t *testing.T) {
-	d := &Descriptor{Channel: 37}
+	d := &Descriptor{Version: "0x1"}
 	id := Identity{Address: [AddrLen]byte{1, 2, 3, 4}}
-	n := NewNode("thermo", d, id)
+	n := NewNode("thermo", 37, d, id)
 	if n.Descriptor != d {
 		t.Error("descriptor not embedded")
 	}
@@ -88,8 +88,7 @@ func TestNewNode(t *testing.T) {
 	if n.Name != "thermo" {
 		t.Errorf("node name = %q, want \"thermo\"", n.Name)
 	}
-	// Fields of the embedded descriptor are reachable directly.
 	if n.Channel != 37 {
-		t.Errorf("embedded descriptor field: channel=%d", n.Channel)
+		t.Errorf("node channel = %d, want 37", n.Channel)
 	}
 }
