@@ -20,8 +20,8 @@ import (
 	"runtime"
 	"time"
 
-	"protocol"
 	"hub/link"
+	"protocol"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
 	"github.com/burgrp/tinygo-drivers/pan211x"
