@@ -20,12 +20,14 @@ These parameters are mandatory for all BleRiot-compatible radio implementations:
 
 | Parameter        | Value                                                                   |
 |------------------|-------------------------------------------------------------------------|
-| Frequency        | 2440 MHz                                                                |
+| Channel          | Per-node, provisioned via §11 (e.g. channel 10 = 2440 MHz)             |
 | Sync word        | Destination device address (4 bytes, little-endian) — see §3           |
 | Data rate        | 250 kbps                                                                |
 | Modulation       | GFSK                                                                    |
 | Packet format    | BLE-compatible (preamble, sync word, PDU, 3-byte CRC, whitening)       |
 | PDU size         | 20 bytes (fixed)                                                        |
+
+Each node operates on a single channel defined in its provisioning descriptor. The hub may have multiple radio interfaces, each assigned to a different channel, allowing nodes to be grouped by channel for spectrum spread or logical partitioning.
 
 The RF sync word for each transmission is set to the 4-byte destination device address. Radio hardware that supports address/pipe filtering must configure its receive address to the device's own address, so only packets destined for that device are passed to the protocol layer. The 32-bit address space makes accidental collision with foreign RF traffic negligible.
 
@@ -176,6 +178,7 @@ key: 9f3c1e8a2b7d4f06e5a0c3d1b8f92e47
 | Field      | Type               | Description                                                   |
 |------------|--------------------|---------------------------------------------------------------|
 | address    | uint32             | Node RF address (§3), hex-encoded (e.g. `0xA3F2B841`)        |
+| channel    | uint8              | RF channel the node listens and transmits on                  |
 | key        | bytes[16]          | AES-128 shared secret, hex-encoded (32 hex chars)             |
 | metadata   | map<string,string> | Key-value pairs merged into the hub's node record             |
 | registers  | list<Register>     | Register descriptors (see §11.3)                              |
@@ -202,6 +205,7 @@ All registers carry `int32` on the wire (§8). `type`, `multiplier`, and `divide
 ```yaml
 --- bleriot-node
 address: 0xA3F2B841
+channel: 10
 key: 9f3c1e8a2b7d4f06e5a0c3d1b8f92e47
 metadata:
   location: garage
@@ -217,8 +221,6 @@ registers:
   - id: 0x0002
     name: relay
     type: bool
-    multiplier: 1
-    divider: 1
 
 ```
 
