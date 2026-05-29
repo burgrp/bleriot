@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"link"
+	"hub/link"
 )
 
 // writeFrame encodes msg and writes it to the mcu side of a pipe.

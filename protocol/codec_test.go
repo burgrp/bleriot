@@ -1,4 +1,4 @@
-package bleriot
+package protocol
 
 import (
 	"bytes"

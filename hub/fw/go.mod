@@ -1,4 +1,4 @@
-module test-fw
+module hub/fw
 
 go 1.25.2
 

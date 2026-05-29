@@ -15,12 +15,12 @@ import (
 	"sync"
 	"time"
 
-	"bleriot"
-	"hub/node"
+	"hub/host/node"
+	"protocol"
 )
 
 // PacketLen is the fixed BleRiot on-wire packet size (§4).
-const PacketLen = bleriot.PacketLen
+const PacketLen = protocol.PacketLen
 
 // Defaults from PROTOCOL.md §9.
 const (
@@ -70,7 +70,7 @@ type key struct {
 
 type nodeState struct {
 	n     *node.Node
-	codec bleriot.Codec
+	codec protocol.Codec
 }
 
 // Options configures an Engine.
@@ -166,7 +166,7 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 		if !live {
 			continue
 		}
-		_, _ = e.transact(ctx, k.addr, bleriot.TypeWATCH, k.reg, 1)
+		_, _ = e.transact(ctx, k.addr, protocol.TypeWATCH, k.reg, 1)
 	}
 }
 
@@ -181,7 +181,7 @@ func (e *Engine) AddRadio(ctx context.Context, channel uint8, r Radio) {
 
 // AddNode registers a node, building its XTEA codec from the provisioned key.
 func (e *Engine) AddNode(n *node.Node) error {
-	c, err := bleriot.NewCodec(n.Key)
+	c, err := protocol.NewCodec(n.Key)
 	if err != nil {
 		return err
 	}
@@ -193,12 +193,12 @@ func (e *Engine) AddNode(n *node.Node) error {
 
 // Get reads a register's current value (§8.1).
 func (e *Engine) Get(ctx context.Context, addr [node.AddrLen]byte, reg uint16) (Update, error) {
-	return e.transact(ctx, addr, bleriot.TypeGET, reg, 0)
+	return e.transact(ctx, addr, protocol.TypeGET, reg, 0)
 }
 
 // Set writes a register and returns the node's reported actual value (§8.2).
 func (e *Engine) Set(ctx context.Context, addr [node.AddrLen]byte, reg uint16, value int32) (Update, error) {
-	return e.transact(ctx, addr, bleriot.TypeSET, reg, value)
+	return e.transact(ctx, addr, protocol.TypeSET, reg, value)
 }
 
 // Watch subscribes to a register (§8.3). cb is invoked for the immediate reply
@@ -219,14 +219,14 @@ func (e *Engine) Watch(ctx context.Context, addr [node.AddrLen]byte, reg uint16,
 	e.subs[k] = cb
 	e.mu.Unlock()
 
-	_, err := e.transact(ctx, addr, bleriot.TypeWATCH, reg, 1)
+	_, err := e.transact(ctx, addr, protocol.TypeWATCH, reg, 1)
 	return err
 }
 
 // Unwatch cancels a subscription (§8.4).
 func (e *Engine) Unwatch(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error {
 	k := key{addr, reg}
-	_, err := e.transact(ctx, addr, bleriot.TypeWATCH, reg, 0)
+	_, err := e.transact(ctx, addr, protocol.TypeWATCH, reg, 0)
 	e.mu.Lock()
 	delete(e.subs, k)
 	e.mu.Unlock()
@@ -309,11 +309,11 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	}
 
 	srcDec, typ, flags, reg, value, err := ns.codec.Decode(pkt[:])
-	if err != nil || srcDec != src || typ != bleriot.TypeIS {
+	if err != nil || srcDec != src || typ != protocol.TypeIS {
 		return
 	}
 
-	u := Update{Value: value, Null: flags&bleriot.FlagNULL != 0}
+	u := Update{Value: value, Null: flags&protocol.FlagNULL != 0}
 	k := key{src, reg}
 
 	e.mu.Lock()

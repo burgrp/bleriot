@@ -20,8 +20,8 @@ import (
 	"runtime"
 	"time"
 
-	"bleriot"
-	"link"
+	"protocol"
+	"hub/link"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
 	"github.com/burgrp/tinygo-drivers/pan211x"
@@ -67,7 +67,7 @@ func main() {
 	radio := pan211x.NewDriverBLELongRange(
 		pan211x.NewRegistersSPI(spi.NewMaster(pinSpiSck, pinSpiData), pinSpiCsn))
 	must(radio.Init(pan211x.ConfigBLELongRange{
-		PayloadLen:      bleriot.PacketLen,
+		PayloadLen:      protocol.PacketLen,
 		SerialInterface: pan211x.SerialInterfaceSPI3W,
 		SpreadFactor:    pan211x.SpreadFactorS8,
 	}))
@@ -89,8 +89,8 @@ type modem struct {
 	radio *pan211x.DriverBLELongRange
 	dec   *link.Decoder
 
-	txBuf   []byte                  // reusable link-frame encode buffer
-	recvBuf [bleriot.PacketLen]byte // reusable radio receive buffer
+	txBuf   []byte                   // reusable link-frame encode buffer
+	recvBuf [protocol.PacketLen]byte // reusable radio receive buffer
 }
 
 // run is the single cooperative loop: drain the UART into the link decoder,
@@ -117,7 +117,7 @@ func (m *modem) run() {
 		}
 
 		// Forward at most one received packet per iteration.
-		if n, ok := m.radio.Receive(m.recvBuf[:]); ok && n == bleriot.PacketLen {
+		if n, ok := m.radio.Receive(m.recvBuf[:]); ok && n == protocol.PacketLen {
 			m.sendRecv(m.recvBuf[:])
 			pinLedGreen.Set(!pinLedGreen.Get())
 		}
@@ -147,7 +147,7 @@ func (m *modem) dispatch(msg link.Message) {
 		m.sendHello()
 
 	case link.MsgSend:
-		if len(msg.Payload) != bleriot.PacketLen {
+		if len(msg.Payload) != protocol.PacketLen {
 			m.sendError(link.ErrBadFrame)
 			return
 		}

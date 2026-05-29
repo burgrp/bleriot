@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"bleriot"
-	"hub/node"
+	"hub/host/node"
+	"protocol"
 )
 
 var testKey = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
@@ -56,7 +56,7 @@ func (f *fakeRadio) Received() <-chan [PacketLen]byte { return f.recv }
 
 // simulateNode reads one request, decodes it, and replies with an IS packet.
 // reply transforms the request value into the response value.
-func simulateNode(t *testing.T, f *fakeRadio, c bleriot.Codec, reply func(typ byte, reg uint16, val int32) (int32, bool)) {
+func simulateNode(t *testing.T, f *fakeRadio, c protocol.Codec, reply func(typ byte, reg uint16, val int32) (int32, bool)) {
 	t.Helper()
 	go func() {
 		for req := range f.sent {
@@ -69,17 +69,17 @@ func simulateNode(t *testing.T, f *fakeRadio, c bleriot.Codec, reply func(typ by
 			var resp [PacketLen]byte
 			flags := byte(0)
 			if null {
-				flags = bleriot.FlagNULL
+				flags = protocol.FlagNULL
 			}
-			c.Encode(resp[:], nodeAddr, bleriot.TypeIS, flags, reg, rv)
+			c.Encode(resp[:], nodeAddr, protocol.TypeIS, flags, reg, rv)
 			f.recv <- resp
 		}
 	}()
 }
 
-func newEngine(t *testing.T) (*Engine, *fakeRadio, bleriot.Codec, context.CancelFunc) {
+func newEngine(t *testing.T) (*Engine, *fakeRadio, protocol.Codec, context.CancelFunc) {
 	t.Helper()
-	c, err := bleriot.NewCodec(testKey)
+	c, err := protocol.NewCodec(testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestEngine_Set(t *testing.T) {
 	defer cancel()
 	// Node clamps to a max of 100.
 	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		if typ != bleriot.TypeSET {
+		if typ != protocol.TypeSET {
 			t.Errorf("expected SET, got %d", typ)
 		}
 		if val > 100 {
@@ -213,7 +213,7 @@ func TestEngine_Watch(t *testing.T) {
 
 	// Simulate an unsolicited push.
 	var push [PacketLen]byte
-	c.Encode(push[:], nodeAddr, bleriot.TypeIS, 0, regTemp, 22)
+	c.Encode(push[:], nodeAddr, protocol.TypeIS, 0, regTemp, 22)
 	f.recv <- push
 
 	deadline := time.After(2 * time.Second)
@@ -238,7 +238,7 @@ func TestEngine_Watch(t *testing.T) {
 }
 
 func TestEngine_RefreshReWatches(t *testing.T) {
-	c, err := bleriot.NewCodec(testKey)
+	c, err := protocol.NewCodec(testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestEngine_RefreshReWatches(t *testing.T) {
 	var mu sync.Mutex
 	var watches int
 	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		if typ == bleriot.TypeWATCH && val == 1 {
+		if typ == protocol.TypeWATCH && val == 1 {
 			mu.Lock()
 			watches++
 			mu.Unlock()

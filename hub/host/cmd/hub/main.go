@@ -56,10 +56,10 @@ import (
 	"github.com/lmittmann/tint"
 	"go.bug.st/serial"
 
-	"hub/bridge"
-	"hub/engine"
-	"hub/modem"
-	"hub/node"
+	"hub/host/bridge"
+	"hub/host/engine"
+	"hub/host/modem"
+	"hub/host/node"
 )
 
 type config struct {

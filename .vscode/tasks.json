@@ -13,7 +13,7 @@
                 "isDefault": true
             },
             "options": {
-                "cwd": "${workspaceFolder}/test-fw"
+                "cwd": "${workspaceFolder}/hub/fw"
             },
             "runOptions": {
                 "instanceLimit": 2

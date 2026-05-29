@@ -1,7 +1,7 @@
-// Package bleriot implements the BleRiot IoT register protocol.
+// Package protocol implements the BleRiot IoT register protocol.
 // All operations are allocation-free; packets are passed by value or via
 // caller-supplied buffers.
-package bleriot
+package protocol
 
 import "errors"
 
