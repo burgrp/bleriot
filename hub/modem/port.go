@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"hub/link"
+	"link"
 )
 
 // DefaultBackoff is the wait between (re)connection attempts when none is set.

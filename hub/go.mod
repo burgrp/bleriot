@@ -10,9 +10,10 @@
 //     PAN211x radios and holds no secrets.
 //
 // The two halves communicate over a COBS-framed byte stream (UART now, USB-CDC
-// later) defined in package hub/link. Each modem manages exactly one radio over
-// its own serial port; the host fans out across several modems (one per port),
-// so that multiplexing lives in the host above the link layer, not on the wire.
+// later) defined in the standalone link module. Each modem manages exactly one
+// radio over its own serial port; the host fans out across several modems (one
+// per port), so that multiplexing lives in the host above the link layer, not on
+// the wire.
 module hub
 
 go 1.25.2
@@ -22,6 +23,7 @@ require (
 	github.com/burgrp/reg v0.0.0-00010101000000-000000000000
 	github.com/lmittmann/tint v1.1.2
 	go.bug.st/serial v1.6.4
+	link v0.0.0
 )
 
 require (
@@ -30,5 +32,7 @@ require (
 )
 
 replace bleriot => ../bleriot
+
+replace link => ../link
 
 replace github.com/burgrp/reg => ../../reg

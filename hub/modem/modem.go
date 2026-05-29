@@ -1,7 +1,7 @@
 // Package modem is the host-side client for a single BleRiot "dumb radio modem"
-// reached over one serial port. It wraps the COBS-framed link protocol
-// (package hub/link) and exposes a small, transport-agnostic API: configure the
-// radio, send BleRiot packets, and receive packets the radio picked up.
+// reached over one serial port. It wraps the COBS-framed link protocol (the
+// standalone link module) and exposes a small, transport-agnostic API: configure
+// the radio, send BleRiot packets, and receive packets the radio picked up.
 //
 // One Modem == one radio == one serial port. Routing across several modems
 // (one per channel/port) lives above this package.
@@ -14,7 +14,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"hub/link"
+	"link"
 )
 
 // PacketLen is the fixed BleRiot on-wire packet size (PROTOCOL.md §4).

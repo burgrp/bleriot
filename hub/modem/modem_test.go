@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"hub/link"
+	"link"
 )
 
 // mcuSide simulates the firmware end of the link: it decodes frames the host
