@@ -6,7 +6,10 @@ package bleriot
 import "errors"
 
 // PacketLen is the fixed on-wire packet size in bytes.
-const PacketLen = 12
+const PacketLen = 13
+
+// PacketVersion is the current plaintext packet format version.
+const PacketVersion byte = 0x00
 
 // Packet TYPE values (§7).
 const (
@@ -19,7 +22,10 @@ const (
 // FLAGS bits (§6).
 const FlagNULL byte = 0x01 // VALUE is absent; register has no value
 
-var errShortPacket = errors.New("short packet")
+var (
+	errShortPacket       = errors.New("short packet")
+	errUnsupportedPacket = errors.New("unsupported packet version")
+)
 
 // Codec encrypts and decrypts BleRiot packets using XTEA with the node's
 // shared key. Create one per node key via NewCodec; reuse for all packets.
@@ -38,23 +44,31 @@ func NewCodec(key [16]byte) (Codec, error) {
 	return c, nil
 }
 
-// Encode writes a 12-byte encrypted packet into dst[0:PacketLen].
+// Encode writes a 13-byte packet into dst[0:PacketLen].
 //
 // Packet layout:
 //
 //	[0:4]  SRC   — plaintext source address
-//	[4:12] BLOCK — XTEA encrypted: TYPE(1)+FLAGS(1)+REG(2)+VALUE(4)
+//	[4]    VER   — packet format version
+//	[5:13] BLOCK — XTEA encrypted: TYPE(1)+FLAGS(1)+REG(2)+VALUE(4)
 func (c *Codec) Encode(dst []byte, src [4]byte, typ, flags byte, reg uint16, value int32) {
 	copy(dst[0:4], src[:])
+	dst[4] = PacketVersion
 
 	v0 := uint32(typ) | uint32(flags)<<8 | uint32(reg)<<16
 	v1 := uint32(value)
 	xteaEncrypt(&v0, &v1, &c.key)
-	dst[4] = byte(v0); dst[5] = byte(v0 >> 8); dst[6] = byte(v0 >> 16); dst[7] = byte(v0 >> 24)
-	dst[8] = byte(v1); dst[9] = byte(v1 >> 8); dst[10] = byte(v1 >> 16); dst[11] = byte(v1 >> 24)
+	dst[5] = byte(v0)
+	dst[6] = byte(v0 >> 8)
+	dst[7] = byte(v0 >> 16)
+	dst[8] = byte(v0 >> 24)
+	dst[9] = byte(v1)
+	dst[10] = byte(v1 >> 8)
+	dst[11] = byte(v1 >> 16)
+	dst[12] = byte(v1 >> 24)
 }
 
-// Decode decrypts and parses a 20-byte packet. Returns errShortPacket if
+// Decode decrypts and parses a 13-byte packet. Returns errShortPacket if
 // len(raw) < PacketLen.
 func (c *Codec) Decode(raw []byte) (src [4]byte, typ, flags byte, reg uint16, value int32, err error) {
 	if len(raw) < PacketLen {
@@ -62,10 +76,15 @@ func (c *Codec) Decode(raw []byte) (src [4]byte, typ, flags byte, reg uint16, va
 		return
 	}
 
+	if raw[4] != PacketVersion {
+		err = errUnsupportedPacket
+		return
+	}
+
 	copy(src[:], raw[0:4])
 
-	v0 := uint32(raw[4]) | uint32(raw[5])<<8 | uint32(raw[6])<<16 | uint32(raw[7])<<24
-	v1 := uint32(raw[8]) | uint32(raw[9])<<8 | uint32(raw[10])<<16 | uint32(raw[11])<<24
+	v0 := uint32(raw[5]) | uint32(raw[6])<<8 | uint32(raw[7])<<16 | uint32(raw[8])<<24
+	v1 := uint32(raw[9]) | uint32(raw[10])<<8 | uint32(raw[11])<<16 | uint32(raw[12])<<24
 	xteaDecrypt(&v0, &v1, &c.key)
 	typ = byte(v0)
 	flags = byte(v0 >> 8)
