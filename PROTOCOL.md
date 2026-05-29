@@ -25,7 +25,7 @@ These parameters are mandatory for all BleRiot-compatible radio implementations:
 | Data rate        | 250 kbps                                                                |
 | Modulation       | GFSK                                                                    |
 | Packet format    | BLE-compatible (preamble, sync word, PDU, 3-byte CRC, whitening)       |
-| PDU size         | 20 bytes (fixed)                                                        |
+| PDU size         | 13 bytes (fixed)                                                        |
 
 Each node operates on a single channel defined in its provisioning descriptor. The hub may have multiple radio interfaces, each assigned to a different channel, allowing nodes to be grouped by channel for spectrum spread or logical partitioning.
 
@@ -43,25 +43,25 @@ Reserved address: `0x00000000` — must not be assigned to any device.
 
 ## 4. Packet Format
 
-All packets share the same fixed 20-byte structure:
+All packets share the same fixed 13-byte structure:
 
 ```
 Offset  Size  Field
 ──────  ────  ─────────────────────────────────────────────────
 0       4     SRC   — source device address (little-endian, plaintext)
-4       16    BLOCK — AES-128-ECB encrypted block (see §5):
+4       1     VER   — packet format version (plaintext)
+5       8     BLOCK — XTEA encrypted block (see §5):
                         TYPE  (1 byte)  — packet type (see §6)
                         FLAGS (1 byte)  — options (see §7)
                         REG   (2 bytes) — register address (uint16, little-endian)
                         VALUE (4 bytes) — int32, little-endian (zero in GET/WATCH)
-                        NONCE (8 bytes) — random, prevents ECB ciphertext reuse
 ──────  ────
-Total: 20 bytes
+Total: 13 bytes
 ```
 
 The destination is not carried in the payload. It is encoded as the RF sync word (§2), which the receiver's hardware uses for filtering. A received packet is therefore always addressed to the receiving device.
 
-SRC is plaintext so the receiver can look up the sender's AES key before decrypting BLOCK.
+SRC and VER are plaintext so the receiver can look up the sender's shared key and validate the packet format before decrypting BLOCK.
 
 All multi-byte fields inside BLOCK are **little-endian**.
 
@@ -69,9 +69,11 @@ All multi-byte fields inside BLOCK are **little-endian**.
 
 ## 5. Security
 
-All packets are encrypted with **AES-128-ECB** using the node's shared key (provisioned via §10). The 16-byte BLOCK field contains the payload and an 8-byte random NONCE. The NONCE ensures that repeated identical payloads produce different ciphertexts.
+All packets are encrypted with **XTEA** using the node's shared key (provisioned via §10). The 8-byte BLOCK field contains the payload: TYPE, FLAGS, REG, and VALUE. There is no per-packet nonce in this format.
 
-The hub decrypts each received packet using the AES key associated with the SRC address. Packets from unknown addresses are silently discarded.
+The version byte is used for wire-format compatibility and does not add confidentiality or replay protection.
+
+The hub decrypts each received packet using the shared key associated with the SRC address. Packets from unknown addresses are silently discarded.
 
 ---
 
@@ -179,7 +181,7 @@ key: 9f3c1e8a2b7d4f06e5a0c3d1b8f92e47
 |------------|--------------------|---------------------------------------------------------------|
 | address    | uint32             | Node RF address (§3), hex-encoded (e.g. `0xA3F2B841`)        |
 | channel    | uint8              | RF channel the node listens and transmits on                  |
-| key        | bytes[16]          | AES-128 shared secret, hex-encoded (32 hex chars)             |
+| key        | bytes[16]          | 16-byte shared secret, hex-encoded (32 hex chars)             |
 | metadata   | map<string,string> | Key-value pairs merged into the hub's node record             |
 | registers  | list<Register>     | Register descriptors (see §11.3)                              |
 
