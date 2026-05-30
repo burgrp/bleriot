@@ -1,5 +1,5 @@
 // Package codegen turns a resolved BleRiot node descriptor into the two
-// generated artifacts described in PROTOCOL.md §11.7:
+// generated artifacts described in the protocol spec §11.7:
 //
 //   - Node code: a Go source file compiled into firmware, containing const wire
 //     IDs, a slice of all IDs, and the descriptor version hash. No per-class
@@ -17,7 +17,7 @@ import (
 	"strings"
 	"unicode"
 
-	"generator/descriptor"
+	"cli/pkg/descriptor"
 )
 
 // NodeCodeOptions controls node-code generation.

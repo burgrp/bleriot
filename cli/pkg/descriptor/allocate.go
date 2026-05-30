@@ -31,7 +31,7 @@ type Resolved struct {
 
 // AllocateIDs resolves a NodeSpec against the given class library and assigns a
 // deterministic uint16 wire ID to every qualified register name, per the
-// algorithm in PROTOCOL.md §11.6:
+// algorithm in the protocol spec §11.6:
 //
 //  1. Collect all qualified names across every instance.
 //  2. Sort lexicographically (canonical order — independent of authoring order).

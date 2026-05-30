@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"generator/descriptor"
+	"cli/pkg/descriptor"
 )
 
 func library() map[string]descriptor.ClassDescriptor {

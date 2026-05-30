@@ -3,7 +3,7 @@
 // Subcommands:
 //
 //	bleriot hub        run the host hub bridge (RF nodes ↔ Registry)
-//	bleriot generate   (planned) generate node code and hub descriptors
+//	bleriot generate   generate node code and hub descriptors from a spec
 //	bleriot provision  (planned) provision a device's identity
 package main
 
@@ -24,7 +24,7 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "bleriot",
 		Short:         "BleRiot RF register protocol tooling",
-		Long:          "bleriot is the command-line tool for the BleRiot RF register protocol: run the host hub, and (soon) generate node code and provision devices.",
+		Long:          "bleriot is the command-line tool for the BleRiot RF register protocol: run the host hub, generate node code, and (soon) provision devices.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
@@ -40,6 +40,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging (shows serial communication)")
 	root.AddCommand(newHubCmd())
+	root.AddCommand(newGenerateCmd())
 	return root
 }
 

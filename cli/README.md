@@ -13,12 +13,12 @@ value and turns consumer change requests into BleRiot `SET` operations.
 > Module path: `cli`. See the [protocol spec](../protocol/README.md) for the wire
 > format and transaction semantics this implements.
 
-The tool is built with [cobra](https://github.com/spf13/cobra). Today it has one
-subcommand, `hub`; `generate` and `provision` are planned.
+The tool is built with [cobra](https://github.com/spf13/cobra). It has two
+subcommands today, `hub` and `generate`; `provision` is planned.
 
 ```
 bleriot hub        run the host hub bridge (RF nodes ↔ Registry)
-bleriot generate   (planned) generate node code and hub descriptors
+bleriot generate   generate node code and the hub descriptor from a spec
 bleriot provision  (planned) provision a device's identity
 ```
 
@@ -110,15 +110,63 @@ The `descriptor` path is resolved relative to the node file. See
 
 ---
 
+## Code generation
+
+`bleriot generate` turns a hand-authored JSON spec into the two artifacts
+BleRiot needs, from a single run — so firmware and hub can never drift
+([protocol §11.7](../protocol/README.md#117-generated-artifacts)):
+
+```sh
+./bleriot generate --spec node.json --out out
+# out/<node>_gen.go   firmware node code (const wire IDs + RegisterIDs + version)
+# out/<node>.json      hub node descriptor (resolved id → name/type/scaling)
+```
+
+Flags: `--spec` (input, default `node.json`), `--out` (output dir, default `.`),
+`--package` (Go package for the generated firmware code, default `main`). Wire
+IDs are never authored — they are assigned deterministically by the generator.
+
+The spec is a class library plus a node composed of class instances:
+
+```json
+{
+  "node": "heating-controller",
+  "metadata": { "hw_rev": "1.3" },
+  "classes": [
+    {
+      "name": "thermometer",
+      "registers": [
+        { "name": "temperature", "type": "float", "multiplier": 1, "divider": 100 },
+        { "name": "humidity", "type": "int", "multiplier": 1, "divider": 1 }
+      ]
+    },
+    { "name": "switch", "registers": [ { "name": "relay", "type": "bool" } ] }
+  ],
+  "instances": [
+    { "class": "thermometer", "name": "outdoor" },
+    { "class": "switch", "name": "main" }
+  ]
+}
+```
+
+The register `type` is `int`, `float` (`display = wire × multiplier / divider`),
+or `bool`. Non-`bool` registers need a non-zero `divider`. The generator logic
+lives in the [`pkg/descriptor`](pkg/descriptor) and [`pkg/codegen`](pkg/codegen)
+packages.
+
+---
+
 ## Layout
 
 | Path | Responsibility |
 |------|----------------|
-| [`cmd/`](cmd) | The `bleriot` CLI (cobra): [`main.go`](cmd/main.go) is the root command; [`hub.go`](cmd/hub.go) is the `hub` subcommand — loads config + node files, starts modems, and wires the engine to the bridge. Colored logging via `tint`. |
+| [`cmd/`](cmd) | The `bleriot` CLI (cobra): [`main.go`](cmd/main.go) is the root command; [`hub.go`](cmd/hub.go) is the `hub` subcommand (config + node files → modems → engine → bridge); [`generate.go`](cmd/generate.go) is the `generate` subcommand. Colored logging via `tint`. |
 | [`pkg/engine`](pkg/engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
 | [`pkg/modem`](pkg/modem) | Host-side client for a single modem over one serial port: wraps the [link protocol](../hub/link/README.md) and exposes configure/send/receive. `Port` is a self-healing variant that survives transport loss and reconnects automatically. |
 | [`pkg/node`](pkg/node) | Host-side node model: the generated descriptor (wire ID → name/type/scaling) plus the separately provisioned identity (address + key). Bridges values to/from the Registry. |
 | [`pkg/bridge`](pkg/bridge) | Connects the engine to the Registry: each register becomes a provider (seeded by `GET`, kept current by `WATCH`), and consumer writes become `SET`. Generic — no per-register knowledge beyond the descriptor. |
+| [`pkg/descriptor`](pkg/descriptor) | Code-generation authoring model (class/register/node spec) and `AllocateIDs` — the deterministic FNV-1a wire-ID allocation (§11.6). |
+| [`pkg/codegen`](pkg/codegen) | `GenerateNodeCode` and `GenerateDescriptorJSON` — emit the firmware Go source and hub JSON from a resolved spec (§11.7). |
 
 ---
 

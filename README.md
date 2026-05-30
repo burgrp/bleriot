@@ -65,7 +65,6 @@ multiplexing lives in the host, above the wire.
 | [`hub/fw/`](hub/fw) | `hub/fw` | TinyGo "dumb radio modem" firmware for the PY32F030 + PAN211x board. | [hub/fw/README.md](hub/fw/README.md) |
 | [`hub/link/`](hub/link) | `hub/link` | Standalone COBS-framed serial link protocol shared by host and firmware. | [hub/link/README.md](hub/link/README.md) |
 | [`hub/example/`](hub/example) | — | Ready-to-edit example hub configuration (config + descriptors + node files). | — |
-| [`generator/`](generator) | `generator` | Host-side code generator: turns register descriptors into firmware code + hub descriptors. | [generator/README.md](generator/README.md) |
 | [`bob/`](bob) | — | KiCad PCB design (breakout board v1.3, the reference hardware). | — |
 | [`sub/hw-kicad/`](sub/hw-kicad) | — | Shared KiCad symbol/footprint library (git submodule). | — |
 
@@ -73,8 +72,8 @@ multiplexing lives in the host, above the wire.
 
 ## How the pieces fit together
 
-1. **Authoring & generation** ([generator](generator/README.md)). Register
-   *classes* and a *node spec* are authored in Go. The generator assigns
+1. **Authoring & generation** (`bleriot generate`, see [cli](cli/README.md)). A
+   class library and a node spec are authored in JSON. The generator assigns
    deterministic `uint16` wire IDs and emits two artifacts from one run: firmware
    node code (const IDs) and a hub-side JSON node descriptor. This guarantees
    firmware and hub can never drift. See [protocol §11](protocol/README.md#11-register-model-descriptors-and-code-generation).
@@ -114,14 +113,15 @@ make flash          # build + flash via PyOCD, then attach RTT log
 
 See [hub/fw/README.md](hub/fw/README.md) for hardware pinout and toolchain notes.
 
-### Code generator
+### Code generation
 
 ```sh
-cd generator
-go run ./example    # writes generated artifacts to ./example/out
+cd cli
+make build
+./bleriot generate --spec node.json --out out
 ```
 
-See [generator/README.md](generator/README.md).
+See [cli/README.md](cli/README.md#code-generation) for the spec format.
 
 ---
 
@@ -144,8 +144,7 @@ single-sourcing the on-wire formats.
 
 - **[Protocol specification](protocol/README.md)** — the authoritative wire-format,
   security, transaction, and code-generation spec.
-- **[Command-line tool](cli/README.md)** — `bleriot hub`: configuration, node files, internal packages.
+- **[Command-line tool](cli/README.md)** — `bleriot hub` and `bleriot generate`: configuration, node files, code generation, internal packages.
 - **[Modem firmware](hub/fw/README.md)** — build/flash, hardware, PAN211x notes.
 - **[Link protocol](hub/link/README.md)** — host↔modem COBS framing.
-- **[Code generator](generator/README.md)** — authoring model and artifacts.
 

@@ -1,6 +1,6 @@
 // Package descriptor defines the host-side authoring model for BleRiot
 // registers and the deterministic wire-ID allocation used by the code
-// generator. See PROTOCOL.md §11.
+// generator. See the protocol spec §11.
 //
 // This package is host tooling only. It is never compiled into node firmware:
 // node firmware receives generated code (const wire IDs + interfaces + wiring
