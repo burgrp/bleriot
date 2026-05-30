@@ -126,26 +126,26 @@ Flags: `--spec` (input, default `node.json`), `--out` (output dir, default `.`),
 `--package` (Go package for the generated firmware code, default `main`). Wire
 IDs are never authored — they are assigned deterministically by the generator.
 
-The spec is a class library plus a node composed of class instances:
+The spec is a class library plus a node composed of class instances. Classes,
+registers, and instances are keyed by name:
 
 ```json
 {
   "node": "heating-controller",
   "metadata": { "hw_rev": "1.3" },
-  "classes": [
-    {
-      "name": "thermometer",
-      "registers": [
-        { "name": "temperature", "type": "float", "multiplier": 1, "divider": 100 },
-        { "name": "humidity", "type": "int", "multiplier": 1, "divider": 1 }
-      ]
+  "classes": {
+    "thermometer": {
+      "registers": {
+        "temperature": { "type": "float", "multiplier": 1, "divider": 100 },
+        "humidity": { "type": "int", "multiplier": 1, "divider": 1 }
+      }
     },
-    { "name": "switch", "registers": [ { "name": "relay", "type": "bool" } ] }
-  ],
-  "instances": [
-    { "class": "thermometer", "name": "outdoor" },
-    { "class": "switch", "name": "main" }
-  ]
+    "switch": { "registers": { "relay": { "type": "bool" } } }
+  },
+  "instances": {
+    "outdoor": "thermometer",
+    "main": "switch"
+  }
 }
 ```
 

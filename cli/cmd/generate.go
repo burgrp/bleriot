@@ -15,21 +15,20 @@
 //	{
 //	  "node": "garage-controller",
 //	  "metadata": { "hw_rev": "1.3" },
-//	  "classes": [
-//	    {
-//	      "name": "thermometer",
+//	  "classes": {
+//	    "thermometer": {
 //	      "metadata": { "category": "sensor" },
-//	      "registers": [
-//	        { "name": "temperature", "type": "float", "multiplier": 1, "divider": 100, "metadata": { "unit": "celsius" } },
-//	        { "name": "humidity", "type": "int" }
-//	      ]
+//	      "registers": {
+//	        "temperature": { "type": "float", "multiplier": 1, "divider": 100, "metadata": { "unit": "celsius" } },
+//	        "humidity": { "type": "int" }
+//	      }
 //	    },
-//	    { "name": "switch", "registers": [ { "name": "relay", "type": "bool" } ] }
-//	  ],
-//	  "instances": [
-//	    { "class": "thermometer", "name": "outdoor" },
-//	    { "class": "switch", "name": "main" }
-//	  ]
+//	    "switch": { "registers": { "relay": { "type": "bool" } } }
+//	  },
+//	  "instances": {
+//	    "outdoor": "thermometer",
+//	    "main": "switch"
+//	  }
 //	}
 package main
 
@@ -48,31 +47,26 @@ import (
 
 // specFile is the JSON authoring format consumed by "bleriot generate". It
 // mirrors descriptor.NodeSpec + the class library, but carries JSON tags and no
-// wire IDs (IDs are assigned by descriptor.AllocateIDs).
+// wire IDs (IDs are assigned by descriptor.AllocateIDs). Classes, registers, and
+// instances are keyed by name: the map key is the name, never a field. An
+// instance maps its name to the class it instantiates.
 type specFile struct {
-	Node      string            `json:"node"`
-	Metadata  map[string]string `json:"metadata"`
-	Classes   []specClass       `json:"classes"`
-	Instances []specInstance    `json:"instances"`
+	Node      string               `json:"node"`
+	Metadata  map[string]string    `json:"metadata"`
+	Classes   map[string]specClass `json:"classes"`
+	Instances map[string]string    `json:"instances"`
 }
 
 type specClass struct {
-	Name      string            `json:"name"`
-	Metadata  map[string]string `json:"metadata"`
-	Registers []specRegister    `json:"registers"`
+	Metadata  map[string]string       `json:"metadata"`
+	Registers map[string]specRegister `json:"registers"`
 }
 
 type specRegister struct {
-	Name       string            `json:"name"`
 	Type       string            `json:"type"`
 	Multiplier int32             `json:"multiplier"`
 	Divider    int32             `json:"divider"`
 	Metadata   map[string]string `json:"metadata"`
-}
-
-type specInstance struct {
-	Class string `json:"class"`
-	Name  string `json:"name"`
 }
 
 // newGenerateCmd builds the "generate" subcommand.
@@ -107,22 +101,19 @@ func runGenerate(specPath, outDir, pkg string, logger *slog.Logger) error {
 	}
 
 	library := make(map[string]descriptor.ClassDescriptor, len(spec.Classes))
-	for _, c := range spec.Classes {
-		if _, dup := library[c.Name]; dup {
-			return fmt.Errorf("duplicate class %q", c.Name)
-		}
+	for className, c := range spec.Classes {
 		regs := make([]descriptor.RegisterDescriptor, 0, len(c.Registers))
-		for _, r := range c.Registers {
+		for regName, r := range c.Registers {
 			regs = append(regs, descriptor.RegisterDescriptor{
-				Name:       r.Name,
+				Name:       regName,
 				Type:       descriptor.RegType(r.Type),
 				Multiplier: r.Multiplier,
 				Divider:    r.Divider,
 				Metadata:   r.Metadata,
 			})
 		}
-		library[c.Name] = descriptor.ClassDescriptor{
-			Name:      c.Name,
+		library[className] = descriptor.ClassDescriptor{
+			Name:      className,
 			Registers: regs,
 			Metadata:  c.Metadata,
 		}
@@ -133,10 +124,10 @@ func runGenerate(specPath, outDir, pkg string, logger *slog.Logger) error {
 		Metadata:  spec.Metadata,
 		Instances: make([]descriptor.ClassInstance, 0, len(spec.Instances)),
 	}
-	for _, i := range spec.Instances {
+	for instName, className := range spec.Instances {
 		nodeSpec.Instances = append(nodeSpec.Instances, descriptor.ClassInstance{
-			Class: i.Class,
-			Name:  i.Name,
+			Class: className,
+			Name:  instName,
 		})
 	}
 
