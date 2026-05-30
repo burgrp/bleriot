@@ -382,7 +382,7 @@ instance concept.
 ### 11.9 Hub Node Files
 
 The hub does not list nodes in its main config. Instead the config names a
-**nodes directory** (`nodesDir`), and every `*.json` file in it is one physical
+**nodes directory** (`nodes`), and every `*.json` file in it is one physical
 node. This keeps provisioning a new device to a single file drop — the hub
 config is never edited.
 
@@ -393,7 +393,7 @@ field). The `descriptor` path is resolved relative to the node file's own
 directory.
 
 ```
-hub.json                     # nodesDir: "nodes"
+hub.json                     # nodes: "nodes"
 descriptors/
   thermo.json                # shared per-type descriptor (generated, §11.7)
 nodes/

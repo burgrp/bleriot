@@ -16,10 +16,10 @@
 //	  "ports": [
 //	    { "device": "/dev/ttyUSB0", "channel": 37 }
 //	  ],
-//	  "nodesDir": "nodes"
+//	  "nodes": "nodes"
 //	}
 //
-// "nodesDir" points to a directory of per-device node files. Each *.json file
+// "nodes" points to a directory of per-device node files. Each *.json file
 // there is a thin instance file naming a shared descriptor plus the device's
 // provisioned identity, and the file's base name is the node name:
 //
@@ -30,11 +30,11 @@
 //	  "key": "00112233445566778899AABBCCDDEEFF"
 //	}
 //
-// Provisioning a new device means dropping another file into nodesDir; the hub
-// config never needs editing. Paths in the config are resolved relative to the
-// config file's directory, and a node file's "descriptor" path is resolved
-// relative to that node file. If "registry" is empty the REGISTRY environment
-// variable is used.
+// Provisioning a new device means dropping another file into the nodes
+// directory; the hub config never needs editing. Paths in the config are
+// resolved relative to the config file's directory, and a node file's
+// "descriptor" path is resolved relative to that node file. If "registry" is
+// empty the REGISTRY environment variable is used.
 package main
 
 import (
@@ -71,7 +71,7 @@ type config struct {
 	TTLSeconds int          `json:"ttlSeconds"`
 	Baud       int          `json:"baud"`
 	Ports      []portConfig `json:"ports"`
-	NodesDir   string       `json:"nodesDir"`
+	NodesDir   string       `json:"nodes"`
 }
 
 type portConfig struct {
@@ -80,8 +80,8 @@ type portConfig struct {
 	Channel uint8  `json:"channel"`
 }
 
-// nodeFile is a per-device node instance file living in nodesDir. The node name
-// is the file's base name, not stored inside the file.
+// nodeFile is a per-device node instance file living in the nodes directory.
+// The node name is the file's base name, not stored inside the file.
 type nodeFile struct {
 	Descriptor string `json:"descriptor"`
 	Channel    uint8  `json:"channel"`
@@ -211,7 +211,7 @@ func startPorts(ctx context.Context, cfg config, eng *engine.Engine, hubAddr [no
 // is resolved relative to the instance file's own directory.
 func loadNodes(cfg config, baseDir string, eng *engine.Engine) ([]*node.Node, error) {
 	if cfg.NodesDir == "" {
-		return nil, fmt.Errorf("config: nodesDir is required")
+		return nil, fmt.Errorf("config: nodes is required")
 	}
 	dir := cfg.NodesDir
 	if !filepath.IsAbs(dir) {

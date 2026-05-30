@@ -45,7 +45,7 @@ resolved relative to the config file's directory.
   "ports": [
     { "device": "/dev/ttyUSB0", "channel": 37 }
   ],
-  "nodesDir": "nodes"
+  "nodes": "nodes"
 }
 ```
 
@@ -59,17 +59,17 @@ resolved relative to the config file's directory.
 | `ttlSeconds` | Registry provider TTL. |
 | `baud` | Serial baud rate to each modem. |
 | `ports` | One entry per modem: serial `device` and its radio `channel`. |
-| `nodesDir` | Directory of per-device node files (see below). |
+| `nodes` | Directory of per-device node files (see below). |
 
 ### Node files
 
-The hub does **not** list nodes in the main config. Instead `nodesDir` names a
+The hub does **not** list nodes in the main config. Instead `nodes` names a
 directory, and every `*.json` file in it is one physical node. The file's base
 name is the node name. Provisioning a new device is a single file drop — the hub
 config is never edited.
 
 ```
-hub.json                  # nodesDir: "nodes"
+hub.json                  # nodes: "nodes"
 descriptors/
   thermo.json             # shared, generated per-type descriptor (§11.7)
 nodes/

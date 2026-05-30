@@ -21,7 +21,7 @@ func TestLoadConfig(t *testing.T) {
 	  "ttlSeconds": 30,
 	  "baud": 115200,
 	  "ports": [{ "device": "/dev/ttyACM0", "channel": 37 }],
-	  "nodesDir": "nodes"
+	  "nodes": "nodes"
 	}`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestLoadConfig(t *testing.T) {
 		t.Errorf("unexpected ports: %+v", cfg.Ports)
 	}
 	if cfg.NodesDir != "nodes" {
-		t.Errorf("unexpected nodesDir: %q", cfg.NodesDir)
+		t.Errorf("unexpected nodes: %q", cfg.NodesDir)
 	}
 	if baseDir != dir {
 		t.Errorf("baseDir = %q, want %q", baseDir, dir)
