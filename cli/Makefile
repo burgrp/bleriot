@@ -1,11 +1,11 @@
-BINARY = hub
-PKG    = ./cmd/hub
+BINARY = bleriot
+PKG    = .
 
 build:
 	go build -o $(BINARY) $(PKG)
 
 run:
-	go run $(PKG)
+	go run $(PKG) hub
 
 test:
 	go test ./...

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"hub/host/engine"
-	"hub/host/node"
+	"cli/pkg/engine"
+	"cli/pkg/node"
 )
 
 var nodeAddr = [4]byte{0xCC, 0xA0, 0x00, 0x02}

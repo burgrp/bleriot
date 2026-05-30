@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"hub/host/node"
+	"cli/pkg/node"
 	"protocol"
 )
 

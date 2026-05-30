@@ -23,7 +23,7 @@ the reference hardware design.
               │  provide / consume
               ▼
 ┌─────────────────────────────┐
-│           hub/host          │
+│       cli (bleriot hub)     │
 │  Linux SBC: protocol logic, │
 │  XTEA keys, retries, watch  │
 └─────────────────────────────┘
@@ -44,9 +44,9 @@ the reference hardware design.
 
 The hub is deliberately split in two:
 
-- **`hub/host`** owns all protocol intelligence — per-node XTEA keys, node
-  descriptors, retries/timeouts, push-subscription bookkeeping, and the Registry
-  client. It runs on a Linux SBC.
+- **`cli`** (the `bleriot` tool) owns all protocol intelligence — per-node XTEA
+  keys, node descriptors, retries/timeouts, push-subscription bookkeeping, and
+  the Registry client. It runs on a Linux SBC as `bleriot hub`.
 - **`hub/fw`** is a "dumb radio modem": TinyGo firmware that owns only the PAN211x
   radio and holds no secrets. It bridges a COBS-framed serial link to the air.
 
@@ -61,9 +61,10 @@ multiplexing lives in the host, above the wire.
 | Path | Module | What it is | Docs |
 |------|--------|------------|------|
 | [`protocol/`](protocol) | `protocol` | Neutral, dependency-free RF wire format: packet codec + XTEA. Compiles for host and TinyGo alike. | [protocol/README.md](protocol/README.md) — the full **protocol specification** |
-| [`hub/host/`](hub/host) | `hub/host` | Host bridge (Linux SBC): protocol engine, modem clients, node model, Registry bridge. | [hub/host/README.md](hub/host/README.md) |
+| [`cli/`](cli) | `cli` | The `bleriot` command-line tool (Linux SBC): protocol engine, modem clients, node model, Registry bridge. | [cli/README.md](cli/README.md) |
 | [`hub/fw/`](hub/fw) | `hub/fw` | TinyGo "dumb radio modem" firmware for the PY32F030 + PAN211x board. | [hub/fw/README.md](hub/fw/README.md) |
 | [`hub/link/`](hub/link) | `hub/link` | Standalone COBS-framed serial link protocol shared by host and firmware. | [hub/link/README.md](hub/link/README.md) |
+| [`hub/example/`](hub/example) | — | Ready-to-edit example hub configuration (config + descriptors + node files). | — |
 | [`generator/`](generator) | `generator` | Host-side code generator: turns register descriptors into firmware code + hub descriptors. | [generator/README.md](generator/README.md) |
 | [`bob/`](bob) | — | KiCad PCB design (breakout board v1.3, the reference hardware). | — |
 | [`sub/hw-kicad/`](sub/hw-kicad) | — | Shared KiCad symbol/footprint library (git submodule). | — |
@@ -86,7 +87,7 @@ multiplexing lives in the host, above the wire.
    receive address, transmits host packets, and forwards received packets — no
    secrets, no retries.
 
-4. **On the host** ([hub/host](hub/host/README.md)). The engine handles XTEA,
+4. **On the host** ([cli](cli/README.md)). The engine handles XTEA,
    timeouts/retries, and watch refresh; the bridge maps every node register to a
    Registry provider/consumer.
 
@@ -97,12 +98,12 @@ multiplexing lives in the host, above the wire.
 ### Host hub
 
 ```sh
-cd hub/host
-make build          # → ./hub
-./hub -config hub.json
+cd cli
+make build          # → ./bleriot
+./bleriot hub --config ../hub/example/config.json
 ```
 
-See [hub/host/README.md](hub/host/README.md) for the config format and node files.
+See [cli/README.md](cli/README.md) for the config format and node files.
 
 ### Modem firmware
 
@@ -128,9 +129,9 @@ See [generator/README.md](generator/README.md).
 
 ```
 protocol  ──────────────┐
- (codec + XTEA)          ├─► hub/host  (also: hub/link, github.com/burgrp/reg)
+ (codec + XTEA)          ├─► cli       (also: hub/link, github.com/burgrp/reg)
                          └─► hub/fw    (also: hub/link, pan211x driver)
-hub/link  ──────────────┴─► hub/host, hub/fw
+hub/link  ──────────────┴─► cli, hub/fw
 ```
 
 `protocol` and `hub/link` are intentionally dependency-free and build-tag-free so
@@ -143,7 +144,7 @@ single-sourcing the on-wire formats.
 
 - **[Protocol specification](protocol/README.md)** — the authoritative wire-format,
   security, transaction, and code-generation spec.
-- **[Host hub](hub/host/README.md)** — configuration, node files, internal packages.
+- **[Command-line tool](cli/README.md)** — `bleriot hub`: configuration, node files, internal packages.
 - **[Modem firmware](hub/fw/README.md)** — build/flash, hardware, PAN211x notes.
 - **[Link protocol](hub/link/README.md)** — host↔modem COBS framing.
 - **[Code generator](generator/README.md)** — authoring model and artifacts.

@@ -1,7 +1,7 @@
 # hub/link — host↔modem link protocol
 
 A standalone, dependency-free Go module defining the **COBS-framed serial
-protocol** spoken between the BleRiot [host hub](../host/README.md) and the MCU
+protocol** spoken between the BleRiot [host hub](../../cli/README.md) and the MCU
 [radio modem](../fw/README.md) (UART now, USB-CDC later).
 
 The module imports only `errors` and uses no build tags, so the exact same

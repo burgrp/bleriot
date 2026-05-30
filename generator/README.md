@@ -6,7 +6,7 @@ artifacts BleRiot needs, from a single run:
 - **Node code** (Go, compiled into firmware): `const` wire IDs, a slice of all
   IDs, and the descriptor version hash. No per-class wrappers — the firmware
   backs registers generically by `uint16` ID.
-- **Node descriptor** (JSON, consumed by the [host hub](../host/README.md)): the
+- **Node descriptor** (JSON, consumed by the [host hub](../cli/README.md)): the
   resolved flat list of `id → {name, type, scaling, metadata}`.
 
 Because both come from one run, firmware and hub **cannot drift**. The generator

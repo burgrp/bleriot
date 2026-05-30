@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"hub/host/node"
+	"cli/pkg/node"
 	"protocol"
 )
 

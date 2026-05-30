@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hub/host/engine"
-	"hub/host/node"
+	"cli/pkg/engine"
+	"cli/pkg/node"
 )
 
 func TestLoadConfig(t *testing.T) {

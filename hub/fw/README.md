@@ -13,7 +13,7 @@ The modem holds **no secrets and no protocol intelligence**. It only:
 - reports failures as `MsgError`.
 
 All XTEA encryption, retries, timeouts, and subscription bookkeeping live on the
-[host](../host/README.md). See the [protocol spec](../../protocol/README.md).
+[host](../../cli/README.md). See the [protocol spec](../../protocol/README.md).
 
 > Module path: `hub/fw`. Built with TinyGo; not part of the host Go workspace.
 

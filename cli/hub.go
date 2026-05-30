@@ -1,9 +1,7 @@
-// Command hub is the BleRiot host bridge. It connects one or more "dumb radio
-// modems" (each a serial port driving a single PAN211x radio) to the external
-// Registry service: every node register is published as a Registry provider and
-// consumer change requests are turned into BleRiot SET operations.
+// hub.go implements the "bleriot hub" subcommand: the host bridge between
+// BleRiot RF nodes and the external Registry service.
 //
-// Configuration is a JSON file (see -config). Example:
+// Configuration is a JSON file (see --config). Example:
 //
 //	{
 //	  "registry": "http://localhost:8080",
@@ -40,7 +38,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -53,14 +50,34 @@ import (
 
 	"github.com/burgrp/reg/pkg/client"
 	clientfactory "github.com/burgrp/reg/pkg/client/factory"
-	"github.com/lmittmann/tint"
+	"github.com/spf13/cobra"
 	"go.bug.st/serial"
 
-	"hub/host/bridge"
-	"hub/host/engine"
-	"hub/host/modem"
-	"hub/host/node"
+	"cli/pkg/bridge"
+	"cli/pkg/engine"
+	"cli/pkg/modem"
+	"cli/pkg/node"
 )
+
+// newHubCmd builds the "hub" subcommand.
+func newHubCmd() *cobra.Command {
+	var cfgPath string
+	cmd := &cobra.Command{
+		Use:   "hub",
+		Short: "Run the host hub bridging RF nodes to the Registry",
+		Long: "Run the BleRiot host hub: connect one or more \"dumb radio modems\" " +
+			"(each a serial port driving a single PAN211x radio) to the external " +
+			"Registry service. Every node register is published as a Registry " +
+			"provider and consumer change requests are turned into BleRiot SET " +
+			"operations.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runHub(cfgPath, slog.Default())
+		},
+	}
+	cmd.Flags().StringVar(&cfgPath, "config", "config.json", "path to the hub configuration file")
+	return cmd
+}
 
 type config struct {
 	Registry   string       `json:"registry"`
@@ -89,28 +106,7 @@ type nodeFile struct {
 	Key        string `json:"key"`
 }
 
-func main() {
-	cfgPath := flag.String("config", "hub.json", "path to the hub configuration file")
-	debug := flag.Bool("debug", false, "enable debug logging (shows serial communication)")
-	flag.Parse()
-
-	level := slog.LevelInfo
-	if *debug {
-		level = slog.LevelDebug
-	}
-	logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
-		Level:      level,
-		TimeFormat: time.TimeOnly,
-	}))
-	slog.SetDefault(logger)
-
-	if err := run(*cfgPath, logger); err != nil {
-		logger.Error("hub failed", "err", err)
-		os.Exit(1)
-	}
-}
-
-func run(cfgPath string, logger *slog.Logger) error {
+func runHub(cfgPath string, logger *slog.Logger) error {
 	cfg, baseDir, err := loadConfig(cfgPath)
 	if err != nil {
 		return err

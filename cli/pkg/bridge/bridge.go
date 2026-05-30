@@ -14,8 +14,8 @@ import (
 	"log/slog"
 	"time"
 
-	"hub/host/engine"
-	"hub/host/node"
+	"cli/pkg/engine"
+	"cli/pkg/node"
 )
 
 // Transactor is the engine surface the bridge needs. *engine.Engine satisfies it.
