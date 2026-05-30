@@ -1,5 +1,5 @@
 BINARY = bleriot
-PKG    = .
+PKG    = ./cmd
 
 build:
 	go build -o $(BINARY) $(PKG)

@@ -28,7 +28,7 @@ bleriot provision  (planned) provision a device's identity
 
 ```sh
 make build              # → ./bleriot
-make run                # go run . hub
+make run                # go run ./cmd hub
 make test               # go test ./...
 make vet
 ./bleriot hub --config config.json
@@ -114,7 +114,7 @@ The `descriptor` path is resolved relative to the node file. See
 
 | Path | Responsibility |
 |------|----------------|
-| [`main.go`](main.go) / [`hub.go`](hub.go) | The `bleriot` CLI (cobra) root and the `hub` subcommand: loads config + node files, starts modems, and wires the engine to the bridge. Colored logging via `tint`. |
+| [`cmd/`](cmd) | The `bleriot` CLI (cobra): [`main.go`](cmd/main.go) is the root command; [`hub.go`](cmd/hub.go) is the `hub` subcommand — loads config + node files, starts modems, and wires the engine to the bridge. Colored logging via `tint`. |
 | [`pkg/engine`](pkg/engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
 | [`pkg/modem`](pkg/modem) | Host-side client for a single modem over one serial port: wraps the [link protocol](../hub/link/README.md) and exposes configure/send/receive. `Port` is a self-healing variant that survives transport loss and reconnects automatically. |
 | [`pkg/node`](pkg/node) | Host-side node model: the generated descriptor (wire ID → name/type/scaling) plus the separately provisioned identity (address + key). Bridges values to/from the Registry. |
