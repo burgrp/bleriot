@@ -71,7 +71,7 @@ func main() {
 		SerialInterface: pan211x.SerialInterfaceSPI3W,
 		SpreadFactor:    pan211x.SpreadFactorS8,
 	}))
-	println("radio OK")
+	println("Radio initialized")
 
 	m := &modem{uart: uart, radio: radio, dec: link.NewDecoder(maxFrame)}
 	m.txBuf = make([]byte, 0, maxFrame)
