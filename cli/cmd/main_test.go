@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cli/pkg/engine"
@@ -109,8 +110,9 @@ func TestNewRegistry(t *testing.T) {
 	})
 }
 
+const sampleDescriptorID = "1A2B3C4D"
+
 const sampleDescriptor = `{
-  "version": "0x1A2B3C4D",
   "metadata": {},
   "registers": [
     { "id": 4660, "name": "outdoor.temperature", "class": "thermometer", "instance": "outdoor",
@@ -131,14 +133,23 @@ func TestLoadNodes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("descriptors/thermo.json", sampleDescriptor)
-	write("nodes/outdoor.json", `{ "descriptor": "../descriptors/thermo.json", "channel": 37, "address": "CCA00002", "key": "00112233445566778899AABBCCDDEEFF" }`)
-	write("nodes/garage.json", `{ "descriptor": "../descriptors/thermo.json", "channel": 11, "address": "CCA00003", "key": "00112233445566778899AABBCCDDEEFF" }`)
+	write("descriptors/"+sampleDescriptorID+".json", sampleDescriptor)
+	write("nodes/outdoor.json", `{ "descriptorId": "`+sampleDescriptorID+`", "channel": 37, "address": "CCA00002", "key": "00112233445566778899AABBCCDDEEFF" }`)
+	write("nodes/garage.json", `{ "descriptorId": "`+sampleDescriptorID+`", "channel": 11, "address": "CCA00003", "key": "00112233445566778899AABBCCDDEEFF" }`)
 	// A non-JSON file in the directory must be ignored.
 	write("nodes/README.txt", "ignore me")
 
+	cfg := config{Descriptors: "descriptors", NodesDir: "nodes"}
+	descriptors, err := loadDescriptors(cfg, base)
+	if err != nil {
+		t.Fatalf("loadDescriptors: %v", err)
+	}
+	if len(descriptors) != 1 {
+		t.Fatalf("got %d descriptors, want 1", len(descriptors))
+	}
+
 	eng := engine.New(engine.Options{HubAddr: [node.AddrLen]byte{0xFF, 0xFF, 0xFF, 0x01}})
-	nodes, err := loadNodes(config{NodesDir: "nodes"}, base, eng)
+	nodes, err := loadNodes(cfg, base, descriptors, eng)
 	if err != nil {
 		t.Fatalf("loadNodes: %v", err)
 	}
@@ -161,15 +172,22 @@ func TestLoadNodes_Errors(t *testing.T) {
 	eng := func() *engine.Engine {
 		return engine.New(engine.Options{HubAddr: [node.AddrLen]byte{0xFF, 0xFF, 0xFF, 0x01}})
 	}
+	pool := func() map[string]*node.Descriptor {
+		d, err := node.LoadDescriptor(strings.NewReader(sampleDescriptor))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]*node.Descriptor{sampleDescriptorID: d}
+	}
 
 	t.Run("missing nodesDir", func(t *testing.T) {
-		if _, err := loadNodes(config{}, t.TempDir(), eng()); err == nil {
+		if _, err := loadNodes(config{}, t.TempDir(), pool(), eng()); err == nil {
 			t.Fatal("expected error when nodesDir is empty")
 		}
 	})
 
 	t.Run("directory not found", func(t *testing.T) {
-		if _, err := loadNodes(config{NodesDir: "nope"}, t.TempDir(), eng()); err == nil {
+		if _, err := loadNodes(config{NodesDir: "nope"}, t.TempDir(), pool(), eng()); err == nil {
 			t.Fatal("expected error for missing directory")
 		}
 	})
@@ -179,8 +197,47 @@ func TestLoadNodes_Errors(t *testing.T) {
 		if err := os.Mkdir(filepath.Join(base, "nodes"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadNodes(config{NodesDir: "nodes"}, base, eng()); err == nil {
+		if _, err := loadNodes(config{NodesDir: "nodes"}, base, pool(), eng()); err == nil {
 			t.Fatal("expected error for empty directory")
+		}
+	})
+
+	t.Run("unknown descriptor id", func(t *testing.T) {
+		base := t.TempDir()
+		if err := os.Mkdir(filepath.Join(base, "nodes"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		nf := `{ "descriptorId": "DEADBEEF", "channel": 37, "address": "CCA00002", "key": "00112233445566778899AABBCCDDEEFF" }`
+		if err := os.WriteFile(filepath.Join(base, "nodes", "outdoor.json"), []byte(nf), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadNodes(config{NodesDir: "nodes"}, base, pool(), eng()); err == nil {
+			t.Fatal("expected error for unknown descriptor ID")
+		}
+	})
+}
+
+func TestLoadDescriptors(t *testing.T) {
+	t.Run("missing descriptors dir", func(t *testing.T) {
+		if _, err := loadDescriptors(config{}, t.TempDir()); err == nil {
+			t.Fatal("expected error when descriptors is empty")
+		}
+	})
+
+	t.Run("valid pool", func(t *testing.T) {
+		base := t.TempDir()
+		if err := os.Mkdir(filepath.Join(base, "descriptors"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(base, "descriptors", sampleDescriptorID+".json"), []byte(sampleDescriptor), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		descriptors, err := loadDescriptors(config{Descriptors: "descriptors"}, base)
+		if err != nil {
+			t.Fatalf("loadDescriptors: %v", err)
+		}
+		if _, ok := descriptors[sampleDescriptorID]; !ok {
+			t.Errorf("descriptor %s not indexed: %v", sampleDescriptorID, descriptors)
 		}
 	})
 }

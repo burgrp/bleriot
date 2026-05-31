@@ -20,8 +20,8 @@ type ResolvedRegister struct {
 }
 
 // Resolved is the full output of resolving a NodeSpec against a class library:
-// the flat register list (sorted by qualified name) plus the descriptor version
-// hash (§11.6 step 5) used for firmware/descriptor mismatch detection.
+// the flat register list (sorted by qualified name) plus the descriptor ID
+// (§11.6 step 5) used for firmware/descriptor mismatch detection.
 type Resolved struct {
 	Node      string
 	Metadata  map[string]string
@@ -37,7 +37,7 @@ type Resolved struct {
 //  2. Sort lexicographically (canonical order — independent of authoring order).
 //  3. Primary slot = fnv1a32(qualifiedName) & 0xFFFF; 0x0000 is reserved.
 //  4. On collision, linear probe (id+1)&0xFFFF, skipping 0x0000.
-//  5. Compute a version hash over the resolved tuples in canonical order.
+//  5. Compute a descriptor ID over the resolved tuples in canonical order.
 //
 // The library maps class name → ClassDescriptor. AllocateIDs returns an error
 // for unknown classes, duplicate instance names, or a zero divider.

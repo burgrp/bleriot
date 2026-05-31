@@ -14,25 +14,30 @@
 //	  "ports": [
 //	    { "device": "/dev/ttyUSB0", "channel": 37 }
 //	  ],
+//	  "descriptors": "descriptors",
 //	  "nodes": "nodes"
 //	}
 //
-// "nodes" points to a directory of per-device node files. Each *.json file
-// there is a thin instance file naming a shared descriptor plus the device's
-// provisioned identity, and the file's base name is the node name:
+// "descriptors" points to a pool of generated, content-addressed descriptor
+// files (§11.7): each is named <id>.json, where <id> is its descriptor ID.
+// "nodes" points to a directory of per-device node files. Each
+// *.json file there is a thin instance file selecting a shared descriptor by its
+// descriptor ID plus the device's provisioned identity, and the file's base name
+// is the node name:
 //
 //	{
-//	  "descriptor": "../descriptors/thermo.json",
+//	  "descriptorId": "1A2B3C4D",
 //	  "channel": 37,
 //	  "address": "CCA00002",
 //	  "key": "00112233445566778899AABBCCDDEEFF"
 //	}
 //
-// Provisioning a new device means dropping another file into the nodes
-// directory; the hub config never needs editing. Paths in the config are
-// resolved relative to the config file's directory, and a node file's
-// "descriptor" path is resolved relative to that node file. If "registry" is
-// empty the REGISTRY environment variable is used.
+// A provisioned device reports its descriptor ID (the firmware's
+// DescriptorID) out of band, so the hub can select the matching descriptor
+// from the pool. Provisioning a new device means dropping another file into the
+// nodes directory; the hub config never needs editing. Paths in the config are
+// resolved relative to the config file's directory. If "registry" is empty the
+// REGISTRY environment variable is used.
 package main
 
 import (
@@ -80,15 +85,16 @@ func newHubCmd() *cobra.Command {
 }
 
 type config struct {
-	Registry   string       `json:"registry"`
-	HubAddress string       `json:"hubAddress"`
-	TimeoutMs  int          `json:"timeoutMs"`
-	Retries    int          `json:"retries"`
-	RefreshSec int          `json:"refreshSeconds"`
-	TTLSeconds int          `json:"ttlSeconds"`
-	Baud       int          `json:"baud"`
-	Ports      []portConfig `json:"ports"`
-	NodesDir   string       `json:"nodes"`
+	Registry    string       `json:"registry"`
+	HubAddress  string       `json:"hubAddress"`
+	TimeoutMs   int          `json:"timeoutMs"`
+	Retries     int          `json:"retries"`
+	RefreshSec  int          `json:"refreshSeconds"`
+	TTLSeconds  int          `json:"ttlSeconds"`
+	Baud        int          `json:"baud"`
+	Ports       []portConfig `json:"ports"`
+	NodesDir    string       `json:"nodes"`
+	Descriptors string       `json:"descriptors"`
 }
 
 type portConfig struct {
@@ -98,12 +104,14 @@ type portConfig struct {
 }
 
 // nodeFile is a per-device node instance file living in the nodes directory.
-// The node name is the file's base name, not stored inside the file.
+// The node name is the file's base name, not stored inside the file. It selects
+// its register descriptor by content-addressed descriptor ID (§11.9), which the
+// hub resolves against the descriptors pool.
 type nodeFile struct {
-	Descriptor string `json:"descriptor"`
-	Channel    uint8  `json:"channel"`
-	Address    string `json:"address"`
-	Key        string `json:"key"`
+	DescriptorID string `json:"descriptorId"`
+	Channel      uint8  `json:"channel"`
+	Address      string `json:"address"`
+	Key          string `json:"key"`
 }
 
 func runHub(cfgPath string, logger *slog.Logger) error {
@@ -131,7 +139,13 @@ func runHub(cfgPath string, logger *slog.Logger) error {
 
 	startPorts(ctx, cfg, eng, hubAddr, logger)
 
-	nodes, err := loadNodes(cfg, baseDir, eng)
+	descriptors, err := loadDescriptors(cfg, baseDir)
+	if err != nil {
+		return err
+	}
+	logger.Info("loaded descriptors", "count", len(descriptors))
+
+	nodes, err := loadNodes(cfg, baseDir, descriptors, eng)
 	if err != nil {
 		return err
 	}
@@ -201,11 +215,52 @@ func startPorts(ctx context.Context, cfg config, eng *engine.Engine, hubAddr [no
 	}
 }
 
+// loadDescriptors reads every *.json file in the configured descriptors pool
+// directory and indexes them by descriptor ID (§11.9). Descriptors are
+// content-addressed: each file is named <id>.json, where <id> is its descriptor
+// ID, so the file name (without ".json") is the ID. A node instance file selects
+// its descriptor by this ID.
+func loadDescriptors(cfg config, baseDir string) (map[string]*node.Descriptor, error) {
+	if cfg.Descriptors == "" {
+		return nil, fmt.Errorf("config: descriptors is required")
+	}
+	dir := cfg.Descriptors
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(baseDir, dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading descriptors directory %s: %w", dir, err)
+	}
+
+	descriptors := make(map[string]*node.Descriptor)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		desc, err := node.LoadDescriptorFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("loading descriptor %s: %w", path, err)
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		if _, dup := descriptors[id]; dup {
+			return nil, fmt.Errorf("duplicate descriptor ID %s in %s", id, dir)
+		}
+		descriptors[id] = desc
+	}
+	if len(descriptors) == 0 {
+		return nil, fmt.Errorf("no descriptor files (*.json) found in %s", dir)
+	}
+	return descriptors, nil
+}
+
 // loadNodes reads every *.json instance file in the configured nodes directory.
-// Each file names a shared descriptor plus the device's RF channel and identity;
-// the file's base name (without ".json") is the node name. The descriptor path
-// is resolved relative to the instance file's own directory.
-func loadNodes(cfg config, baseDir string, eng *engine.Engine) ([]*node.Node, error) {
+// Each file selects a shared descriptor by content-addressed descriptor ID and
+// carries the device's RF channel and identity; the file's base name (without
+// ".json") is the node name. The descriptor is resolved from the pool built by
+// loadDescriptors.
+func loadNodes(cfg config, baseDir string, descriptors map[string]*node.Descriptor, eng *engine.Engine) ([]*node.Node, error) {
 	if cfg.NodesDir == "" {
 		return nil, fmt.Errorf("config: nodes is required")
 	}
@@ -229,13 +284,9 @@ func loadNodes(cfg config, baseDir string, eng *engine.Engine) ([]*node.Node, er
 		if err != nil {
 			return nil, err
 		}
-		descPath := nf.Descriptor
-		if !filepath.IsAbs(descPath) {
-			descPath = filepath.Join(dir, descPath)
-		}
-		desc, err := node.LoadDescriptorFile(descPath)
-		if err != nil {
-			return nil, fmt.Errorf("node %s: loading descriptor %s: %w", name, descPath, err)
+		desc, ok := descriptors[nf.DescriptorID]
+		if !ok {
+			return nil, fmt.Errorf("node %s: unknown descriptor ID %s", name, nf.DescriptorID)
 		}
 		id, err := node.ParseIdentity(nf.Address, nf.Key)
 		if err != nil {
@@ -263,8 +314,8 @@ func loadNodeFile(path string) (nodeFile, error) {
 	if err := json.Unmarshal(data, &nf); err != nil {
 		return nodeFile{}, fmt.Errorf("parsing node file %s: %w", path, err)
 	}
-	if nf.Descriptor == "" {
-		return nodeFile{}, fmt.Errorf("node file %s: descriptor is required", path)
+	if nf.DescriptorID == "" {
+		return nodeFile{}, fmt.Errorf("node file %s: descriptorId is required", path)
 	}
 	return nf, nil
 }

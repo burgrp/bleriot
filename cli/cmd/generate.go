@@ -2,13 +2,21 @@
 // generator that turns a hand-authored register spec into the two artifacts
 // BleRiot needs from a single run (see the protocol spec, §11.7):
 //
-//   - <out>/<node>_gen.go   firmware node code (const wire IDs + RegisterIDs + version)
-//   - <out>/<node>.json      hub node descriptor (resolved id → name/type/scaling)
+//		bleriot generate <spec> <fw-go>
 //
-// Because both come from one run, firmware and hub can never drift. The spec is
-// a JSON file (--spec) mirroring the authoring model: a class library plus a
-// node composed of class instances. Wire IDs are never authored; they are
-// assigned deterministically by the generator.
+//	  - <fw-go>        firmware node code (const wire IDs + RegisterIDs + descriptor ID)
+//	  - <id>.json      hub node descriptor (resolved id → name/type/scaling),
+//	                   written next to <spec> and named by its descriptor ID
+//
+// The descriptor file is content-addressed: its name is the descriptor ID, a
+// hash over the resolved register set. The same ID is embedded
+// in the firmware as DescriptorID, so a provisioned device can report which
+// descriptor it implements and the hub can select it from a pool (§11.9).
+//
+// Because both artifacts come from one run, firmware and hub can never drift. The
+// spec is a JSON file mirroring the authoring model: a class library plus a node
+// composed of class instances. Wire IDs are never authored; they are assigned
+// deterministically by the generator.
 //
 // Example spec:
 //
@@ -71,30 +79,30 @@ type specRegister struct {
 
 // newGenerateCmd builds the "generate" subcommand.
 func newGenerateCmd() *cobra.Command {
-	var (
-		specPath string
-		outDir   string
-		pkg      string
-	)
+	var pkg string
 	cmd := &cobra.Command{
-		Use:   "generate",
+		Use:   "generate <spec> <fw-go>",
 		Short: "Generate firmware node code and the hub descriptor from a spec",
 		Long: "Generate the two BleRiot artifacts from a single hand-authored JSON " +
-			"spec: the firmware node code (const wire IDs + version) and the hub " +
+			"spec: the firmware node code (const wire IDs + descriptor ID) and the hub " +
 			"node descriptor (resolved id → name/type/scaling). Wire IDs are " +
-			"assigned deterministically so firmware and hub can never drift.",
-		Args: cobra.NoArgs,
+			"assigned deterministically so firmware and hub can never drift.\n\n" +
+			"The descriptor is content-addressed: it is written next to <spec> and " +
+			"named <id>.json, where <id> is the descriptor ID (also " +
+			"embedded in the firmware).\n\n" +
+			"Arguments:\n" +
+			"  spec   path to the JSON node spec\n" +
+			"  fw-go  output path for the generated firmware Go source",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGenerate(specPath, outDir, pkg, slog.Default())
+			return runGenerate(args[0], args[1], pkg, slog.Default())
 		},
 	}
-	cmd.Flags().StringVar(&specPath, "spec", "node.json", "path to the JSON node spec")
-	cmd.Flags().StringVar(&outDir, "out", ".", "directory to write the generated artifacts into")
 	cmd.Flags().StringVar(&pkg, "package", "main", "Go package name for the generated firmware code")
 	return cmd
 }
 
-func runGenerate(specPath, outDir, pkg string, logger *slog.Logger) error {
+func runGenerate(specPath, fwGoPath, pkg string, logger *slog.Logger) error {
 	spec, err := loadSpec(specPath)
 	if err != nil {
 		return err
@@ -145,26 +153,36 @@ func runGenerate(specPath, outDir, pkg string, logger *slog.Logger) error {
 		return err
 	}
 
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	// The descriptor is content-addressed: its file name is the descriptor ID
+	// (also embedded in the firmware), written next to the spec.
+	descID := fmt.Sprintf("%08X", res.Version)
+	nodeJSONPath := filepath.Join(filepath.Dir(specPath), descID+".json")
+
+	if err := writeFile(fwGoPath, nodeCode); err != nil {
 		return err
 	}
-	codePath := filepath.Join(outDir, res.Node+"_gen.go")
-	jsonPath := filepath.Join(outDir, res.Node+".json")
-	if err := os.WriteFile(codePath, nodeCode, 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(jsonPath, descJSON, 0o644); err != nil {
+	if err := writeFile(nodeJSONPath, descJSON); err != nil {
 		return err
 	}
 
 	logger.Info("generated node artifacts",
 		"node", res.Node,
 		"registers", len(res.Registers),
-		"version", fmt.Sprintf("0x%08X", res.Version),
-		"code", codePath,
-		"descriptor", jsonPath,
+		"descriptorId", descID,
+		"code", fwGoPath,
+		"descriptor", nodeJSONPath,
 	)
 	return nil
+}
+
+// writeFile writes data to path, creating any missing parent directories.
+func writeFile(path string, data []byte) error {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // loadSpec reads and parses the JSON node spec.

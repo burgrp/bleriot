@@ -118,10 +118,12 @@ See [hub/fw/README.md](hub/fw/README.md) for hardware pinout and toolchain notes
 ```sh
 cd cli
 make build
-./bleriot generate --spec node.json --out out
+./bleriot generate node.json node_gen.go
 ```
 
-See [cli/README.md](cli/README.md#code-generation) for the spec format.
+The hub descriptor is content-addressed: it is written next to the spec as
+`<id>.json` and its ID is printed. See
+[cli/README.md](cli/README.md#code-generation) for the spec format.
 
 ---
 

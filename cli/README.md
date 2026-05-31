@@ -63,6 +63,7 @@ The hub is configured with a single JSON file (`--config`, default
   "ports": [
     { "device": "/dev/ttyACM0", "channel": 37 }
   ],
+  "descriptors": "descriptors",
   "nodes": "nodes"
 }
 ```
@@ -77,19 +78,27 @@ The hub is configured with a single JSON file (`--config`, default
 | `ttlSeconds` | Registry provider TTL. |
 | `baud` | Serial baud rate to each modem. |
 | `ports` | One entry per modem: serial `device` and its radio `channel`. |
+| `descriptors` | Directory of generated, content-addressed descriptor files (see below). |
 | `nodes` | Directory of per-device node files (see below). |
 
-### Node files
+### Descriptors and node files
 
 The hub does **not** list nodes in the main config. Instead `nodes` names a
 directory, and every `*.json` file in it is one physical node. The file's base
 name is the node name. Provisioning a new device is a single file drop — the hub
 config is never edited.
 
+Descriptors are **content-addressed**: `generate` writes each descriptor as
+`<id>.json`, where `<id>` is its descriptor ID (a hash over the
+resolved register set). The same ID is embedded in the firmware as
+`DescriptorID`, so a provisioned device can report which descriptor it
+implements. A node file selects its descriptor by that ID; the hub resolves it
+from the `descriptors` pool.
+
 ```
-config.json               # nodes: "nodes"
+config.json               # descriptors: "descriptors", nodes: "nodes"
 descriptors/
-  thermo.json             # shared, generated per-type descriptor (§11.7)
+  1A2B3C4D.json           # shared, generated per-type descriptor (§11.7)
 nodes/
   outdoor.json            # node "outdoor"
   garage.json             # node "garage" — same descriptor, own channel + identity
@@ -98,14 +107,15 @@ nodes/
 ```json
 // nodes/outdoor.json
 {
-  "descriptor": "../descriptors/thermo.json",
+  "descriptorId": "1A2B3C4D",
   "channel": 37,
   "address": "CCA00002",
   "key": "00112233445566778899AABBCCDDEEFF"
 }
 ```
 
-The `descriptor` path is resolved relative to the node file. See
+The `descriptorId` must match an `<id>.json` file in the `descriptors` pool. The
+ID is the file name; it is not stored inside the descriptor. See
 [protocol §11.9](../protocol/README.md#119-hub-node-files).
 
 ---
@@ -117,12 +127,15 @@ BleRiot needs, from a single run — so firmware and hub can never drift
 ([protocol §11.7](../protocol/README.md#117-generated-artifacts)):
 
 ```sh
-./bleriot generate --spec node.json --out out
-# out/<node>_gen.go   firmware node code (const wire IDs + RegisterIDs + version)
-# out/<node>.json      hub node descriptor (resolved id → name/type/scaling)
+./bleriot generate node.json node_gen.go
+# arg 1  spec     JSON node spec (input)
+# arg 2  fw-go    firmware node code (const wire IDs + RegisterIDs + descriptor ID)
 ```
 
-Flags: `--spec` (input, default `node.json`), `--out` (output dir, default `.`),
+The hub descriptor is **not** named on the command line: it is content-addressed
+and written next to the spec as `<id>.json`, where `<id>` is the descriptor ID
+(also embedded in the firmware). `generate` prints the ID it
+wrote. Drop that file into the hub's `descriptors` pool. The only flag is
 `--package` (Go package for the generated firmware code, default `main`). Wire
 IDs are never authored — they are assigned deterministically by the generator.
 
@@ -143,8 +156,9 @@ registers, and instances are keyed by name:
     "switch": { "registers": { "relay": { "type": "bool" } } }
   },
   "instances": {
-    "outdoor": "thermometer",
-    "main": "switch"
+    "sensor": "thermometer",
+    "heating": "switch",
+    "led": "switch"
   }
 }
 ```

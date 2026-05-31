@@ -39,9 +39,9 @@ type Register struct {
 // Descriptor is a node's generated register table (§11.7), plus indexes for
 // lookup by wire ID and by qualified name. It is a shared, per-type artifact and
 // carries no node name or RF channel; those are per-device facts that come from
-// the node's instance file (name) and provisioning (channel).
+// the node's instance file (name) and provisioning (channel). The descriptor ID
+// is not stored in the file; the file is content-addressed by that ID.
 type Descriptor struct {
-	Version   string            `json:"version"`
 	Metadata  map[string]string `json:"metadata"`
 	Registers []Register        `json:"registers"`
 

@@ -117,13 +117,13 @@ func TestBridge_SeedsInitialValue(t *testing.T) {
 		case <-time.After(2 * time.Millisecond):
 		}
 	}
-	if reg.name != "outdoor.temperature" {
+	if reg.name != "test.outdoor.temperature" {
 		t.Errorf("provided name = %q", reg.name)
 	}
 	if reg.initial != 12.34 {
 		t.Errorf("initial value = %v, want 12.34", reg.initial)
 	}
-	if reg.metadata["unit"] != "celsius" || reg.metadata["type"] != "float" {
+	if reg.metadata["unit"] != "celsius" || reg.metadata["type"] != "float" || reg.metadata["device"] != "test" {
 		t.Errorf("metadata = %v", reg.metadata)
 	}
 }

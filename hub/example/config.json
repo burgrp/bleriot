@@ -9,5 +9,6 @@
   "ports": [
     { "device": "/dev/ttyACM0", "channel": 37 }
   ],
+  "descriptors": "descriptors",
   "nodes": "nodes"
 }

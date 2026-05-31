@@ -3,6 +3,12 @@
 // the register's value (seeded by a GET, then kept current by a WATCH push
 // subscription) and turns consumer change requests into BleRiot SET operations.
 //
+// Each register is published under a name scoped by the device instance: the
+// node's name (the base name of its instance file on the hub) is prefixed to the
+// descriptor's qualified register name, e.g. node "kitchen" + register
+// "heating.state" → "kitchen.heating.state". This keeps names distinct across
+// devices that share one per-type descriptor.
+//
 // The bridge is generic — it has no per-class or per-register knowledge beyond
 // the node descriptor (PROTOCOL.md §11.7). It depends on small interfaces so it
 // can be tested without real hardware or a running registry; *engine.Engine and
@@ -81,12 +87,17 @@ func (h discardHandler) WithGroup(string) slog.Handler           { return h }
 func (b *Bridge) ServeNode(ctx context.Context, n *node.Node) {
 	for i := range n.Registers {
 		r := &n.Registers[i]
-		go b.serveRegister(ctx, n.Address, r)
+		go b.serveRegister(ctx, n.Name, n.Address, r)
 	}
 }
 
-func (b *Bridge) serveRegister(ctx context.Context, addr [node.AddrLen]byte, r *node.Register) {
-	log := b.log.With("register", r.Name, "id", r.ID)
+func (b *Bridge) serveRegister(ctx context.Context, nodeName string, addr [node.AddrLen]byte, r *node.Register) {
+	// The Registry name is scoped by the device instance (the node's name, i.e.
+	// the base name of its instance file on the hub), so the same per-type
+	// descriptor used by many devices yields distinct, fully-qualified names —
+	// e.g. node "kitchen" + register "heating.state" → "kitchen.heating.state".
+	regName := nodeName + "." + r.Name
+	log := b.log.With("register", regName, "id", r.ID)
 
 	// Seed the initial value with a best-effort GET.
 	var initial any
@@ -97,9 +108,9 @@ func (b *Bridge) serveRegister(ctx context.Context, addr [node.AddrLen]byte, r *
 		log.Debug("initial GET failed; providing null", "err", err)
 	}
 
-	md := metadata(r)
+	md := metadata(r, nodeName)
 	log.Debug("registry provide", "value", initial, "metadata", md, "ttl", b.ttl)
-	updates, requests, err := b.reg.Provide(ctx, r.Name, initial, md, b.ttl)
+	updates, requests, err := b.reg.Provide(ctx, regName, initial, md, b.ttl)
 	if err != nil {
 		log.Error("registry provide failed", "err", err)
 		return
@@ -173,18 +184,14 @@ func regValue(r *node.Register, u engine.Update) any {
 }
 
 // metadata builds the Registry metadata for a register: its descriptor metadata
-// plus the structural fields useful to consumers.
-func metadata(r *node.Register) map[string]any {
-	m := make(map[string]any, len(r.Metadata)+3)
+// plus the structural fields useful to consumers (the value type and the device
+// instance name).
+func metadata(r *node.Register, deviceName string) map[string]any {
+	m := make(map[string]any, len(r.Metadata)+2)
 	for k, v := range r.Metadata {
 		m[k] = v
 	}
 	m["type"] = string(r.Type)
-	if r.Class != "" {
-		m["class"] = r.Class
-	}
-	if r.Instance != "" {
-		m["instance"] = r.Instance
-	}
+	m["device"] = deviceName
 	return m
 }

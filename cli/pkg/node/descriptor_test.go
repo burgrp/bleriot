@@ -6,7 +6,6 @@ import (
 )
 
 const sampleJSON = `{
-  "version": "0x0E9FC8AD",
   "metadata": { "hw_rev": "1.3" },
   "registers": [
     { "id": 7911, "name": "outdoor.temperature", "class": "thermometer", "instance": "outdoor",
@@ -29,9 +28,6 @@ func loadSample(t *testing.T) *Descriptor {
 
 func TestLoadDescriptor_Indexes(t *testing.T) {
 	d := loadSample(t)
-	if d.Version != "0x0E9FC8AD" {
-		t.Fatalf("header wrong: version=%q", d.Version)
-	}
 	if len(d.Registers) != 3 {
 		t.Fatalf("got %d registers, want 3", len(d.Registers))
 	}

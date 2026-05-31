@@ -56,8 +56,8 @@ func TestGenerateNodeCode_CompilableAndComplete(t *testing.T) {
 	if !strings.Contains(code, "DO NOT EDIT") {
 		t.Error("missing generated-code marker")
 	}
-	if !strings.Contains(code, "const DescriptorVersion uint32 = 0x") {
-		t.Error("missing DescriptorVersion const")
+	if !strings.Contains(code, "const DescriptorID uint32 = 0x") {
+		t.Error("missing DescriptorID const")
 	}
 	if !strings.Contains(code, "var RegisterIDs = []uint16{") {
 		t.Error("missing RegisterIDs slice")
@@ -104,9 +104,6 @@ func TestGenerateDescriptorJSON_Shape(t *testing.T) {
 	var jd jsonDescriptor
 	if err := json.Unmarshal(data, &jd); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
-	}
-	if !strings.HasPrefix(jd.Version, "0x") {
-		t.Errorf("version not hex string: %q", jd.Version)
 	}
 	if len(jd.Registers) != 4 {
 		t.Fatalf("got %d registers, want 4", len(jd.Registers))

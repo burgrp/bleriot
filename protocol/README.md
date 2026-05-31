@@ -263,7 +263,10 @@ baked into the descriptor.
 
 The node firmware therefore emits **no descriptor at runtime**. The hub obtains
 the generated node descriptor (§11.7) directly as a file and merges in the
-identity record produced by the provisioning tool.
+identity record produced by the provisioning tool. A device does, however, know
+its **descriptor ID** (§11.6) baked into its firmware, and
+reports it at provisioning time so the hub can pick the matching descriptor from
+its pool (§11.9).
 
 ### 11.6 Wire ID Allocation (generator algorithm)
 
@@ -279,15 +282,15 @@ deterministically:
    collision.
 4. **Collision resolution:** if the slot is already taken (or reserved), linear
    probe `(id + 1) & 0xFFFF`, skipping `0x0000`, until a free slot is found.
-5. **Version hash:** the generator computes a descriptor version hash over the
+5. **Descriptor ID:** the generator computes a descriptor ID over the
    full resolved set of `(id, qualifiedName, type, multiplier, divider)` tuples
-   in canonical order. This hash is embedded in both the generated node code and
+   in canonical order. This ID is embedded in both the generated node code and
    the generated node descriptor so the hub can detect a firmware/descriptor
    mismatch.
 
 > **Stability note.** Hash-based allocation is stable across reordering the node
 > spec. Adding a register can still shift the IDs of later-probed entries that
-> collide with the newcomer's slot. The version hash makes such a shift
+> collide with the newcomer's slot. The descriptor ID makes such a shift
 > detectable; pinning IDs across firmware versions (e.g. via a checked-in
 > lockfile) is a possible future hardening and is out of scope here.
 
@@ -301,7 +304,7 @@ control**.
 - A `const` for each qualified register's wire ID, e.g.
   `RegOutdoorTemperature uint16 = 0x1A3F`.
 - A slice of all wire IDs (`RegisterIDs`) for iteration / table setup.
-- The descriptor version hash as a `const`.
+- The descriptor ID as a `const`.
 
 No per-class wrappers or interfaces are generated. The firmware backs registers
 generically, keyed by `uint16` wire ID; classes and instances exist only at
@@ -319,9 +322,17 @@ and **no RF channel**. A node's name, its RF channel, and its provisioned
 identity all live in a separate per-device instance file on the hub (§11.9), so
 one descriptor can back many physical devices on different channels.
 
+The descriptor is **content-addressed**: the generator names the JSON file
+`<id>.json`, where `<id>` is the descriptor ID (§11.6) as a zero-padded hex
+string (no `0x` prefix), the same value embedded in the firmware. Because the ID
+depends only on the resolved register set (IDs, types, scaling) and not on
+hub-side metadata, a device can report it, and the hub can keep many such
+descriptors in a flat pool keyed by ID. The ID is **not** stored inside the file;
+it is the file name. Two descriptors that differ only in metadata share an ID,
+which is acceptable.
+
 ```json
 {
-  "version": "0x9F3C1E8A",
   "metadata": { "hw_rev": "1.3" },
   "registers": [
     {
@@ -386,16 +397,18 @@ The hub does not list nodes in its main config. Instead the config names a
 node. This keeps provisioning a new device to a single file drop — the hub
 config is never edited.
 
-A node file is a thin **instance file**: it references a shared descriptor
-(§11.7) and carries the device's RF channel and provisioned identity (§11.5).
-The file's base name is the node name (so the descriptor itself needs no name
-field). The `descriptor` path is resolved relative to the node file's own
-directory.
+A node file is a thin **instance file**: it selects a shared descriptor (§11.7)
+by its **descriptor ID** and carries the device's RF channel and provisioned
+identity (§11.5). The file's base name is the node name (so the descriptor
+itself needs no name field). The hub resolves the descriptor from a
+content-addressed **descriptors pool** named by the config (`descriptors`): each
+file there is `<id>.json`, where `<id>` is the descriptor ID (the file name is
+the ID).
 
 ```
-hub.json                     # nodes: "nodes"
+hub.json                     # descriptors: "descriptors", nodes: "nodes"
 descriptors/
-  thermo.json                # shared per-type descriptor (generated, §11.7)
+  1A2B3C4D.json              # shared per-type descriptor (generated, §11.7)
 nodes/
   outdoor.json               # node "outdoor" on channel 37
   garage.json                # node "garage"  (same descriptor, own channel + identity)
@@ -404,7 +417,7 @@ nodes/
 ```json
 // nodes/outdoor.json
 {
-  "descriptor": "../descriptors/thermo.json",
+  "descriptorId": "1A2B3C4D",
   "channel": 37,
   "address": "CCA00002",
   "key": "00112233445566778899AABBCCDDEEFF"

@@ -76,7 +76,7 @@ func TestParseIdentity(t *testing.T) {
 }
 
 func TestNewNode(t *testing.T) {
-	d := &Descriptor{Version: "0x1"}
+	d := &Descriptor{}
 	id := Identity{Address: [AddrLen]byte{1, 2, 3, 4}}
 	n := NewNode("thermo", 37, d, id)
 	if n.Descriptor != d {
