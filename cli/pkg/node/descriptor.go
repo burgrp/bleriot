@@ -1,6 +1,6 @@
-// Package node models a BleRiot node on the host side: its generated descriptor
-// (loaded from the generator's JSON, PROTOCOL.md §11.7) plus its separately
-// provisioned identity (address and XTEA key, §11.5).
+// Package node models a BleRiot node on the host side: its register descriptor
+// (built from a device type's register table) plus its separately provisioned
+// identity (address and XTEA key, PROTOCOL.md §11.5).
 //
 // The descriptor maps wire register IDs to names, hub-side types, and scaling.
 // The host bridges these to the external Registry using ToValue/FromValue.
@@ -10,9 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"os"
 )
 
 // RegType is the hub-side interpretation of a register's int32 wire value (§11.3).
@@ -26,51 +24,35 @@ const (
 
 // Register is one resolved register from a node descriptor.
 type Register struct {
-	ID         uint16            `json:"id"`
-	Name       string            `json:"name"`
-	Class      string            `json:"class"`
-	Instance   string            `json:"instance"`
-	Type       RegType           `json:"type"`
-	Multiplier int32             `json:"multiplier"`
-	Divider    int32             `json:"divider"`
-	Metadata   map[string]string `json:"metadata"`
+	ID         uint16
+	Name       string
+	Type       RegType
+	Multiplier int32
+	Divider    int32
+	Metadata   map[string]string
 }
 
-// Descriptor is a node's generated register table (§11.7), plus indexes for
-// lookup by wire ID and by qualified name. It is a shared, per-type artifact and
-// carries no node name or RF channel; those are per-device facts that come from
-// the node's instance file (name) and provisioning (channel). The descriptor ID
-// is not stored in the file; the file is content-addressed by that ID.
+// Descriptor is a node's register table, plus indexes for lookup by wire ID and
+// by qualified name. It is a shared, per-type artifact and carries no node name
+// or RF channel; those are per-device facts that come from the inventory
+// instance (name) and provisioning (channel).
 type Descriptor struct {
-	Metadata  map[string]string `json:"metadata"`
-	Registers []Register        `json:"registers"`
+	Metadata  map[string]string
+	Registers []Register
 
 	byID   map[uint16]*Register
 	byName map[string]*Register
 }
 
-// LoadDescriptor parses a node descriptor from JSON and builds its indexes,
-// validating that IDs and names are unique and non-degenerate.
-func LoadDescriptor(r io.Reader) (*Descriptor, error) {
-	var d Descriptor
-	dec := json.NewDecoder(r)
-	if err := dec.Decode(&d); err != nil {
-		return nil, fmt.Errorf("decode node descriptor: %w", err)
-	}
+// NewDescriptor builds a Descriptor from an in-memory register table (e.g. one
+// derived from an inventory device type) and validates it: register IDs and
+// names must be unique and non-degenerate.
+func NewDescriptor(metadata map[string]string, regs []Register) (*Descriptor, error) {
+	d := &Descriptor{Metadata: metadata, Registers: regs}
 	if err := d.index(); err != nil {
 		return nil, err
 	}
-	return &d, nil
-}
-
-// LoadDescriptorFile loads a node descriptor from a file path.
-func LoadDescriptorFile(path string) (*Descriptor, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return LoadDescriptor(f)
+	return d, nil
 }
 
 func (d *Descriptor) index() error {

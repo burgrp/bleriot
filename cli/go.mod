@@ -1,5 +1,7 @@
-// Module cli is the BleRiot command-line tool: the host (Linux SBC) half of the
-// bridge between BleRiot RF nodes and the external Registry service.
+// Module cli is the BleRiot host library: the host (Linux SBC) half of the
+// bridge between BleRiot RF nodes and the external Registry service. A site
+// repository imports it and drives it with inventory-as-code, calling
+// host.Start(inventory.Inventory{...}) from its own main().
 //
 // The hub is split into two cooperating parts (see the protocol spec):
 //

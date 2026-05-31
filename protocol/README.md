@@ -27,7 +27,7 @@ These parameters are mandatory for all BleRiot-compatible radio implementations:
 | Packet format    | BLE-compatible (preamble, sync word, PDU, 3-byte CRC, whitening)       |
 | PDU size         | 13 bytes (fixed)                                                        |
 
-Each node operates on a single channel defined in its provisioning descriptor. The hub may have multiple radio interfaces, each assigned to a different channel, allowing nodes to be grouped by channel for spectrum spread or logical partitioning.
+Each node operates on a single channel defined in its provisioning page (§11.5). The hub may have multiple radio interfaces, each assigned to a different channel, allowing nodes to be grouped by channel for spectrum spread or logical partitioning.
 
 The RF sync word for each transmission is set to the 4-byte destination device address. Radio hardware that supports address/pipe filtering must configure its receive address to the device's own address, so only packets destined for that device are passed to the protocol layer. The 32-bit address space makes accidental collision with foreign RF traffic negligible.
 
@@ -156,69 +156,65 @@ The protocol is **best-effort at the RF layer**. Reliability is the hub's respon
 
 ---
 
-## 11. Register Model, Descriptors, and Code Generation
+## 11. Register Model and Provisioning
 
 The protocol carries registers as bare `uint16` IDs on the wire (§4). Names,
 types, scaling, and metadata are **hub-side knowledge** and are deliberately
 absent from the wire format for performance and memory reasons. The mapping
-between wire IDs and named, typed registers is produced by an offline
-**code-generation** step, not transmitted by the node at runtime.
+between wire IDs and named, typed registers lives in the host as
+**inventory-as-code**: a Go program that the host library compiles and runs.
+There is no runtime descriptor exchange and no offline code-generation step.
 
-This section defines the authoring model (class descriptors, node specs), the
-generated artifacts (node code, node descriptor), the deterministic ID
-allocation algorithm, and the separate node-identity provisioning path.
+This section defines the register model (tags, types, scaling), the
+inventory-as-code authoring model (device types and instances), and the
+node-identity provisioning path.
 
 ### 11.1 Concepts
 
 | Concept | Role | Source of truth | Carries wire IDs? |
 |---------|------|-----------------|-------------------|
-| **Class descriptor** | A reusable, named set of registers (a "register profile"). Defines register *names*, types, scaling, and metadata only. | Hand-authored library | No |
-| **Node spec** | Composition of one or more class *instances*, plus channel and node metadata. Describes *what a node is*. | Hand-authored, per node-type | No |
-| **Generated node code** | Per-node firmware artifact: `const` wire IDs, one interface per class, and a wiring table. | Code generator | Yes (assigned) |
-| **Generated node descriptor** | Per-node hub artifact: the resolved flat list of `id → {name, type, scaling, metadata}`. | Code generator | Yes (assigned) |
-| **Node identity** | The node's `address` (§3) and shared `key` (§5). Per-chip, secret. | Runtime / provisioning tool | n/a |
+| **Device type** | A reusable, named register table (`Name` + `Registers`). Defines register *names*, tags, types, scaling, and metadata. | Hand-authored Go (device-type module's `Type()`) | Yes (tags) |
+| **Instance** | One physical device: its name, MCU `UID`, key, channel, device type, and config. Describes *what a node is and where it is*. | Hand-authored Go (the site inventory) | n/a |
+| **Node identity** | The node's `address` (§3) and shared `key` (§5). Per-chip; the key is secret. | Provisioning page (written over SWD) | n/a |
 
-The single most important rule: **the code generator is the sole authority that
-assigns wire IDs.** Class descriptors and node specs never contain IDs. Both
-generated artifacts are produced from the same generator run, so the firmware
-and the hub descriptor cannot drift.
+The single most important rule: **a register's wire identity is its hand-assigned
+`Tag`** (a `uint8`, like a protobuf field number) — unique and non-zero within a
+device type, and **never reused** once retired. Because tags are stable by
+construction, firmware and host cannot drift: reordering or extending a register
+table never changes any existing register's wire ID.
 
 ```
-class descriptors          ──┐
- (names only, NO wire IDs)   │
-                             ├─► codegen ──┬─► node code (const IDs + interfaces + wiring)
-node spec                    │             │
- (which classes/instances) ──┘             └─► node descriptor (resolved id→name/meta)
-                                                      │
-                                                      └─► consumed by hub
+device type (Go)                ──┐
+ (registers: tag, name, scaling)  │
+                                  ├─► host runtime ──► Registry bridge
+instance (Go)                     │
+ (UID, key, channel, config) ─────┘
 ```
 
-The wire format (§4) and the node-side protocol logic are **unchanged** by this
-model — they still operate on a flat `uint16` REG. All class/instance/offset
-resolution happens at generation time on the host, never on the MCU.
+The wire format (§4) and the node-side protocol logic operate on a flat `uint16`
+REG. The host maps each register's `Tag` to the `uint16` carried on the wire
+(`REG = Tag`); the firmware likewise knows its registers by tag.
 
-### 11.2 Class Descriptor
+### 11.2 Device Type
 
-A class descriptor is a reusable register profile. It is authored as Go source
-(values consumed by the generator). Register names are unique within the class.
+A device type is a reusable register table, authored as Go source in the
+device-type module and returned by its `Type()` function. Register names and
+tags are unique within the type.
 
 | Field      | Type                 | Description                                                  |
 |------------|----------------------|-------------------------------------------------------------|
-| name       | string               | Class name (e.g. `thermometer`), unique within the library  |
-| registers  | list<Register>       | Register descriptors (see §11.3)                            |
-| metadata   | map<string,string>   | Key-value pairs merged into every instance's hub record     |
+| name       | string               | Device-type name (e.g. `thermostat`)                        |
+| registers  | list<Register>       | Register table (see §11.3)                                  |
 
-### 11.3 Register Descriptor
-
-Note: there is **no `id` field**. The wire ID is assigned by the generator
-(§11.6).
+### 11.3 Register
 
 | Field      | Type               | Description                                                   |
 |------------|--------------------|---------------------------------------------------------------|
-| name       | string             | Register name, unique within its class (e.g. `temperature`)   |
+| tag        | uint8              | Permanent wire identity: unique, non-zero, never reused       |
+| name       | string             | Register name, unique within the device type                  |
 | type       | enum               | `int`, `float`, or `bool`                                     |
 | multiplier | int32              | Hub scaling: `display = wire × multiplier / divider`          |
-| divider    | int32              | See multiplier; must not be zero                              |
+| divider    | int32              | See multiplier; must not be zero for non-`bool` registers     |
 | metadata   | map<string,string> | Key-value pairs merged into the hub's register record         |
 
 All registers carry `int32` on the wire (§8). `type`, `multiplier`, and
@@ -228,201 +224,108 @@ All registers carry `int32` on the wire (§8). `type`, `multiplier`, and
 - **`float`** — wire value is scaled: e.g. multiplier=1, divider=100 means wire value `1234` displays as `12.34`.
 - **`bool`** — wire value 0 = false, 1 = true; multiplier/divider are ignored.
 
-### 11.4 Node Spec
+The register name is scoped by the device instance name when published to the
+Registry: instance `kitchen` + register `temperature` → `kitchen.temperature`.
+This keeps names distinct across devices that share one device type.
 
-A node spec composes class instances into a concrete node-type. A class may be
-instantiated more than once; each instance has a name unique within the node.
+### 11.4 Inventory
 
-| Field      | Type                 | Description                                                       |
-|------------|----------------------|------------------------------------------------------------------|
-| name       | string               | Node-type name (used to name generated artifacts)                |
-| channel    | uint8                | RF channel the node listens and transmits on (§2)                |
-| metadata   | map<string,string>   | Key-value pairs merged into the hub's node record                |
-| instances  | list<ClassInstance>  | Class instances composed onto this node (see below)              |
+A deployment is an `Inventory`: a list of `Instance`s, each binding one physical
+device to its identity and type. A device type may be instantiated any number of
+times.
 
-**ClassInstance**
+**Instance**
 
-| Field    | Type   | Description                                                          |
-|----------|--------|---------------------------------------------------------------------|
-| class    | string | Name of a class descriptor (§11.2)                                  |
-| name     | string | Instance name, unique within the node (e.g. `outdoor`, `relay_a`)  |
+| Field    | Type      | Description                                                       |
+|----------|-----------|------------------------------------------------------------------|
+| name     | string    | Device name, unique within the inventory (scopes register names) |
+| uid      | [12]byte  | MCU unique ID; the RF address is derived from it (§11.5)         |
+| key      | [16]byte  | XTEA shared key (§5)                                             |
+| channel  | uint8     | RF channel the device listens and transmits on (§2)             |
+| type     | DeviceType| The device's register table (§11.2)                             |
+| config   | any       | Device-type-specific configuration (a fixed-size struct)        |
 
-The **qualified register name** is `instanceName + "." + registerName`
-(e.g. `outdoor.temperature`). Qualified names are unique within a node and are
-the keys used by both ID allocation (§11.6) and the hub.
+The host validates the inventory at startup: tags are unique and non-zero within
+each device type, and instance names are unique.
 
 ### 11.5 Node Identity Provisioning
 
-`address` (§3) and `key` (§5) are **not** part of any descriptor file. They are
-per-chip and the key is secret, so they are delivered to the hub by the
-provisioning tooling out of band — for example, read/derived over SWD at flash
-time (`address = CRC32(MCU_UID)`), with the key injected during the same step.
-The node's **RF channel** (§2) is likewise a per-device deployment fact, not a
-property of the node type, so it too is provisioned per device rather than
-baked into the descriptor.
+`address` (§3) and `key` (§5) are **not** part of any device type. They are
+per-chip and the key is secret, so they are written to the device by the
+provisioning tooling over SWD, together with the device's RF channel and config,
+as a single **provisioning page** in flash.
 
-The node firmware therefore emits **no descriptor at runtime**. The hub obtains
-the generated node descriptor (§11.7) directly as a file and merges in the
-identity record produced by the provisioning tool. A device does, however, know
-its **descriptor ID** (§11.6) baked into its firmware, and
-reports it at provisioning time so the hub can pick the matching descriptor from
-its pool (§11.9).
+The RF address is **derived, not stored**: both the host and the firmware compute
+`address = CRC32(MCU_UID)` (§3), so it never appears in the inventory. The host
+reads the device's 12-byte UID over SWD, looks the device up in the inventory by
+UID, and writes its page.
 
-### 11.6 Wire ID Allocation (generator algorithm)
+The **provisioning page** layout (encoded identically by host and firmware, so
+they cannot disagree on the bytes):
 
-The generator assigns a `uint16` to every qualified register name
-deterministically:
+```
+header  magic | layout | configLen | channel | pad | address | key
+config  the device type's fixed-size config struct
+crc32   CRC-32 (IEEE) over everything before it
+```
 
-1. **Collect** all qualified names across every instance in the node spec.
-2. **Canonical order:** sort qualified names lexicographically. Allocation is
-   performed in this order so the result is independent of the authoring order
-   of classes or instances in the node spec.
-3. **Primary slot:** `id = fnv1a32(qualifiedName) & 0xFFFF`. The reserved value
-   `0x0000` is never assigned; if the hash yields `0x0000`, treat it as a
-   collision.
-4. **Collision resolution:** if the slot is already taken (or reserved), linear
-   probe `(id + 1) & 0xFFFF`, skipping `0x0000`, until a free slot is found.
-5. **Descriptor ID:** the generator computes a descriptor ID over the
-   full resolved set of `(id, qualifiedName, type, multiplier, divider)` tuples
-   in canonical order. This ID is embedded in both the generated node code and
-   the generated node descriptor so the hub can detect a firmware/descriptor
-   mismatch.
+The firmware reads the page once at boot to learn its identity and config; it
+emits **no descriptor at runtime**. A device whose page has never been written is
+detected by a magic mismatch (an erased page), distinct from a corrupt page
+(CRC mismatch).
 
-> **Stability note.** Hash-based allocation is stable across reordering the node
-> spec. Adding a register can still shift the IDs of later-probed entries that
-> collide with the newcomer's slot. The descriptor ID makes such a shift
-> detectable; pinning IDs across firmware versions (e.g. via a checked-in
-> lockfile) is a possible future hardening and is out of scope here.
+### 11.6 Worked Example
 
-### 11.7 Generated Artifacts
+A `thermostat` device type, authored in Go (tags hand-assigned, permanent):
 
-Both artifacts are produced by one generator run and are **checked into version
-control**.
-
-**Node code** (Go, compiled into firmware) provides, per node:
-
-- A `const` for each qualified register's wire ID, e.g.
-  `RegOutdoorTemperature uint16 = 0x1A3F`.
-- A slice of all wire IDs (`RegisterIDs`) for iteration / table setup.
-- The descriptor ID as a `const`.
-
-No per-class wrappers or interfaces are generated. The firmware backs registers
-generically, keyed by `uint16` wire ID; classes and instances exist only at
-generation time. No register names, types, scaling, or metadata appear in
-firmware — only IDs. This keeps flash/RAM cost minimal.
-
-**Node descriptor** (consumed by the hub) is the resolved flat list. It is
-emitted as a data file (JSON) so the hub need not import generator packages.
-The hub is a generic bridge: it reads this descriptor and maps every BleRiot
-register to a register in the external Registry service, without any
-class-specific logic.
-
-The descriptor is a **shared, per-type** artifact and carries **no node name**
-and **no RF channel**. A node's name, its RF channel, and its provisioned
-identity all live in a separate per-device instance file on the hub (§11.9), so
-one descriptor can back many physical devices on different channels.
-
-The descriptor is **content-addressed**: the generator names the JSON file
-`<id>.json`, where `<id>` is the descriptor ID (§11.6) as a zero-padded hex
-string (no `0x` prefix), the same value embedded in the firmware. Because the ID
-depends only on the resolved register set (IDs, types, scaling) and not on
-hub-side metadata, a device can report it, and the hub can keep many such
-descriptors in a flat pool keyed by ID. The ID is **not** stored inside the file;
-it is the file name. Two descriptors that differ only in metadata share an ID,
-which is acceptable.
-
-```json
-{
-  "metadata": { "hw_rev": "1.3" },
-  "registers": [
-    {
-      "id": 6719,
-      "name": "outdoor.temperature",
-      "class": "thermometer",
-      "instance": "outdoor",
-      "type": "float",
-      "multiplier": 1,
-      "divider": 100,
-      "metadata": { "unit": "celsius" }
+```go
+inventory.DeviceType{
+    Name: "thermostat",
+    Registers: []inventory.Register{
+        {Tag: 1, Name: "temperature", Type: inventory.TypeFloat, Multiplier: 1, Divider: 100,
+            Metadata: map[string]string{"unit": "celsius"}},
+        {Tag: 2, Name: "setpoint", Type: inventory.TypeFloat, Multiplier: 1, Divider: 100,
+            Metadata: map[string]string{"unit": "celsius"}},
+        {Tag: 3, Name: "heating", Type: inventory.TypeBool},
     },
+}
+```
+
+A site inventory instantiates it per physical device:
+
+```go
+inventory.Inventory{
     {
-      "id": 2048,
-      "name": "main.relay",
-      "class": "switch",
-      "instance": "main",
-      "type": "bool",
-      "multiplier": 1,
-      "divider": 1,
-      "metadata": {}
-    }
-  ]
+        Name:    "kitchen",
+        UID:     [12]byte{ /* MCU unique ID, read over SWD */ },
+        Key:     [16]byte{ /* XTEA key */ },
+        Channel: 37,
+        Type:    thermostat.Type(),
+        Config:  thermostat.Config{MinTemp: 18, MaxTemp: 22},
+    },
 }
 ```
 
-### 11.8 Worked Example
+The host derives `kitchen`'s address as `CRC32(UID)`, maps each register's tag to
+its wire REG, and publishes `kitchen.temperature`, `kitchen.setpoint` and
+`kitchen.heating` to the Registry. Two instances of the same type coexist because
+their *names* differ; the wire never sees the instance concept.
 
-Authored classes (names only, no IDs):
+### 11.7 Onboarding and Provisioning Workflow
 
-```
-class "thermometer":
-  registers:
-    - name: temperature   type: float   multiplier: 1  divider: 100  metadata: {unit: celsius}
-    - name: humidity       type: int      multiplier: 1  divider: 1
+1. **Onboard.** Attach a new device and run `new`: the host reads its UID over
+   SWD and prints a paste-ready `Instance{}` stub. Fill in the name, key,
+   channel, type and config, and commit it to the inventory source.
+2. **Provision.** Run `provision`: the host reads the attached device's UID,
+   finds the matching inventory instance **by UID alone**, builds its
+   provisioning page (address = `CRC32(UID)`, key, channel, config) and writes it
+   to flash over SWD.
+3. **Run.** Run `hub`: the host builds every inventory device's register
+   descriptor, derives its address, and bridges its registers to the Registry.
 
-class "switch":
-  registers:
-    - name: relay          type: bool
-```
-
-Authored node spec (`garage-controller`, channel 10):
-
-```
-instances:
-  - class: thermometer  name: outdoor
-  - class: switch        name: main
-  - class: switch        name: aux
-```
-
-The generator collects qualified names `aux.relay`, `main.relay`,
-`outdoor.humidity`, `outdoor.temperature`, allocates a `uint16` to each per
-§11.6, then emits the node code (const IDs + `Thermometer` and `Switch`
-interfaces + wiring table) and the JSON node descriptor above. Two `switch`
-instances coexist because their qualified names differ — the wire never sees the
-instance concept.
-
-### 11.9 Hub Node Files
-
-The hub does not list nodes in its main config. Instead the config names a
-**nodes directory** (`nodes`), and every `*.json` file in it is one physical
-node. This keeps provisioning a new device to a single file drop — the hub
-config is never edited.
-
-A node file is a thin **instance file**: it selects a shared descriptor (§11.7)
-by its **descriptor ID** and carries the device's RF channel and provisioned
-identity (§11.5). The file's base name is the node name (so the descriptor
-itself needs no name field). The hub resolves the descriptor from a
-content-addressed **descriptors pool** named by the config (`descriptors`): each
-file there is `<id>.json`, where `<id>` is the descriptor ID (the file name is
-the ID).
-
-```
-hub.json                     # descriptors: "descriptors", nodes: "nodes"
-descriptors/
-  1A2B3C4D.json              # shared per-type descriptor (generated, §11.7)
-nodes/
-  outdoor.json               # node "outdoor" on channel 37
-  garage.json                # node "garage"  (same descriptor, own channel + identity)
-```
-
-```json
-// nodes/outdoor.json
-{
-  "descriptorId": "1A2B3C4D",
-  "channel": 37,
-  "address": "CCA00002",
-  "key": "00112233445566778899AABBCCDDEEFF"
-}
-```
+Adding or provisioning a device is an edit to the inventory **source**, type-checked
+by the Go compiler — there are no JSON files to hand-edit and no descriptor pool
+to keep in sync.
 
 ---
 

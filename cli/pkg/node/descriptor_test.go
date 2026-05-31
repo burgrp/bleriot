@@ -1,32 +1,27 @@
 package node
 
 import (
-	"strings"
 	"testing"
 )
 
-const sampleJSON = `{
-  "metadata": { "hw_rev": "1.3" },
-  "registers": [
-    { "id": 7911, "name": "outdoor.temperature", "class": "thermometer", "instance": "outdoor",
-      "type": "float", "multiplier": 1, "divider": 100, "metadata": { "unit": "celsius" } },
-    { "id": 6470, "name": "outdoor.humidity", "class": "thermometer", "instance": "outdoor",
-      "type": "int", "multiplier": 1, "divider": 1, "metadata": {} },
-    { "id": 4466, "name": "aux.relay", "class": "switch", "instance": "aux",
-      "type": "bool", "multiplier": 0, "divider": 0, "metadata": {} }
-  ]
-}`
+func sampleRegisters() []Register {
+	return []Register{
+		{ID: 7911, Name: "outdoor.temperature", Type: TypeFloat, Multiplier: 1, Divider: 100, Metadata: map[string]string{"unit": "celsius"}},
+		{ID: 6470, Name: "outdoor.humidity", Type: TypeInt, Multiplier: 1, Divider: 1},
+		{ID: 4466, Name: "aux.relay", Type: TypeBool},
+	}
+}
 
 func loadSample(t *testing.T) *Descriptor {
 	t.Helper()
-	d, err := LoadDescriptor(strings.NewReader(sampleJSON))
+	d, err := NewDescriptor(map[string]string{"hw_rev": "1.3"}, sampleRegisters())
 	if err != nil {
-		t.Fatalf("LoadDescriptor: %v", err)
+		t.Fatalf("NewDescriptor: %v", err)
 	}
 	return d
 }
 
-func TestLoadDescriptor_Indexes(t *testing.T) {
+func TestDescriptor_Indexes(t *testing.T) {
 	d := loadSample(t)
 	if len(d.Registers) != 3 {
 		t.Fatalf("got %d registers, want 3", len(d.Registers))
@@ -41,20 +36,6 @@ func TestLoadDescriptor_Indexes(t *testing.T) {
 	}
 	if _, ok := d.ByID(0xFFFF); ok {
 		t.Error("ByID of missing register should fail")
-	}
-}
-
-func TestLoadDescriptor_Validation(t *testing.T) {
-	cases := map[string]string{
-		"reserved id 0":  `{"registers":[{"id":0,"name":"x","type":"int","multiplier":1,"divider":1}]}`,
-		"duplicate id":   `{"registers":[{"id":5,"name":"a","type":"int","divider":1},{"id":5,"name":"b","type":"int","divider":1}]}`,
-		"duplicate name": `{"registers":[{"id":1,"name":"a","type":"int","divider":1},{"id":2,"name":"a","type":"int","divider":1}]}`,
-		"zero divider":   `{"registers":[{"id":1,"name":"a","type":"float","multiplier":1,"divider":0}]}`,
-	}
-	for desc, js := range cases {
-		if _, err := LoadDescriptor(strings.NewReader(js)); err == nil {
-			t.Errorf("%s: expected error, got nil", desc)
-		}
 	}
 }
 

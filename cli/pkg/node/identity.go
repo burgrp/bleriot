@@ -1,8 +1,12 @@
 package node
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"hash/crc32"
+
+	"cli/pkg/page"
 )
 
 // AddrLen is the BleRiot device address length in bytes (§3).
@@ -10,6 +14,16 @@ const AddrLen = 4
 
 // KeyLen is the XTEA shared-key length in bytes (§5).
 const KeyLen = 16
+
+// AddressFromUID derives a node's 4-byte RF address from its 12-byte MCU unique
+// ID (PROTOCOL.md §11.5): address = CRC32(UID), big-endian. Both the host
+// (provisioning, hub) and the firmware compute it the same way, so the address
+// is never stored in the inventory.
+func AddressFromUID(uid [page.UIDLen]byte) [AddrLen]byte {
+	var a [AddrLen]byte
+	binary.BigEndian.PutUint32(a[:], crc32.ChecksumIEEE(uid[:]))
+	return a
+}
 
 // Identity is a node's per-chip secret material, provisioned out of band
 // (PROTOCOL.md §11.5) and never present in the generated descriptor.

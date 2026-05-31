@@ -1,0 +1,169 @@
+package host
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"log/slog"
+	"strings"
+	"testing"
+
+	"cli/pkg/inventory"
+	"cli/pkg/node"
+	"cli/pkg/page"
+)
+
+// fakeProbe is an in-memory Probe for tests.
+type fakeProbe struct {
+	uid      [page.UIDLen]byte
+	readErr  error
+	written  []byte
+	writeErr error
+}
+
+func (f *fakeProbe) ReadUID(context.Context) ([page.UIDLen]byte, error) {
+	return f.uid, f.readErr
+}
+
+func (f *fakeProbe) WritePage(_ context.Context, image []byte) error {
+	if f.writeErr != nil {
+		return f.writeErr
+	}
+	f.written = append([]byte(nil), image...)
+	return nil
+}
+
+type thermostatConfig struct {
+	MinTemp int16
+	MaxTemp int16
+}
+
+func sampleType() inventory.DeviceType {
+	return inventory.DeviceType{
+		Name: "thermostat",
+		Registers: []inventory.Register{
+			{Tag: 1, Name: "temperature", Type: inventory.TypeFloat, Multiplier: 1, Divider: 100},
+			{Tag: 2, Name: "heating", Type: inventory.TypeBool},
+		},
+	}
+}
+
+func sampleInstance() inventory.Instance {
+	return inventory.Instance{
+		Name:    "kitchen",
+		UID:     [page.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		Key:     [page.KeyLen]byte{0xAA, 0xBB, 0xCC, 0xDD},
+		Channel: 37,
+		Type:    sampleType(),
+		Config:  thermostatConfig{MinTemp: 1800, MaxTemp: 2400},
+	}
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestBuildNode(t *testing.T) {
+	inst := sampleInstance()
+
+	n, err := buildNode(inst)
+	if err != nil {
+		t.Fatalf("buildNode: %v", err)
+	}
+	if n.Name != "kitchen" || n.Channel != 37 {
+		t.Fatalf("node name/channel = %q/%d", n.Name, n.Channel)
+	}
+	if n.Address != node.AddressFromUID(inst.UID) {
+		t.Fatalf("node address not derived from UID")
+	}
+	if n.Key != inst.Key {
+		t.Fatalf("node key mismatch")
+	}
+	if r, ok := n.ByID(1); !ok || r.Name != "temperature" {
+		t.Fatalf("register tag 1 not mapped: %v %v", r, ok)
+	}
+	if _, ok := n.ByID(2); !ok {
+		t.Fatalf("register tag 2 not mapped")
+	}
+}
+
+func TestRunProvisionWritesPage(t *testing.T) {
+	inst := sampleInstance()
+	inv := inventory.Inventory{inst}
+	fp := &fakeProbe{uid: inst.UID}
+
+	if err := runProvision(context.Background(), inv, fp, discardLogger()); err != nil {
+		t.Fatalf("runProvision: %v", err)
+	}
+	if fp.written == nil {
+		t.Fatal("no page written")
+	}
+
+	var got thermostatConfig
+	h, err := page.Unmarshal(fp.written, &got)
+	if err != nil {
+		t.Fatalf("Unmarshal written page: %v", err)
+	}
+	if h.Address != node.AddressFromUID(inst.UID) {
+		t.Fatalf("page address not derived from UID")
+	}
+	if h.Key != inst.Key {
+		t.Fatalf("page key mismatch")
+	}
+	if h.Channel != inst.Channel {
+		t.Fatalf("page channel = %d, want %d", h.Channel, inst.Channel)
+	}
+	if got != inst.Config {
+		t.Fatalf("page config = %+v, want %+v", got, inst.Config)
+	}
+}
+
+func TestRunProvisionUnknownUID(t *testing.T) {
+	inv := inventory.Inventory{sampleInstance()}
+	fp := &fakeProbe{uid: [page.UIDLen]byte{0xFF}} // not in inventory
+
+	err := runProvision(context.Background(), inv, fp, discardLogger())
+	if err == nil {
+		t.Fatal("expected error for unknown UID")
+	}
+	if fp.written != nil {
+		t.Fatal("must not write a page for an unknown device")
+	}
+}
+
+func TestRunNewPrintsStub(t *testing.T) {
+	inv := inventory.Inventory{sampleInstance()}
+	uid := [page.UIDLen]byte{0x10, 0x20, 0x30}
+	fp := &fakeProbe{uid: uid}
+
+	var buf bytes.Buffer
+	if err := runNew(context.Background(), inv, fp, &buf, discardLogger()); err != nil {
+		t.Fatalf("runNew: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "inventory.Instance{") {
+		t.Fatalf("stub missing Instance literal:\n%s", out)
+	}
+	if !strings.Contains(out, "0x10, 0x20, 0x30") {
+		t.Fatalf("stub missing UID bytes:\n%s", out)
+	}
+}
+
+func TestParsePorts(t *testing.T) {
+	ports, err := parsePorts([]string{"/dev/ttyUSB0:37", "/dev/ttyUSB1:11"})
+	if err != nil {
+		t.Fatalf("parsePorts: %v", err)
+	}
+	if len(ports) != 2 || ports[0].device != "/dev/ttyUSB0" || ports[0].channel != 37 {
+		t.Fatalf("unexpected ports: %+v", ports)
+	}
+	if ports[1].channel != 11 {
+		t.Fatalf("unexpected channel: %+v", ports[1])
+	}
+
+	for _, bad := range []string{"nochannel", "/dev/ttyUSB0:", ":37", "/dev/ttyUSB0:999"} {
+		if _, err := parsePorts([]string{bad}); err == nil {
+			t.Fatalf("expected error for %q", bad)
+		}
+	}
+}

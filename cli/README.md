@@ -1,3 +1,166 @@
+# cli — BleRiot host library
+
+`cli` is the host (Linux-SBC) half of the BleRiot hub, packaged as a **library**
+that a site repository drives with **inventory-as-code**. It owns all protocol
+intelligence — per-node XTEA keys, register tables, retries/timeouts, push
+subscription bookkeeping, and the Registry client — and drives one or more "dumb
+radio modems" ([`hub/fw`](../hub/fw/README.md)) over serial.
+
+For every BleRiot register the hub acts as a
+[Registry](https://github.com/burgrp/reg) provider: it publishes the register's
+value and turns consumer change requests into BleRiot `SET` operations.
+
+> Module path: `cli`. See the [protocol spec](../protocol/README.md) for the wire
+> format and transaction semantics this implements.
+
+There is **no JSON configuration and no code generation**. A deployment is a Go
+program: it declares an [`inventory.Inventory`](pkg/inventory) and hands it to
+[`host.Start`](pkg/host), which builds the `bleriot` command tree (cobra) around
+it.
+
+```go
+package main
+
+import (
+	"cli/pkg/host"
+	"cli/pkg/inventory"
+
+	"thermostat"
+)
+
+func main() {
+	host.Start(inventory.Inventory{
+		{
+			Name:    "kitchen",
+			UID:     [12]byte{ /* MCU unique ID */ },
+			Key:     [16]byte{ /* XTEA key */ },
+			Channel: 37,
+			Type:    thermostat.Type(),
+			Config:  thermostat.Config{MinTemp: 18, MaxTemp: 22},
+		},
+	})
+}
+```
+
+A complete, runnable site binary lives in [`../example/hub`](../example/hub).
+
+---
+
+## Commands
+
+`host.Start` provides three subcommands:
+
+```
+hub        bridge the inventory's RF nodes to the Registry
+provision  write a device's identity + config to its flash over SWD
+new        read an attached device's UID and print an Instance stub
+```
+
+```sh
+cd ../example/hub
+go run . hub --registry http://localhost:8080 --port /dev/ttyACM0:37
+go run . --debug hub --port /dev/ttyACM0:37   # verbose: shows serial traffic
+go run . provision                            # provision the attached device
+go run . new                                  # onboard a brand-new device
+```
+
+### `hub` flags
+
+Runtime/deploy settings are command-line flags, not inventory data:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--registry` | `$REGISTRY` | Registry service URL. |
+| `--hub-address` | `FFFFFF01` | 4-byte hub source address (hex), used as SRC in outgoing packets. |
+| `--timeout` | `50ms` | Per-attempt response wait (protocol §9). |
+| `--retries` | `3` | Retransmissions after the first attempt (§9). |
+| `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
+| `--ttl` | `30s` | Registry provider TTL. |
+| `--baud` | `115200` | Serial baud rate to each modem. |
+| `--port` | — | A modem as `device:channel`, e.g. `/dev/ttyACM0:37`. Repeatable, one per modem. |
+
+### `provision` / `new` flags
+
+Both talk to the attached device over SWD via `pyocd`:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--target` | `py32f030x8` | pyocd target name. |
+| `--uid-addr` | `0x1FFF0E00` | Memory address of the 12-byte MCU unique ID. |
+| `--page-addr` | `0x0800F800` | Flash address of the provisioning page. |
+
+`provision` reads the device's UID, matches it against the inventory **by UID
+alone** (no device name argument), and writes its provisioning page — the RF
+address (derived as `CRC32(UID)`), key, channel and `Config` — to flash. `new`
+reads the UID of a device not yet in the inventory and prints a paste-ready
+`inventory.Instance{}` stub to add to the source.
+
+---
+
+## Inventory model
+
+The [`inventory`](pkg/inventory) package is the type-safe model of a deployment.
+
+- **`Register`** — one register of a device type. Its `Tag` (a `uint8`, like a
+  protobuf field number) is its permanent wire identity: unique and non-zero
+  within the device type, never reused once retired. Slice order is irrelevant.
+- **`DeviceType`** — a shared, per-type register table (`Name` + `Registers`),
+  authored once in the device-type module and returned by its `Type()` function.
+- **`Instance`** — one physical device: its `Name`, MCU `UID`, XTEA `Key`, RF
+  `Channel`, device `Type`, and device-specific `Config`.
+- **`Inventory`** — the full set of devices. `Validate()` enforces unique
+  non-zero tags per device type and unique instance names.
+
+The RF address is never stored: both the host and the firmware derive it as
+`CRC32(UID)` ([protocol §11.5](../protocol/README.md)).
+
+### Device-type modules
+
+A device type (e.g. [`../example/thermostat`](../example/thermostat)) is a
+dual-target Go module:
+
+- `Config` (a fixed-size struct) is shared by host and firmware.
+- `Type() inventory.DeviceType` is host-only (build tag `!tinygo`), so the
+  firmware build never pulls in the host library.
+- The firmware entry point lives behind `//go:build tinygo`.
+
+### Provisioning page
+
+The host and firmware agree on one flash page per device, encoded by the shared
+[`page`](pkg/page) package (`encoding/binary`, fixed-width, CRC-checked):
+
+```
+header  magic | layout | configLen | channel | pad | address | key
+config  the device type's fixed-size Config struct
+crc32   CRC-32 (IEEE) over everything before it
+```
+
+The firmware reads it once at boot; `page.IsUnprovisioned` distinguishes an
+erased page from a corrupt one.
+
+---
+
+## Layout
+
+| Path | Responsibility |
+|------|----------------|
+| [`pkg/host`](pkg/host) | The `bleriot` command tree (cobra): `host.Start(Inventory)` plus the `hub`, `provision` and `new` subcommands, and the `Probe` interface (SWD read-UID / write-page) with its `pyocd` implementation. |
+| [`pkg/inventory`](pkg/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. |
+| [`pkg/page`](pkg/page) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
+| [`pkg/engine`](pkg/engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
+| [`pkg/modem`](pkg/modem) | Host-side client for a single modem over one serial port: wraps the [link protocol](../hub/link/README.md). `Port` is a self-healing variant that survives transport loss and reconnects automatically. |
+| [`pkg/node`](pkg/node) | Host-side node model: a register descriptor (wire ID → name/type/scaling) built from a device type, plus the provisioned identity (address + key). Bridges values to/from the Registry. |
+| [`pkg/bridge`](pkg/bridge) | Connects the engine to the Registry: each register becomes a provider (seeded by `GET`, kept current by `WATCH`), and consumer writes become `SET`. Generic — no per-register knowledge beyond the descriptor. |
+
+---
+
+## Resilience
+
+- The modem `Port` starts even when the radio is **disconnected** and reconnects
+  with backoff; `Send` returns `ErrDisconnected` until a transport is available.
+- `Watch` subscriptions are persistent intents: they are retained even if the
+  initial attempt times out, and re-`WATCH`ed periodically so a node that comes
+  up later (or reboots) is resubscribed automatically.
 # cli — BleRiot command-line tool
 
 `bleriot` is the BleRiot command-line tool. It is the Linux-SBC half of the hub:

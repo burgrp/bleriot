@@ -1,11 +1,5 @@
-BINARY = bleriot
-PKG    = ./cmd
-
-build:
-	go build -o $(BINARY) $(PKG)
-
-run:
-	go run $(PKG) hub
+# cli is a library (the BleRiot host runtime). A deployment is a separate
+# site binary that imports it; see ../example/hub.
 
 test:
 	go test ./...
@@ -13,11 +7,11 @@ test:
 vet:
 	go vet ./...
 
+build:
+	go build ./...
+
 tidy:
 	go mod tidy
 
-clean:
-	rm -f $(BINARY)
-
-.PHONY: build run test vet tidy clean
+.PHONY: test vet build tidy
 

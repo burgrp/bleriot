@@ -76,7 +76,7 @@ func (r *fakeReg) Provide(ctx context.Context, name string, value any, metadata 
 
 func floatReg() *node.Register {
 	return &node.Register{
-		ID: 0x1234, Name: "outdoor.temperature", Class: "thermometer", Instance: "outdoor",
+		ID: 0x1234, Name: "outdoor.temperature",
 		Type: node.TypeFloat, Multiplier: 1, Divider: 100,
 		Metadata: map[string]string{"unit": "celsius"},
 	}
