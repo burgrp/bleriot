@@ -157,6 +157,7 @@ The protocol is **best-effort at the RF layer**. Reliability is the hub's respon
 - A node keeps at most one subscription per register per hub.
 - A subscription expires if the node receives no packet from that hub for `T_idle` (recommended: 60 s). After expiry, push stops silently.
 - To keep subscriptions alive, the hub periodically re-sends `WATCH` for every active subscription well within `T_idle` (the reference host hub uses a 15 s refresh interval). Re-`WATCH` also re-establishes any subscription a node may have dropped (e.g. after a reboot).
+- The refresh doubles as a liveness check: each re-`WATCH` draws an immediate `IS` reply from a live node. When a node stops answering refreshes (e.g. it loses power), the hub treats the register as having no value after a few consecutive misses and reports it as `NULL`, so a vanished node's last value is not served indefinitely. The next successful refresh (or any push) restores the real value. The reference host hub marks a node offline after 2 missed refreshes (~30 s).
 - Change detection is implementation-defined. The hub may fall back to polling if a node pushes too frequently.
 
 ---

@@ -334,3 +334,91 @@ func TestEngine_RefreshReWatches(t *testing.T) {
 		t.Fatalf("WATCH refreshes continued after Unwatch: %d -> %d", baseline, after)
 	}
 }
+
+// TestEngine_OfflineNodeReportsNull verifies that when a watched node stops
+// answering refreshes (e.g. it is powered off), the engine delivers a NULL
+// update to the watcher after LivenessMisses consecutive unanswered refreshes,
+// so a stale value is not reported indefinitely.
+func TestEngine_OfflineNodeReportsNull(t *testing.T) {
+	c, err := protocol.NewCodec(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(Options{
+		HubAddr:         hubAddr,
+		Timeout:         20 * time.Millisecond,
+		Retries:         1,
+		RefreshInterval: 15 * time.Millisecond,
+		LivenessMisses:  2,
+	})
+	f := newFakeRadio()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.AddRadio(ctx, testChannel, f)
+	n := node.NewNode("t", testChannel, &node.Descriptor{},
+		node.Identity{Address: nodeAddr, Key: testKey})
+	if err := e.AddNode(n); err != nil {
+		t.Fatal(err)
+	}
+
+	// The simulated node answers while alive, then goes silent (powered off).
+	var smu sync.Mutex
+	alive := true
+	go func() {
+		for req := range f.sent {
+			smu.Lock()
+			up := alive
+			smu.Unlock()
+			if !up {
+				continue // node is off: no reply
+			}
+			_, _, _, reg, _, derr := c.Decode(req[:])
+			if derr != nil {
+				t.Errorf("node decode: %v", derr)
+				continue
+			}
+			var resp [PacketLen]byte
+			c.Encode(resp[:], nodeAddr, protocol.TypeIS, 0, reg, 11)
+			f.recv <- resp
+		}
+	}()
+
+	var cmu sync.Mutex
+	var updates []Update
+	if err := e.Watch(context.Background(), nodeAddr, regTemp, func(u Update) {
+		cmu.Lock()
+		updates = append(updates, u)
+		cmu.Unlock()
+	}); err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+
+	go e.Run(ctx)
+
+	// Let a few refreshes succeed, then power the node off.
+	time.Sleep(45 * time.Millisecond)
+	smu.Lock()
+	alive = false
+	smu.Unlock()
+
+	// Expect a NULL update once the refreshes go unanswered past the threshold.
+	deadline := time.After(2 * time.Second)
+	for {
+		cmu.Lock()
+		var sawNull bool
+		for _, u := range updates {
+			if u.Null {
+				sawNull = true
+			}
+		}
+		cmu.Unlock()
+		if sawNull {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("expected a NULL update after node went offline")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}

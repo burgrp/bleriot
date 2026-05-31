@@ -34,6 +34,14 @@ const (
 // margin below that.
 const DefaultRefreshInterval = 15 * time.Second
 
+// DefaultLivenessMisses is how many consecutive unanswered WATCH refreshes
+// (§10) mark a node offline. When a subscription's refresh has timed out this
+// many times in a row, the engine delivers a NULL update to its watcher so a
+// vanished node's last value is not reported indefinitely. With
+// DefaultRefreshInterval this detects a powered-off node in ~30 s while
+// tolerating a single lost refresh.
+const DefaultLivenessMisses = 2
+
 // Radio is the minimal transmit/receive surface the engine needs. *modem.Modem
 // satisfies it.
 type Radio interface {
@@ -90,20 +98,26 @@ type Options struct {
 	// them alive within the node's T_idle window (§10). Defaults to
 	// DefaultRefreshInterval.
 	RefreshInterval time.Duration
+	// LivenessMisses is the number of consecutive unanswered WATCH refreshes
+	// after which a node is considered offline and its watchers receive a NULL
+	// update. Defaults to DefaultLivenessMisses.
+	LivenessMisses int
 }
 
 // Engine coordinates BleRiot transactions across radios and nodes.
 type Engine struct {
-	hubAddr [node.AddrLen]byte
-	timeout time.Duration
-	retries int
-	refresh time.Duration
+	hubAddr  [node.AddrLen]byte
+	timeout  time.Duration
+	retries  int
+	refresh  time.Duration
+	liveness int
 
 	mu      sync.Mutex
 	radios  map[uint8]Radio // by channel
 	nodes   map[[node.AddrLen]byte]*nodeState
 	pending map[key]pendingReq
 	subs    map[key]Callback
+	misses  map[key]int // consecutive unanswered WATCH refreshes per subscription
 }
 
 // New creates an Engine. HubAddr should match the receive address configured on
@@ -121,15 +135,21 @@ func New(opts Options) *Engine {
 	if rf <= 0 {
 		rf = DefaultRefreshInterval
 	}
+	lm := opts.LivenessMisses
+	if lm <= 0 {
+		lm = DefaultLivenessMisses
+	}
 	return &Engine{
-		hubAddr: opts.HubAddr,
-		timeout: to,
-		retries: rt,
-		refresh: rf,
-		radios:  make(map[uint8]Radio),
-		nodes:   make(map[[node.AddrLen]byte]*nodeState),
-		pending: make(map[key]pendingReq),
-		subs:    make(map[key]Callback),
+		hubAddr:  opts.HubAddr,
+		timeout:  to,
+		retries:  rt,
+		refresh:  rf,
+		liveness: lm,
+		radios:   make(map[uint8]Radio),
+		nodes:    make(map[[node.AddrLen]byte]*nodeState),
+		pending:  make(map[key]pendingReq),
+		subs:     make(map[key]Callback),
+		misses:   make(map[key]int),
 	}
 }
 
@@ -174,7 +194,38 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 		if !live {
 			continue
 		}
-		_, _ = e.transact(ctx, k.addr, protocol.TypeWATCH, 0, k.reg, 1)
+		_, err := e.transact(ctx, k.addr, protocol.TypeWATCH, 0, k.reg, 1)
+		e.noteLiveness(k, err)
+	}
+}
+
+// noteLiveness records the outcome of a subscription refresh and detects a node
+// going offline. A successful refresh (or any received IS, see handle) clears
+// the miss counter; consecutive timeouts accumulate, and exactly when they reach
+// the liveness threshold the watcher is told the register is NULL so a vanished
+// node's stale value stops being reported. ErrBusy is not a liveness signal (a
+// transaction was merely already in flight) and is ignored.
+func (e *Engine) noteLiveness(k key, err error) {
+	if errors.Is(err, ErrBusy) {
+		return
+	}
+	e.mu.Lock()
+	cb, live := e.subs[k]
+	if !live {
+		delete(e.misses, k)
+		e.mu.Unlock()
+		return
+	}
+	if err == nil {
+		e.misses[k] = 0
+		e.mu.Unlock()
+		return
+	}
+	e.misses[k]++
+	cross := e.misses[k] == e.liveness
+	e.mu.Unlock()
+	if cross {
+		cb(Update{Null: true})
 	}
 }
 
@@ -248,6 +299,7 @@ func (e *Engine) Unwatch(ctx context.Context, addr [node.AddrLen]byte, reg uint1
 	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, reg, 0)
 	e.mu.Lock()
 	delete(e.subs, k)
+	delete(e.misses, k)
 	e.mu.Unlock()
 	return err
 }
@@ -353,6 +405,13 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	e.mu.Lock()
 	cb := e.subs[k]
 	pr := e.pending[k]
+	// A received IS proves the node is alive: clear any accumulated refresh
+	// misses so an active node is never marked offline.
+	if typ == protocol.TypeIS {
+		if _, live := e.subs[k]; live {
+			e.misses[k] = 0
+		}
+	}
 	e.mu.Unlock()
 
 	// ACKs are not value reports; they must not be delivered to a watcher.
