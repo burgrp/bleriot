@@ -101,7 +101,7 @@ multiplexing lives in the host, above the wire.
 
 ```sh
 cd example/hub
-go run . hub --registry http://localhost:8080 --port /dev/ttyACM0:37
+go run . hub --registry http://localhost:8080 --port /dev/ttyACM0,37
 ```
 
 See [cli/README.md](cli/README.md) for the inventory model, commands and flags.

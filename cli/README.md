@@ -58,8 +58,8 @@ new        read an attached device's UID and print an Instance stub
 
 ```sh
 cd ../example/hub
-go run . hub --registry http://localhost:8080 --port /dev/ttyACM0:37
-go run . --debug hub --port /dev/ttyACM0:37   # verbose: shows serial traffic
+go run . hub --registry http://localhost:8080 --port /dev/ttyACM0,37
+go run . --debug hub --port /dev/ttyACM0,37   # verbose: shows serial traffic
 go run . provision                            # provision the attached device
 go run . new                                  # onboard a brand-new device
 ```
@@ -77,7 +77,7 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
 | `--ttl` | `30s` | Registry provider TTL. |
 | `--baud` | `115200` | Serial baud rate to each modem. |
-| `--port` | — | A modem as `device:channel`, e.g. `/dev/ttyACM0:37`. Repeatable, one per modem. |
+| `--port` | — | A modem as `device,channel`, e.g. `/dev/ttyACM0,37`. The `,` separator keeps by-path devices (which contain colons) unambiguous, e.g. `/dev/serial/by-path/pci-0000:07:00.4-usb-0:2.1:1.0,37`. Repeatable, one per modem. |
 
 ### `provision` / `new` flags
 

@@ -34,7 +34,7 @@ type hubOptions struct {
 	refresh    time.Duration
 	ttl        time.Duration
 	baud       int
-	ports      []string // each "device:channel", e.g. "/dev/ttyUSB0:37"
+	ports      []string // each "device,channel", e.g. "/dev/ttyUSB0,37"
 }
 
 // newHubCmd builds the "hub" subcommand: bridge the inventory's nodes to the
@@ -60,7 +60,7 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	f.DurationVar(&o.refresh, "refresh", 15*time.Second, "how often to re-WATCH active subscriptions")
 	f.DurationVar(&o.ttl, "ttl", 30*time.Second, "Registry provider TTL for each register")
 	f.IntVar(&o.baud, "baud", 115200, "default serial baud rate for ports")
-	f.StringArrayVar(&o.ports, "port", nil, "radio port as device:channel (repeatable), e.g. /dev/ttyUSB0:37")
+	f.StringArrayVar(&o.ports, "port", nil, "radio port as device,channel (repeatable), e.g. /dev/ttyUSB0,37")
 	return cmd
 }
 
@@ -77,7 +77,7 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 		return err
 	}
 	if len(ports) == 0 {
-		return fmt.Errorf("no radio ports: pass at least one --port device:channel")
+		return fmt.Errorf("no radio ports: pass at least one --port device,channel")
 	}
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -140,14 +140,19 @@ type port struct {
 	channel uint8
 }
 
-// parsePorts parses --port "device:channel" specs. The device may itself contain
-// colons (rare), so the channel is taken from the final colon-separated field.
+// parsePorts parses --port port specs into (device, channel) pairs.
+//
+// The device and channel are separated by ",", e.g. "/dev/ttyUSB0,37". A comma
+// never occurs in a device path, so this is unambiguous even for by-path devices
+// that themselves contain colons, such as
+// "/dev/serial/by-path/pci-0000:07:00.4-usb-0:2.1:1.0,37". (The flag uses a
+// string-array, not a string-slice, so cobra does not split values on commas.)
 func parsePorts(specs []string) ([]port, error) {
 	ports := make([]port, 0, len(specs))
 	for _, s := range specs {
-		i := strings.LastIndex(s, ":")
+		i := strings.LastIndex(s, ",")
 		if i < 0 {
-			return nil, fmt.Errorf("port %q: expected device:channel", s)
+			return nil, fmt.Errorf("port %q: expected device,channel", s)
 		}
 		device, chStr := s[:i], s[i+1:]
 		if device == "" {

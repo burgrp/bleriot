@@ -53,6 +53,12 @@ func main() {
 	pinLedGreen.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	pinLedRed.Configure(machine.PinConfig{Mode: machine.PinOutput})
 
+	pinLedGreen.High()
+	pinLedRed.High()
+	time.Sleep(500 * time.Millisecond)
+	pinLedGreen.Low()
+	pinLedRed.Low()
+
 	// Host link: USART1 on PB6 (TX) / PB7 (RX), both alternate function AF0.
 	// RX is interrupt-driven into a ring buffer; we drain it from the main loop.
 	pinUartTx.Configure(machine.PinConfig{Mode: machine.PinAlternate})
