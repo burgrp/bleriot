@@ -57,6 +57,35 @@ type DeviceType struct {
 	// Registers is the device's register table. Slice order is irrelevant to the
 	// wire; each register is identified by its Tag.
 	Registers []Register
+	// Chip is the MCU the device's firmware runs on. It tells the provisioning
+	// commands how to reach the device over SWD (pyocd target, UID and page
+	// addresses). It is only needed for provisioning; the hub ignores it.
+	Chip Chip
+}
+
+// Chip describes an MCU type from the provisioning tooling's point of view: how
+// to address it over SWD. It is a firmware/hardware fact of a device type, not a
+// per-device deployment fact, so it lives on the DeviceType. Predefined chips
+// are provided as package-level values (e.g. PY32F030); a site can also declare
+// its own.
+type Chip struct {
+	// Name selects the chip on the command line (--chip) and identifies it in
+	// errors, e.g. "py32f030".
+	Name string
+	// Target is the pyocd target name, e.g. "py32f030x8".
+	Target string
+	// UIDAddr is the memory address of the 12-byte MCU unique ID.
+	UIDAddr uint32
+	// PageAddr is the flash address of the provisioning page.
+	PageAddr uint32
+}
+
+// PY32F030 is the Puya PY32F030 chip profile.
+var PY32F030 = Chip{
+	Name:     "py32f030",
+	Target:   "py32f030x8",
+	UIDAddr:  0x1FFF0E00,
+	PageAddr: 0x0800F800,
 }
 
 // Instance is one physical device in the deployment.

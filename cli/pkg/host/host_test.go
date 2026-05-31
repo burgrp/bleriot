@@ -41,6 +41,7 @@ type thermostatConfig struct {
 func sampleType() inventory.DeviceType {
 	return inventory.DeviceType{
 		Name: "thermostat",
+		Chip: inventory.PY32F030,
 		Registers: []inventory.Register{
 			{Tag: 1, Name: "temperature", Type: inventory.TypeFloat, Multiplier: 1, Divider: 100},
 			{Tag: 2, Name: "heating", Type: inventory.TypeBool},
@@ -92,7 +93,7 @@ func TestRunProvisionWritesPage(t *testing.T) {
 	inv := inventory.Inventory{inst}
 	fp := &fakeProbe{uid: inst.UID}
 
-	if err := runProvision(context.Background(), inv, fp, discardLogger()); err != nil {
+	if err := runProvision(context.Background(), inv, inventory.PY32F030, fp, discardLogger()); err != nil {
 		t.Fatalf("runProvision: %v", err)
 	}
 	if fp.written == nil {
@@ -122,7 +123,7 @@ func TestRunProvisionUnknownUID(t *testing.T) {
 	inv := inventory.Inventory{sampleInstance()}
 	fp := &fakeProbe{uid: [page.UIDLen]byte{0xFF}} // not in inventory
 
-	err := runProvision(context.Background(), inv, fp, discardLogger())
+	err := runProvision(context.Background(), inv, inventory.PY32F030, fp, discardLogger())
 	if err == nil {
 		t.Fatal("expected error for unknown UID")
 	}
@@ -141,11 +142,22 @@ func TestRunNewPrintsStub(t *testing.T) {
 		t.Fatalf("runNew: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "inventory.Instance{") {
+	if !strings.Contains(out, "Name:    \"TODO\"") {
 		t.Fatalf("stub missing Instance literal:\n%s", out)
 	}
 	if !strings.Contains(out, "0x10, 0x20, 0x30") {
 		t.Fatalf("stub missing UID bytes:\n%s", out)
+	}
+	// The stub must carry a freshly generated, non-zero key rather than a
+	// placeholder.
+	if strings.Contains(out, "TODO: 16-byte") {
+		t.Fatalf("stub still has a key placeholder:\n%s", out)
+	}
+	if !strings.Contains(out, "Key:     [16]byte{") {
+		t.Fatalf("stub missing key literal:\n%s", out)
+	}
+	if strings.Contains(out, "Key:     [16]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}") {
+		t.Fatalf("generated key is all zero:\n%s", out)
 	}
 }
 

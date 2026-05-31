@@ -81,13 +81,21 @@ Runtime/deploy settings are command-line flags, not inventory data:
 
 ### `provision` / `new` flags
 
-Both talk to the attached device over SWD via `pyocd`:
+Both talk to the attached device over SWD via `pyocd`. The chip-specific details
+(pyocd target, UID memory address, provisioning-page flash address) are a
+property of the device's MCU and are declared once on the device type's `Chip`
+field, so the commands take a single flag:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--target` | `py32f030x8` | pyocd target name. |
-| `--uid-addr` | `0x1FFF0E00` | Memory address of the 12-byte MCU unique ID. |
-| `--page-addr` | `0x0800F800` | Flash address of the provisioning page. |
+| `--chip` | — | Chip to drive over SWD. Required only when the inventory declares more than one chip; otherwise the sole chip is selected automatically. |
+
+A `Chip` bundles `Target` (pyocd target name), `UIDAddr` (memory address of the
+12-byte MCU unique ID) and `PageAddr` (flash address of the provisioning page).
+`inventory.PY32F030` (`py32f030x8`, UID `0x1FFF0E00`, page `0x0800F800`) is
+built in; declare a `Chip{...}` on a device type to support other MCUs. `--chip`
+accepts a built-in chip name even on an empty inventory, so the very first
+device can be onboarded with `new`.
 
 `provision` reads the device's UID, matches it against the inventory **by UID
 alone** (no device name argument), and writes its provisioning page — the RF

@@ -1,5 +1,3 @@
-//go:build !tinygo
-
 package thermostat
 
 import "cli/pkg/inventory"
@@ -13,6 +11,7 @@ import "cli/pkg/inventory"
 func Type() inventory.DeviceType {
 	return inventory.DeviceType{
 		Name: "thermostat",
+		Chip: inventory.PY32F030,
 		Registers: []inventory.Register{
 			{
 				Tag:        1,
@@ -20,7 +19,7 @@ func Type() inventory.DeviceType {
 				Type:       inventory.TypeFloat,
 				Multiplier: 1,
 				Divider:    100,
-				Metadata:   map[string]string{"unit": "celsius"},
+				Metadata:   map[string]string{"unit": "°C"},
 			},
 			{
 				Tag:        2,
@@ -28,7 +27,7 @@ func Type() inventory.DeviceType {
 				Type:       inventory.TypeFloat,
 				Multiplier: 1,
 				Divider:    100,
-				Metadata:   map[string]string{"unit": "celsius"},
+				Metadata:   map[string]string{"unit": "°C"},
 			},
 			{
 				Tag:  3,

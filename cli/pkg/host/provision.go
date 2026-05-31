@@ -12,41 +12,15 @@ import (
 	"cli/pkg/page"
 )
 
-// probeConfig holds the flags that configure a hardware Probe (the pyocd target
-// and the MCU addresses it reads/writes). It is shared by the provision and new
-// commands.
-type probeConfig struct {
-	target   string
-	uidAddr  uint32
-	pageAddr uint32
-}
-
-// addProbeFlags registers the probe flags on cmd and returns the config they
-// populate.
-func addProbeFlags(cmd *cobra.Command) *probeConfig {
-	pc := &probeConfig{}
-	f := cmd.Flags()
-	f.StringVar(&pc.target, "target", "py32f030x8", "pyocd target name")
-	f.Uint32Var(&pc.uidAddr, "uid-addr", 0x1FFF0E00, "memory address of the 12-byte MCU unique ID")
-	f.Uint32Var(&pc.pageAddr, "page-addr", 0x0800F800, "flash address of the provisioning page")
-	return pc
-}
-
-// probe builds the hardware Probe from the flag values.
-func (pc *probeConfig) probe(logger *slog.Logger) Probe {
-	return &PyOCDProbe{
-		Target:   pc.target,
-		UIDAddr:  pc.uidAddr,
-		PageAddr: pc.pageAddr,
-		Logger:   logger,
-	}
-}
-
 // newProvisionCmd builds the "provision" subcommand: read the attached device's
 // UID over SWD, find the matching inventory instance, and write its provisioning
 // page (identity + config) to flash. The device is matched by UID alone, so no
 // device name argument is needed.
+//
+// The chip to drive over SWD comes from the device types' declared Chip; --chip
+// selects one when the inventory declares more than one.
 func newProvisionCmd(inv inventory.Inventory) *cobra.Command {
+	var chipName string
 	cmd := &cobra.Command{
 		Use:   "provision",
 		Short: "Provision the attached device from its inventory entry",
@@ -55,14 +29,18 @@ func newProvisionCmd(inv inventory.Inventory) *cobra.Command {
 			"config) to flash.",
 		Args: cobra.NoArgs,
 	}
-	pc := addProbeFlags(cmd)
+	cmd.Flags().StringVar(&chipName, "chip", "", "chip to drive over SWD (required only if the inventory declares more than one)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return runProvision(cmd.Context(), inv, pc.probe(slog.Default()), slog.Default())
+		chip, err := resolveChip(inv, chipName)
+		if err != nil {
+			return err
+		}
+		return runProvision(cmd.Context(), inv, chip, chipProbe(chip, slog.Default()), slog.Default())
 	}
 	return cmd
 }
 
-func runProvision(ctx context.Context, inv inventory.Inventory, probe Probe, logger *slog.Logger) error {
+func runProvision(ctx context.Context, inv inventory.Inventory, chip inventory.Chip, probe Probe, logger *slog.Logger) error {
 	if err := inv.Validate(); err != nil {
 		return fmt.Errorf("inventory: %w", err)
 	}
@@ -73,6 +51,13 @@ func runProvision(ctx context.Context, inv inventory.Inventory, probe Probe, log
 	inst, ok := findByUID(inv, uid)
 	if !ok {
 		return fmt.Errorf("no inventory instance has UID %X; run \"new\" to add one", uid)
+	}
+
+	// Guard against driving the wrong chip: the matched device's type must run on
+	// the chip we are about to write to, or we'd flash to the wrong page address.
+	if got := inst.Type.Chip; got.Name != "" && chip.Name != "" && got != chip {
+		return fmt.Errorf("attached device %q runs on chip %q, but %q was selected; pass --chip %s",
+			inst.Name, got.Name, chip.Name, got.Name)
 	}
 
 	addr := node.AddressFromUID(inst.UID)
