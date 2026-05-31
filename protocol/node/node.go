@@ -129,12 +129,13 @@ func (n *Node) Poll() bool {
 // Notify pushes the new value of a register to every hub currently watching it.
 // Firmware calls this whenever a register's value changes on its own (a sensor
 // reading, a relay toggled locally, …) so subscribers are kept up to date
-// (PROTOCOL.md §8, WATCH).
-func (n *Node) Notify(tag uint16, value int32) {
+// (PROTOCOL.md §8, WATCH). When null is true the register has become unset and
+// the push carries the NULL flag with value 0 (the dual of a NULL IS reply).
+func (n *Node) Notify(tag uint16, value int32, null bool) {
 	for i := range n.subs {
 		s := &n.subs[i]
 		if s.active && s.tag == tag {
-			n.send(s.addr, protocol.TypeIS, 0, tag, value)
+			n.replyIS(s.addr, tag, value, null)
 		}
 	}
 }

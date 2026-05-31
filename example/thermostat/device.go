@@ -4,10 +4,15 @@ package thermostat
 
 import "protocol/node"
 
-// thermostat is the running device. It holds the live register state and a
-// reference to the runtime so it can push updates when a value changes on its
-// own. The struct is allocated once in Start; the run loop never allocates.
-type thermostat struct {
+// Device is the running thermostat: the application behind the registers. It
+// holds the live register state and a reference to the runtime so it can push
+// updates when a value changes on its own (PROTOCOL.md §8, WATCH).
+//
+// It implements node.Device (Read/Write) and is otherwise driven by the firmware
+// main loop, which feeds it temperature samples (UpdateTemperature) and reads
+// back the heating decision (Heating) to drive the relay. The struct is
+// allocated once at boot; the run loop never allocates.
+type Device struct {
 	cfg Config
 
 	temperature int32 // measured temperature, ×100 (wire units)
@@ -18,36 +23,28 @@ type thermostat struct {
 	rt *node.Node
 }
 
-// Start brings the thermostat firmware up: it builds the protocol runtime around
-// the provisioned identity (address, key) and the supplied radio, then runs the
-// dispatch loop forever. radio must already be configured for channel.
-func Start(address [4]byte, key [16]byte, channel uint8, cfg Config, radio node.Radio) error {
-	println("Thermostat starting...")
-
-	// The thermostat starts off: the setpoint is NULL until a hub sets one.
-	t := &thermostat{cfg: cfg}
-
-	rt, err := node.New(radio, address, key, t)
-	if err != nil {
-		return err
-	}
-	t.rt = rt
-
-	rt.Run() // never returns
-	return nil
+// New builds a thermostat device for the given configuration. The thermostat
+// starts off: the setpoint is NULL until a hub sets one. Call Attach with the
+// runtime before driving the device so it can push IS updates to watchers.
+func New(cfg Config) *Device {
+	return &Device{cfg: cfg}
 }
+
+// Attach wires the device to its protocol runtime so control changes can be
+// pushed to watching hubs via Notify.
+func (d *Device) Attach(rt *node.Node) { d.rt = rt }
 
 // Read returns the current value of a register by tag (PROTOCOL.md GET). It is
 // the device's read switch: one case per register.
-func (t *thermostat) Read(tag uint16) (int32, bool) {
+func (d *Device) Read(tag uint16) (int32, bool) {
 	switch tag {
 	case TagTemperature:
-		return t.temperature, false
+		return d.temperature, false
 	case TagSetpoint:
 		// A NULL setpoint means the thermostat is off.
-		return t.setpoint, !t.setpointSet
+		return d.setpoint, !d.setpointSet
 	case TagHeating:
-		return boolToWire(t.heating), false
+		return boolToWire(d.heating), false
 	default:
 		return 0, true // unknown register: no value
 	}
@@ -57,37 +54,57 @@ func (t *thermostat) Read(tag uint16) (int32, bool) {
 // device's write switch. It has no return value; the runtime acknowledges the
 // SET with an ACK. Writes to read-only or unknown registers are ignored. A NULL
 // setpoint turns the thermostat off (heating forced off).
-func (t *thermostat) Write(tag uint16, value int32, null bool) {
+func (d *Device) Write(tag uint16, value int32, null bool) {
 	switch tag {
 	case TagSetpoint:
 		if null {
-			// Clear the setpoint: thermostat off.
-			t.setpointSet = false
-			t.control()
+			// Clear the setpoint: thermostat off. Push the now-NULL setpoint to
+			// any watcher so the off state is visible without a fresh GET.
+			d.setpointSet = false
+			d.rt.Notify(TagSetpoint, 0, true)
+			d.control()
 			return
 		}
 		// Clamp the requested setpoint to the configured operating range.
-		lo := int32(t.cfg.MinTemp * 100)
-		hi := int32(t.cfg.MaxTemp * 100)
+		lo := int32(d.cfg.MinTemp * 100)
+		hi := int32(d.cfg.MaxTemp * 100)
 		if value < lo {
 			value = lo
 		} else if value > hi {
 			value = hi
 		}
-		t.setpoint = value
-		t.setpointSet = true
-		t.control()
+		d.setpoint = value
+		d.setpointSet = true
+		d.rt.Notify(TagSetpoint, value, false)
+		d.control()
 	}
 }
+
+// UpdateTemperature records a fresh temperature sample (×100 wire units) from the
+// sensor, re-evaluates the heating decision, and pushes the new reading to any
+// hub watching the temperature register. The firmware main loop calls this
+// periodically.
+func (d *Device) UpdateTemperature(value int32) {
+	if value == d.temperature {
+		return
+	}
+	d.temperature = value
+	d.rt.Notify(TagTemperature, value, false)
+	d.control()
+}
+
+// Heating reports the current heating-element decision so the firmware can drive
+// the relay output.
+func (d *Device) Heating() bool { return d.heating }
 
 // control updates the heating element from temperature vs setpoint and pushes an
 // IS to any hub watching the heating register when it changes. With no setpoint
 // (thermostat off) the heating is forced off.
-func (t *thermostat) control() {
-	want := t.setpointSet && t.temperature < t.setpoint
-	if want != t.heating {
-		t.heating = want
-		t.rt.Notify(TagHeating, boolToWire(t.heating))
+func (d *Device) control() {
+	want := d.setpointSet && d.temperature < d.setpoint
+	if want != d.heating {
+		d.heating = want
+		d.rt.Notify(TagHeating, boolToWire(d.heating), false)
 	}
 }
 

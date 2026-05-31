@@ -144,3 +144,66 @@ func Unmarshal(data []byte, config any) (Header, error) {
 	}
 	return h, nil
 }
+
+// Sentinel errors returned by Decode. They carry no formatting so the firmware
+// decode path pulls in neither fmt nor reflection.
+var (
+	errTooShort = errors.New("page: too short")
+	errLayout   = errors.New("page: unsupported layout")
+	errCRC      = errors.New("page: CRC mismatch")
+)
+
+// Decode validates a page image and returns its identity header and the raw
+// config bytes (aliasing data), without using reflection, fmt, allocation, or a
+// CRC lookup table. It is the firmware-side counterpart to Unmarshal: it lets
+// TinyGo dead-code-eliminate the host-only Marshal/Unmarshal path, keeping the
+// firmware small. The caller decodes the config bytes into its own fixed-size
+// Config (the layout matches Marshal: fields in declaration order, little-endian).
+//
+// If the page was never written, the returned error satisfies IsUnprovisioned.
+func Decode(data []byte) (Header, []byte, error) {
+	var h Header
+	if len(data) < headerLen+crcLen {
+		return h, nil, errTooShort
+	}
+	h.Magic = byteOrder.Uint32(data[0:4])
+	if h.Magic != Magic {
+		return h, nil, errUnprovisioned
+	}
+	h.Layout = byteOrder.Uint16(data[4:6])
+	if h.Layout != LayoutVersion {
+		return h, nil, errLayout
+	}
+	h.ConfigLen = byteOrder.Uint16(data[6:8])
+	h.Channel = data[8]
+	copy(h.Address[:], data[10:10+AddrLen])
+	copy(h.Key[:], data[10+AddrLen:10+AddrLen+KeyLen])
+
+	end := headerLen + int(h.ConfigLen)
+	if len(data) < end+crcLen {
+		return h, nil, errTooShort
+	}
+	if byteOrder.Uint32(data[end:end+crcLen]) != crc32IEEE(data[:end]) {
+		return h, nil, errCRC
+	}
+	return h, data[headerLen:end], nil
+}
+
+// crc32IEEE computes the IEEE CRC-32 bitwise (the same value as
+// hash/crc32.ChecksumIEEE) without a 1 KiB lookup table, for the firmware decode
+// path. Decoding one small page at boot makes the per-bit loop's cost
+// irrelevant.
+func crc32IEEE(data []byte) uint32 {
+	crc := ^uint32(0)
+	for _, b := range data {
+		crc ^= uint32(b)
+		for i := 0; i < 8; i++ {
+			if crc&1 != 0 {
+				crc = (crc >> 1) ^ 0xEDB88320
+			} else {
+				crc >>= 1
+			}
+		}
+	}
+	return ^crc
+}

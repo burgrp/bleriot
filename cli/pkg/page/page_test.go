@@ -2,6 +2,7 @@ package page
 
 import (
 	"bytes"
+	"hash/crc32"
 	"testing"
 )
 
@@ -122,5 +123,81 @@ func TestTruncatedConfig(t *testing.T) {
 	truncated := data[:headerLen+1]
 	if _, err := Unmarshal(truncated, &sampleConfig{}); err == nil {
 		t.Fatal("expected truncation error")
+	}
+}
+
+// TestDecodeMatchesUnmarshal checks the lean firmware decoder agrees with the
+// host Unmarshal on a valid page: same identity, and config bytes that decode to
+// the same value.
+func TestDecodeMatchesUnmarshal(t *testing.T) {
+	addr, key, channel := sampleIdentity()
+	cfg := sampleConfig{Pin: 4, SensorID: 0x1234, Cal: 1.5, Enabled: true}
+	data, err := Marshal(addr, key, channel, cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	h, cfgBytes, err := Decode(data)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if h.Address != addr || h.Key != key || h.Channel != channel {
+		t.Errorf("identity mismatch: %+v", h)
+	}
+	if h.Magic != Magic || h.Layout != LayoutVersion {
+		t.Errorf("header magic/layout wrong: %+v", h)
+	}
+	// cfgBytes must equal the config region Unmarshal reads.
+	if want := data[headerLen : headerLen+int(h.ConfigLen)]; !bytes.Equal(cfgBytes, want) {
+		t.Errorf("config bytes = % x, want % x", cfgBytes, want)
+	}
+}
+
+// TestDecodeToleratesTrailingSlack mirrors how firmware reads a fixed flash
+// window larger than the page: extra trailing bytes after the CRC are ignored.
+func TestDecodeToleratesTrailingSlack(t *testing.T) {
+	addr, key, channel := sampleIdentity()
+	data, err := Marshal(addr, key, channel, sampleConfig{Pin: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	padded := append(append([]byte{}, data...), make([]byte, 16)...)
+	if _, _, err := Decode(padded); err != nil {
+		t.Fatalf("Decode with trailing slack: %v", err)
+	}
+}
+
+func TestDecodeCRCMismatch(t *testing.T) {
+	addr, key, channel := sampleIdentity()
+	data, err := Marshal(addr, key, channel, sampleConfig{Pin: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[headerLen] ^= 0x01 // corrupt the config region
+	if _, _, err := Decode(data); err == nil {
+		t.Fatal("expected CRC mismatch")
+	} else if IsUnprovisioned(err) {
+		t.Fatal("corruption misclassified as unprovisioned")
+	}
+}
+
+func TestDecodeUnprovisioned(t *testing.T) {
+	for _, fill := range []byte{0x00, 0xFF} {
+		data := bytes.Repeat([]byte{fill}, headerLen+crcLen+8)
+		if _, _, err := Decode(data); err == nil {
+			t.Fatalf("fill 0x%02X: expected error", fill)
+		} else if !IsUnprovisioned(err) {
+			t.Fatalf("fill 0x%02X: expected unprovisioned, got %v", fill, err)
+		}
+	}
+}
+
+// TestCRC32IEEEMatchesStdlib pins the table-free firmware CRC to the stdlib
+// table-based one so the host writer and firmware reader never disagree.
+func TestCRC32IEEEMatchesStdlib(t *testing.T) {
+	for _, in := range [][]byte{nil, {0}, []byte("BleRiot"), bytes.Repeat([]byte{0xA5}, 64)} {
+		if got, want := crc32IEEE(in), crc32.ChecksumIEEE(in); got != want {
+			t.Errorf("crc32IEEE(% x) = 0x%08X, want 0x%08X", in, got, want)
+		}
 	}
 }

@@ -223,7 +223,7 @@ func TestWatchSubscribesAndPushes(t *testing.T) {
 
 	// A change pushes a new IS to the subscriber.
 	dev.value = 8
-	n.Notify(1, 8)
+	n.Notify(1, 8, false)
 	if len(r.sent) != 2 {
 		t.Fatalf("Notify sent total %d packets, want 2", len(r.sent))
 	}
@@ -239,9 +239,33 @@ func TestWatchSubscribesAndPushes(t *testing.T) {
 
 func TestNotifyWithoutSubscriberIsSilent(t *testing.T) {
 	n, r := newTestNode(t, &fakeDevice{})
-	n.Notify(1, 123)
+	n.Notify(1, 123, false)
 	if len(r.sent) != 0 {
 		t.Fatalf("Notify with no subscribers sent %d packets, want 0", len(r.sent))
+	}
+}
+
+func TestNotifyNullPushesNullFlag(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, 1, 1)) // subscribe
+	n.Poll()
+	before := len(r.sent)
+
+	n.Notify(1, 99, true) // value is ignored when null
+	if len(r.sent) != before+1 {
+		t.Fatalf("Notify(null) sent %d packets, want 1", len(r.sent)-before)
+	}
+	_, typ, flags, reg, value := decodeReply(t, r.sent[before].packet)
+	if typ != protocol.TypeIS || reg != 1 {
+		t.Fatalf("push = type %#x reg %d, want IS/1", typ, reg)
+	}
+	if flags&protocol.FlagNULL == 0 {
+		t.Fatalf("push flags = %#x, want NULL set", flags)
+	}
+	if value != 0 {
+		t.Fatalf("push value = %d, want 0 when null", value)
 	}
 }
 
@@ -255,7 +279,7 @@ func TestUnsubscribeStopsPushes(t *testing.T) {
 	n.Poll()
 
 	before := len(r.sent)
-	n.Notify(1, 77)
+	n.Notify(1, 77, false)
 	if len(r.sent) != before {
 		t.Fatalf("Notify after unsubscribe sent %d extra packets, want 0", len(r.sent)-before)
 	}
@@ -269,7 +293,7 @@ func TestNotifyOnlyTargetsMatchingTag(t *testing.T) {
 	n.Poll()
 	sentAfterSub := len(r.sent)
 
-	n.Notify(2, 50) // different tag, no subscriber
+	n.Notify(2, 50, false) // different tag, no subscriber
 	if len(r.sent) != sentAfterSub {
 		t.Fatalf("Notify on unwatched tag pushed %d packets, want 0", len(r.sent)-sentAfterSub)
 	}
