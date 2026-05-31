@@ -94,12 +94,15 @@ When NULL=1 the VALUE field is undefined and must be ignored by the receiver.
 |-------|-------|--------|----------------------------------------------------|
 | 0x00  | GET   | hub    | Read current register value (one-shot)             |
 | 0x01  | SET   | hub    | Write register value                               |
-| 0x02  | IS    | node   | Current register value (reply to any hub packet)   |
+| 0x02  | IS    | node   | Current register value (reply to GET/WATCH)        |
 | 0x03  | WATCH | hub    | Subscribe (VALUE=1) or unsubscribe (VALUE=0)       |
+| 0x04  | ACK   | node   | Acknowledges a SET; carries no value               |
 
 Receivers must ignore packets with unknown TYPE values.
 
 A node sends IS with FLAGS.NULL=1 when a register has no value (e.g. sensor not yet ready, hardware fault, or explicitly unset).
+
+An ACK confirms only that a SET was received. It carries no value (VALUE=0, FLAGS=0): a write may be applied asynchronously, so the node does not report a result inline. The hub observes the resulting value through a WATCH subscription or a subsequent GET.
 
 ---
 
@@ -116,10 +119,12 @@ Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
 
 ```
 Hub  →  Node    TYPE=SET    REG=R  VALUE=<requested value>
-Node →  Hub     TYPE=IS     REG=R  VALUE=<actual value>
+Node →  Hub     TYPE=ACK    REG=R  VALUE=0
 ```
 
-The node always responds with the *actual* register value after applying the write. If the register is read-only or the value was clamped, the hub learns the true state from the response.
+The node replies with an ACK to confirm receipt of the write; the ACK carries no value. A write may be applied asynchronously (it can take time, or be clamped or rejected for a read-only register), so the node does not report the resulting value inline. The hub learns the true state from a WATCH push (§8.3) or a subsequent GET (§8.1).
+
+A SET with FLAGS.NULL=1 clears the register: VALUE is undefined and the hub is asking the node to unset it (the dual of a NULL IS, §7). The node still replies with an ACK. A node that has no notion of an unset register ignores the NULL write.
 
 ### 8.3 Subscribe
 
@@ -142,7 +147,7 @@ Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
 
 The protocol is **best-effort at the RF layer**. Reliability is the hub's responsibility:
 
-- After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `REG == sent REG`).
+- After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `REG == sent REG`, and the expected reply TYPE: ACK for a SET, IS for a GET/WATCH).
 - If no response arrives within `T_timeout`, the hub may retransmit the same request up to `N_retry` times (recommended: 3).
 
 ---

@@ -27,7 +27,8 @@ import (
 // Transactor is the engine surface the bridge needs. *engine.Engine satisfies it.
 type Transactor interface {
 	Get(ctx context.Context, addr [node.AddrLen]byte, reg uint16) (engine.Update, error)
-	Set(ctx context.Context, addr [node.AddrLen]byte, reg uint16, value int32) (engine.Update, error)
+	Set(ctx context.Context, addr [node.AddrLen]byte, reg uint16, value int32) error
+	SetNull(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error
 	Watch(ctx context.Context, addr [node.AddrLen]byte, reg uint16, cb engine.Callback) error
 }
 
@@ -158,14 +159,24 @@ func (b *Bridge) serveRegister(ctx context.Context, nodeName string, addr [node.
 				return
 			}
 			log.Debug("registry change request", "value", req)
+			// A nil request clears the register: send a SET with the NULL flag
+			// (§8.2) rather than coercing nil through FromValue.
+			if req == nil {
+				if err := b.tx.SetNull(ctx, addr, r.ID); err != nil {
+					log.Warn("SET NULL failed", "err", err)
+				} else {
+					log.Debug("applied SET NULL to node")
+				}
+				continue
+			}
 			wire, err := r.FromValue(req)
 			if err != nil {
 				log.Warn("ignoring malformed change request", "value", req, "err", err)
 				continue // ignore malformed change requests
 			}
-			// Apply the write. The node's IS reply flows back through the watch
+			// Apply the write. The node's value change flows back through the watch
 			// subscription and updates the registry, so we don't publish here.
-			if _, err := b.tx.Set(ctx, addr, r.ID, wire); err != nil {
+			if err := b.tx.Set(ctx, addr, r.ID, wire); err != nil {
 				log.Warn("SET failed", "wire", wire, "err", err)
 			} else {
 				log.Debug("applied SET to node", "wire", wire)

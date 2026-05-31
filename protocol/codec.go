@@ -17,6 +17,7 @@ const (
 	TypeSET   byte = 0x01 // hub → node: write register
 	TypeIS    byte = 0x02 // node → hub: current register value
 	TypeWATCH byte = 0x03 // hub → node: subscribe (VALUE=1) or unsubscribe (VALUE=0)
+	TypeACK   byte = 0x04 // node → hub: acknowledges a SET (no value)
 )
 
 // FLAGS bits (§6).

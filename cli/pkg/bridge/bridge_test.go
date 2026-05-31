@@ -15,27 +15,40 @@ var nodeAddr = [4]byte{0xCC, 0xA0, 0x00, 0x02}
 // fakeTx is a fake Transactor. It records Set calls and exposes the registered
 // watch callback so tests can drive pushes.
 type fakeTx struct {
-	mu      sync.Mutex
-	getU    engine.Update
-	getErr  error
-	watchCb engine.Callback
-	sets    []int32
+	mu       sync.Mutex
+	getU     engine.Update
+	getErr   error
+	watchCb  engine.Callback
+	sets     []int32
+	setNulls int
 }
 
 func (f *fakeTx) Get(ctx context.Context, addr [4]byte, reg uint16) (engine.Update, error) {
 	return f.getU, f.getErr
 }
 
-func (f *fakeTx) Set(ctx context.Context, addr [4]byte, reg uint16, value int32) (engine.Update, error) {
+func (f *fakeTx) Set(ctx context.Context, addr [4]byte, reg uint16, value int32) error {
 	f.mu.Lock()
 	f.sets = append(f.sets, value)
 	cb := f.watchCb
 	f.mu.Unlock()
-	// Emulate the node's IS reply flowing back through the subscription.
+	// Emulate the node's value change flowing back through the subscription.
 	if cb != nil {
 		cb(engine.Update{Value: value})
 	}
-	return engine.Update{Value: value}, nil
+	return nil
+}
+
+func (f *fakeTx) SetNull(ctx context.Context, addr [4]byte, reg uint16) error {
+	f.mu.Lock()
+	f.setNulls++
+	cb := f.watchCb
+	f.mu.Unlock()
+	// Emulate the node clearing the register and pushing a NULL value back.
+	if cb != nil {
+		cb(engine.Update{Null: true})
+	}
+	return nil
 }
 
 func (f *fakeTx) Watch(ctx context.Context, addr [4]byte, reg uint16, cb engine.Callback) error {
@@ -188,6 +201,44 @@ func TestBridge_ChangeRequestTriggersSet(t *testing.T) {
 	defer tx.mu.Unlock()
 	if len(tx.sets) != 1 || tx.sets[0] != 1800 {
 		t.Errorf("sets = %v, want [1800]", tx.sets)
+	}
+}
+
+func TestBridge_NilChangeRequestTriggersSetNull(t *testing.T) {
+	tx := &fakeTx{getU: engine.Update{Value: 0}}
+	reg := newFakeReg()
+	cancel := serve(t, tx, reg, floatReg())
+	defer cancel()
+
+	// Wait for watch registration so the SetNull's emulated push has a callback.
+	deadline := time.After(time.Second)
+	for {
+		tx.mu.Lock()
+		ready := tx.watchCb != nil
+		tx.mu.Unlock()
+		if ready {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("watch never registered")
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+
+	// A nil change request clears the register.
+	reg.requests <- nil
+
+	if got := recvWithin(t, reg.updates, time.Second); got != nil {
+		t.Errorf("reflected update = %v, want nil", got)
+	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	if tx.setNulls != 1 {
+		t.Errorf("setNulls = %d, want 1", tx.setNulls)
+	}
+	if len(tx.sets) != 0 {
+		t.Errorf("sets = %v, want none", tx.sets)
 	}
 }
 

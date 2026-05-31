@@ -14,7 +14,7 @@ func Type() inventory.DeviceType {
 		Chip: inventory.PY32F030,
 		Registers: []inventory.Register{
 			{
-				Tag:        1,
+				Tag:        TagTemperature,
 				Name:       "temperature",
 				Type:       inventory.TypeFloat,
 				Multiplier: 1,
@@ -22,7 +22,7 @@ func Type() inventory.DeviceType {
 				Metadata:   map[string]string{"unit": "°C"},
 			},
 			{
-				Tag:        2,
+				Tag:        TagSetpoint,
 				Name:       "setpoint",
 				Type:       inventory.TypeFloat,
 				Multiplier: 1,
@@ -30,7 +30,7 @@ func Type() inventory.DeviceType {
 				Metadata:   map[string]string{"unit": "°C"},
 			},
 			{
-				Tag:  3,
+				Tag:  TagHeating,
 				Name: "heating",
 				Type: inventory.TypeBool,
 			},

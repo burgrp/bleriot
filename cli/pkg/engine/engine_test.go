@@ -54,8 +54,9 @@ func (f *fakeRadio) Send(dst [4]byte, payload []byte) error {
 
 func (f *fakeRadio) Received() <-chan [PacketLen]byte { return f.recv }
 
-// simulateNode reads one request, decodes it, and replies with an IS packet.
-// reply transforms the request value into the response value.
+// simulateNode reads one request, decodes it, and replies: an ACK for a SET
+// (§8.2), or an IS for a GET/WATCH. reply transforms the request value into the
+// response value (used only for the IS reply).
 func simulateNode(t *testing.T, f *fakeRadio, c protocol.Codec, reply func(typ byte, reg uint16, val int32) (int32, bool)) {
 	t.Helper()
 	go func() {
@@ -67,6 +68,11 @@ func simulateNode(t *testing.T, f *fakeRadio, c protocol.Codec, reply func(typ b
 			}
 			rv, null := reply(typ, reg, val)
 			var resp [PacketLen]byte
+			if typ == protocol.TypeSET {
+				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
+				f.recv <- resp
+				continue
+			}
 			flags := byte(0)
 			if null {
 				flags = protocol.FlagNULL
@@ -119,23 +125,44 @@ func TestEngine_Get(t *testing.T) {
 func TestEngine_Set(t *testing.T) {
 	e, f, c, cancel := newEngine(t)
 	defer cancel()
-	// Node clamps to a max of 100.
 	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
 		if typ != protocol.TypeSET {
 			t.Errorf("expected SET, got %d", typ)
 		}
-		if val > 100 {
-			val = 100
-		}
 		return val, false
 	})
 
-	u, err := e.Set(context.Background(), nodeAddr, regTemp, 250)
-	if err != nil {
+	if err := e.Set(context.Background(), nodeAddr, regTemp, 250); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if u.Value != 100 {
-		t.Fatalf("Set clamp = %d, want 100", u.Value)
+}
+
+func TestEngine_SetNull(t *testing.T) {
+	e, f, c, cancel := newEngine(t)
+	defer cancel()
+
+	// Simulate a node that checks the request carries the NULL flag, then ACKs.
+	go func() {
+		for req := range f.sent {
+			_, typ, flags, reg, _, err := c.Decode(req[:])
+			if err != nil {
+				t.Errorf("node decode: %v", err)
+				continue
+			}
+			if typ != protocol.TypeSET {
+				t.Errorf("expected SET, got %d", typ)
+			}
+			if flags&protocol.FlagNULL == 0 {
+				t.Errorf("expected NULL flag, got flags %#x", flags)
+			}
+			var resp [PacketLen]byte
+			c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
+			f.recv <- resp
+		}
+	}()
+
+	if err := e.SetNull(context.Background(), nodeAddr, regTemp); err != nil {
+		t.Fatalf("SetNull: %v", err)
 	}
 }
 

@@ -68,6 +68,14 @@ type key struct {
 	reg  uint16
 }
 
+// pendingReq is an in-flight transaction awaiting its reply. want is the reply
+// TYPE that resolves it (IS for GET/WATCH, ACK for SET), so an unrelated push
+// (e.g. a WATCH IS) cannot complete a pending SET.
+type pendingReq struct {
+	ch   chan Update
+	want byte
+}
+
 type nodeState struct {
 	n     *node.Node
 	codec protocol.Codec
@@ -94,7 +102,7 @@ type Engine struct {
 	mu      sync.Mutex
 	radios  map[uint8]Radio // by channel
 	nodes   map[[node.AddrLen]byte]*nodeState
-	pending map[key]chan Update
+	pending map[key]pendingReq
 	subs    map[key]Callback
 }
 
@@ -120,7 +128,7 @@ func New(opts Options) *Engine {
 		refresh: rf,
 		radios:  make(map[uint8]Radio),
 		nodes:   make(map[[node.AddrLen]byte]*nodeState),
-		pending: make(map[key]chan Update),
+		pending: make(map[key]pendingReq),
 		subs:    make(map[key]Callback),
 	}
 }
@@ -166,7 +174,7 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 		if !live {
 			continue
 		}
-		_, _ = e.transact(ctx, k.addr, protocol.TypeWATCH, k.reg, 1)
+		_, _ = e.transact(ctx, k.addr, protocol.TypeWATCH, 0, k.reg, 1)
 	}
 }
 
@@ -193,12 +201,23 @@ func (e *Engine) AddNode(n *node.Node) error {
 
 // Get reads a register's current value (§8.1).
 func (e *Engine) Get(ctx context.Context, addr [node.AddrLen]byte, reg uint16) (Update, error) {
-	return e.transact(ctx, addr, protocol.TypeGET, reg, 0)
+	return e.transact(ctx, addr, protocol.TypeGET, 0, reg, 0)
 }
 
-// Set writes a register and returns the node's reported actual value (§8.2).
-func (e *Engine) Set(ctx context.Context, addr [node.AddrLen]byte, reg uint16, value int32) (Update, error) {
-	return e.transact(ctx, addr, protocol.TypeSET, reg, value)
+// Set writes a register (§8.2). The node replies with an ACK that confirms
+// receipt but carries no value; the resulting value is observed via a Watch
+// subscription (or a subsequent Get). Set returns once the ACK arrives, or
+// ErrTimeout after exhausting retries.
+func (e *Engine) Set(ctx context.Context, addr [node.AddrLen]byte, reg uint16, value int32) error {
+	_, err := e.transact(ctx, addr, protocol.TypeSET, 0, reg, value)
+	return err
+}
+
+// SetNull clears a register (§8.2): it sends a SET with FLAGS.NULL=1, asking the
+// node to unset the register. Like Set it returns once the ACK arrives.
+func (e *Engine) SetNull(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error {
+	_, err := e.transact(ctx, addr, protocol.TypeSET, protocol.FlagNULL, reg, 0)
+	return err
 }
 
 // Watch subscribes to a register (§8.3). cb is invoked for the immediate reply
@@ -219,21 +238,21 @@ func (e *Engine) Watch(ctx context.Context, addr [node.AddrLen]byte, reg uint16,
 	e.subs[k] = cb
 	e.mu.Unlock()
 
-	_, err := e.transact(ctx, addr, protocol.TypeWATCH, reg, 1)
+	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, reg, 1)
 	return err
 }
 
 // Unwatch cancels a subscription (§8.4).
 func (e *Engine) Unwatch(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error {
 	k := key{addr, reg}
-	_, err := e.transact(ctx, addr, protocol.TypeWATCH, reg, 0)
+	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, reg, 0)
 	e.mu.Lock()
 	delete(e.subs, k)
 	e.mu.Unlock()
 	return err
 }
 
-func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ byte, reg uint16, value int32) (Update, error) {
+func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, flags byte, reg uint16, value int32) (Update, error) {
 	e.mu.Lock()
 	ns, ok := e.nodes[addr]
 	if !ok {
@@ -251,7 +270,11 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ byte
 		return Update{}, ErrBusy
 	}
 	ch := make(chan Update, 1)
-	e.pending[k] = ch
+	want := protocol.TypeIS
+	if typ == protocol.TypeSET {
+		want = protocol.TypeACK
+	}
+	e.pending[k] = pendingReq{ch: ch, want: want}
 	e.mu.Unlock()
 
 	defer func() {
@@ -261,7 +284,7 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ byte
 	}()
 
 	var pkt [PacketLen]byte
-	ns.codec.Encode(pkt[:], e.hubAddr, typ, 0, reg, value)
+	ns.codec.Encode(pkt[:], e.hubAddr, typ, flags, reg, value)
 
 	for attempt := 0; attempt <= e.retries; attempt++ {
 		if err := r.Send(addr, pkt[:]); err != nil {
@@ -309,8 +332,19 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	}
 
 	srcDec, typ, flags, reg, value, err := ns.codec.Decode(pkt[:])
-	if err != nil || srcDec != src || typ != protocol.TypeIS {
+	if err != nil || srcDec != src {
 		return
+	}
+
+	switch typ {
+	case protocol.TypeIS:
+		// A value report: resolves a pending GET/WATCH and feeds subscribers.
+	case protocol.TypeACK:
+		// A SET acknowledgement: resolves the pending SET only. It carries no
+		// value, so clear value/flags and never invoke a subscription callback.
+		value, flags = 0, 0
+	default:
+		return // nodes send only IS and ACK
 	}
 
 	u := Update{Value: value, Null: flags&protocol.FlagNULL != 0}
@@ -318,15 +352,18 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 
 	e.mu.Lock()
 	cb := e.subs[k]
-	ch := e.pending[k]
+	pr := e.pending[k]
 	e.mu.Unlock()
 
-	if cb != nil {
+	// ACKs are not value reports; they must not be delivered to a watcher.
+	if cb != nil && typ == protocol.TypeIS {
 		cb(u)
 	}
-	if ch != nil {
+	// Resolve a pending transaction only with the reply type it is waiting for,
+	// so a WATCH push (IS) cannot complete a pending SET (ACK) and vice versa.
+	if pr.ch != nil && pr.want == typ {
 		select {
-		case ch <- u:
+		case pr.ch <- u:
 		default:
 		}
 	}
