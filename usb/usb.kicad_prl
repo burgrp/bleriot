@@ -1,14 +1,11 @@
 {
   "board": {
-    "active_layer": 5,
+    "active_layer": 25,
     "active_layer_preset": "",
     "auto_track_width": true,
     "hidden_netclasses": [],
-    "hidden_nets": [
-      "GND",
-      "+5V"
-    ],
-    "high_contrast_mode": 1,
+    "hidden_nets": [],
+    "high_contrast_mode": 0,
     "net_color_mode": 1,
     "opacity": {
       "images": 0.6,
@@ -19,17 +16,17 @@
       "zones": 0.6
     },
     "selection_filter": {
-      "dimensions": true,
-      "footprints": true,
-      "graphics": true,
-      "keepouts": true,
-      "lockedItems": true,
-      "otherItems": true,
-      "pads": true,
-      "text": true,
-      "tracks": true,
+      "dimensions": false,
+      "footprints": false,
+      "graphics": false,
+      "keepouts": false,
+      "lockedItems": false,
+      "otherItems": false,
+      "pads": false,
+      "text": false,
+      "tracks": false,
       "vias": true,
-      "zones": true
+      "zones": false
     },
     "visible_items": [
       "vias",
@@ -49,11 +46,12 @@
       "zones",
       "drc_warnings",
       "drc_exclusions",
+      "locked_item_shadows",
       "conflict_shadows",
       "shapes"
     ],
-    "visible_layers": "ffffffff_ffffffff_fffffff7_ffffffff",
-    "zone_display_mode": 0
+    "visible_layers": "ffffffff_ffffffff_fffffff5_ffffffff",
+    "zone_display_mode": 1
   },
   "git": {
     "integration_disabled": false,
@@ -62,13 +60,11 @@
     "ssh_key": ""
   },
   "meta": {
-    "filename": "bob.kicad_prl",
+    "filename": "usb.kicad_prl",
     "version": 5
   },
   "net_inspector_panel": {
     "col_hidden": [
-      false,
-      false,
       false,
       false,
       false,
@@ -90,13 +86,9 @@
       6,
       7,
       8,
-      9,
-      10,
-      11
+      9
     ],
     "col_widths": [
-      0,
-      0,
       0,
       0,
       0,

@@ -37,9 +37,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 2.15,
-          "height": 3.9,
-          "width": 3.9
+          "drill": 0.8,
+          "height": 1.27,
+          "width": 2.54
         },
         "silk_line_width": 0.1,
         "silk_text_italic": false,
@@ -48,27 +48,45 @@
         "silk_text_thickness": 0.1,
         "silk_text_upright": false,
         "zones": {
-          "min_clearance": 0.0
+          "min_clearance": 0.5
         }
       },
-      "diff_pair_dimensions": [
-        {
-          "gap": 0.0,
-          "via_gap": 0.0,
-          "width": 0.0
-        }
-      ],
+      "diff_pair_dimensions": [],
       "drc_exclusions": [
         [
-          "hole_clearance|245000000|54000000|8c38a229-3c1e-4564-a621-47c1f1aeede6|5c46ecbc-4f12-4027-9a3f-c9518596fa77",
+          "silk_edge_clearance|124000000|63855000|a79b57db-0388-485f-bb92-57dc22d85b47|f026ba76-bbe5-42a3-aed2-56fb02e4a6e6",
           ""
         ],
         [
-          "silk_overlap|191655000|56750000|0e26bfd8-edfe-4c3c-bc65-71cbffd36b71|bc0c7ba4-e935-4e6a-bf65-65f3da200608",
+          "silk_edge_clearance|124000000|76145000|a79b57db-0388-485f-bb92-57dc22d85b47|8be95ac0-2b0e-45d6-b904-b47bac5e0d30",
           ""
         ],
         [
-          "starved_thermal|182000000|68000000|ded64ec3-e64e-4486-8d8a-5adabc22e8bb|7ceb1d70-6a21-4339-a11a-f4dc6b558080|In1.Cu",
+          "silk_over_copper|139488095|76748599|ccc9f4f1-f5f9-44dd-b8e8-f031b42be500|00000000-0000-0000-0000-000000000000",
+          ""
+        ],
+        [
+          "silk_over_copper|139925000|72025376|b7ace646-759d-49e3-bfe8-c176ceb7d803|00000000-0000-0000-0000-000000000000",
+          ""
+        ],
+        [
+          "silk_overlap|151460000|68315000|5ff0fa91-2367-4fd7-8a4c-81d880097e62|b75abd09-1ef4-4126-a175-0f99efbab1ec",
+          ""
+        ],
+        [
+          "silk_overlap|151460000|68315000|5ff0fa91-2367-4fd7-8a4c-81d880097e62|c9ae7957-8cbb-4057-bc4e-2751db93b32b",
+          ""
+        ],
+        [
+          "silk_overlap|151460000|68315000|b2cb2c9f-b49d-4710-abde-4c63d6649940|c9ae7957-8cbb-4057-bc4e-2751db93b32b",
+          ""
+        ],
+        [
+          "silk_overlap|151460000|71000000|b2cb2c9f-b49d-4710-abde-4c63d6649940|b75abd09-1ef4-4126-a175-0f99efbab1ec",
+          ""
+        ],
+        [
+          "text_thickness|151250000|75250000|ae3287a3-2620-4aa4-bcad-58d23980f83d|00000000-0000-0000-0000-000000000000",
           ""
         ]
       ],
@@ -101,7 +119,7 @@
         "items_not_allowed": "error",
         "length_out_of_range": "error",
         "lib_footprint_issues": "warning",
-        "lib_footprint_mismatch": "ignore",
+        "lib_footprint_mismatch": "warning",
         "malformed_courtyard": "error",
         "microvia_drill_out_of_range": "error",
         "mirrored_text_on_front_layer": "warning",
@@ -130,7 +148,7 @@
         "track_width": "error",
         "tracks_crossing": "error",
         "unconnected_items": "error",
-        "unresolved_variable": "ignore",
+        "unresolved_variable": "error",
         "via_dangling": "warning",
         "zones_intersect": "error"
       },
@@ -199,9 +217,7 @@
           "td_width_to_size_filter_ratio": 0.9
         }
       ],
-      "track_widths": [
-        0.0
-      ],
+      "track_widths": [],
       "tuning_pattern_settings": {
         "diff_pair_defaults": {
           "corner_radius_percentage": 80,
@@ -228,12 +244,7 @@
           "spacing": 0.6
         }
       },
-      "via_dimensions": [
-        {
-          "diameter": 0.0,
-          "drill": 0.0
-        }
-      ],
+      "via_dimensions": [],
       "zones_allow_external_fillets": false
     },
     "ipc2581": {
@@ -252,36 +263,7 @@
     "equivalence_files": []
   },
   "erc": {
-    "erc_exclusions": [
-      [
-        "power_pin_not_driven|1092200|292100|beae8df4-5b09-4cee-8035-364769fb548d|00000000-0000-0000-0000-000000000000|/3059dabe-d0bb-4700-8034-0af3f3f15902|/3059dabe-d0bb-4700-8034-0af3f3f15902|",
-        ""
-      ],
-      [
-        "power_pin_not_driven|1447800|1701800|594d03d7-16a8-40f7-a997-9d1e951afd9a|00000000-0000-0000-0000-000000000000|/3059dabe-d0bb-4700-8034-0af3f3f15902|/3059dabe-d0bb-4700-8034-0af3f3f15902|",
-        ""
-      ],
-      [
-        "power_pin_not_driven|1485900|1651000|594d03d7-16a8-40f7-a997-9d1e951afd9a|00000000-0000-0000-0000-000000000000|/3059dabe-d0bb-4700-8034-0af3f3f15902|/3059dabe-d0bb-4700-8034-0af3f3f15902|",
-        ""
-      ],
-      [
-        "power_pin_not_driven|1485900|1752600|ae1c9b2d-764b-4290-925c-940f62479341|00000000-0000-0000-0000-000000000000|/3059dabe-d0bb-4700-8034-0af3f3f15902|/3059dabe-d0bb-4700-8034-0af3f3f15902|",
-        ""
-      ],
-      [
-        "power_pin_not_driven|393700|1701800|2c2d266e-4294-4be2-86cf-57e9cb20d2a3|00000000-0000-0000-0000-000000000000|/3059dabe-d0bb-4700-8034-0af3f3f15902|/3059dabe-d0bb-4700-8034-0af3f3f15902|",
-        ""
-      ],
-      [
-        "power_pin_not_driven|723900|1485900|e6005174-59fd-4341-9b7f-75a7e01c64f8|00000000-0000-0000-0000-000000000000|/3059dabe-d0bb-4700-8034-0af3f3f15902|/3059dabe-d0bb-4700-8034-0af3f3f15902|",
-        ""
-      ],
-      [
-        "power_pin_not_driven|762000|1701800|313eedfe-5618-4e5a-956f-ba5b912b8c05|00000000-0000-0000-0000-000000000000|/3059dabe-d0bb-4700-8034-0af3f3f15902|/3059dabe-d0bb-4700-8034-0af3f3f15902|",
-        ""
-      ]
-    ],
+    "erc_exclusions": [],
     "meta": {
       "version": 0
     },
@@ -502,18 +484,11 @@
     }
   },
   "libraries": {
-    "pinned_footprint_libs": [
-      "Drake"
-    ],
-    "pinned_symbol_libs": [
-      "py32",
-      "MCU_Puya_PY32F",
-      "Drake",
-      "Drake-Templates"
-    ]
+    "pinned_footprint_libs": [],
+    "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "bob.kicad_pro",
+    "filename": "usb.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -673,7 +648,7 @@
   },
   "sheets": [
     [
-      "3059dabe-d0bb-4700-8034-0af3f3f15902",
+      "f599aef9-7b59-4a5b-ae32-7e27daba42dd",
       "Root"
     ]
   ],

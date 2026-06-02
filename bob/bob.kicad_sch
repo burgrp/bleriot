@@ -4249,17 +4249,6 @@
 		)
 		(uuid "9c48ba95-87f7-4fa6-9043-55d6dfc5e58f")
 	)
-	(text "do verze 1.4 \n- chyba v pojmenování pinů B4, B5 - již opraveno\n- jak s SPI/I2C přepínáním - je potřeba?"
-		(exclude_from_sim no)
-		(at 186.69 173.482 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "df15d082-86a0-4d5c-b557-237480f2d669")
-	)
 	(junction
 		(at 115.57 29.21)
 		(diameter 0)
@@ -4785,7 +4774,7 @@
 		(uuid "3cbc9fb7-4f7d-42b6-8221-a4a2967a865d")
 	)
 	(label "~{RF_CS}"
-		(at 113.03 170.18 0)
+		(at 128.27 170.18 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -7052,70 +7041,6 @@
 		)
 	)
 	(symbol
-		(lib_id "power:GND")
-		(at 148.59 175.26 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(uuid "4b80b0ad-7c80-48fc-8482-ed1b0743180e")
-		(property "Reference" "#PWR01"
-			(at 148.59 181.61 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Value" "GND"
-			(at 148.59 179.578 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 148.59 175.26 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 148.59 175.26 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 148.59 175.26 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "ae1c9b2d-764b-4290-925c-940f62479341")
-		)
-		(instances
-			(project "bob"
-				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
-					(reference "#PWR01")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:C")
 		(at 115.57 35.56 0)
 		(unit 1)
@@ -7506,79 +7431,6 @@
 			(project "bob"
 				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
 					(reference "R4")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Jumper:SolderJumper_3_Open")
-		(at 148.59 170.18 270)
-		(mirror x)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom no)
-		(on_board yes)
-		(dnp no)
-		(uuid "9d20487c-287b-49b8-96d2-b488815c86ff")
-		(property "Reference" "JP2"
-			(at 151.13 168.9099 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "I2C/SPI"
-			(at 151.13 171.4499 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Jumper:SolderJumper-3_P2.0mm_Open_TrianglePad1.0x1.5mm"
-			(at 148.59 170.18 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "~"
-			(at 148.59 170.18 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" "Solder Jumper, 3-pole, open"
-			(at 148.59 170.18 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "2"
-			(uuid "99db5650-9e3b-4c34-848e-d0a79ecac62e")
-		)
-		(pin "3"
-			(uuid "4afa53fd-2144-4bb8-a34a-7c35630319df")
-		)
-		(pin "1"
-			(uuid "796d5d4c-0617-4bce-a2b6-023edbb06697")
-		)
-		(instances
-			(project "bob"
-				(path "/3059dabe-d0bb-4700-8034-0af3f3f15902"
-					(reference "JP2")
 					(unit 1)
 				)
 			)
@@ -8490,7 +8342,7 @@
 	)
 	(symbol
 		(lib_id "power:+3.3V")
-		(at 148.59 165.1 0)
+		(at 144.78 170.18 270)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -8498,7 +8350,7 @@
 		(dnp no)
 		(uuid "db555ea4-82c8-4a67-b002-94b9e3725f71")
 		(property "Reference" "#PWR02"
-			(at 148.59 168.91 0)
+			(at 140.97 170.18 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -8507,7 +8359,7 @@
 			)
 		)
 		(property "Value" "+3V3"
-			(at 148.59 161.29 0)
+			(at 148.59 170.18 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -8515,7 +8367,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 148.59 165.1 0)
+			(at 144.78 170.18 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -8524,7 +8376,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 148.59 165.1 0)
+			(at 144.78 170.18 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -8533,7 +8385,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 148.59 165.1 0)
+			(at 144.78 170.18 0)
 			(effects
 				(font
 					(size 1.27 1.27)
