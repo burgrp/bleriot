@@ -1,0 +1,4 @@
+github.com/burgrp/tinygo-drivers/bb/spi v0.0.0-20260529225117-75c3fff7a486 h1:cMFFt4d/P34Dbh+1163BF6Kz7QM8OOHBKyVtmyPJtvM=
+github.com/burgrp/tinygo-drivers/bb/spi v0.0.0-20260529225117-75c3fff7a486/go.mod h1:ryUKCGYUQUGbb+z/OsbomhY+CdFnDk4x2EpeK06xc8Q=
+github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486 h1:EgQ65/4X1zL5HULVynyRPAczE5AVQH4R3BwkMa2fnb4=
+github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486/go.mod h1:TEGCo2HQXxFmH7uD019FVPzgT/EA/XplevJrSjKRiQ8=

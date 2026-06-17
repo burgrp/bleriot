@@ -4,5 +4,4 @@ use .
 use ../thermostat
 use ../../cli
 use ../../protocol
-use ../../hub/link
 use ../../../reg

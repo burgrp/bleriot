@@ -24,16 +24,12 @@ require (
 	github.com/burgrp/reg v0.0.0-00010101000000-000000000000
 	github.com/lmittmann/tint v1.1.2
 	github.com/spf13/cobra v1.10.2
-	go.bug.st/serial v1.6.4
-	hub/link v0.0.0
 	protocol v0.0.0
 )
 
 require (
-	github.com/creack/goselect v0.1.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	golang.org/x/sys v0.38.0 // indirect
 )
 
 replace protocol => ../protocol

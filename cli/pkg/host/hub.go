@@ -3,24 +3,19 @@ package host
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/burgrp/reg/pkg/client"
 	clientfactory "github.com/burgrp/reg/pkg/client/factory"
 	"github.com/spf13/cobra"
-	"go.bug.st/serial"
 
 	"cli/pkg/bridge"
 	"cli/pkg/engine"
 	"cli/pkg/inventory"
-	"cli/pkg/modem"
 	"cli/pkg/node"
 )
 
@@ -72,13 +67,6 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 	if err != nil {
 		return fmt.Errorf("hub-address: %w", err)
 	}
-	ports, err := parsePorts(o.ports)
-	if err != nil {
-		return err
-	}
-	if len(ports) == 0 {
-		return fmt.Errorf("no radio ports: pass at least one --port device,channel")
-	}
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	// Cancelling the context makes each radio Port close its transport and stop.
@@ -91,8 +79,6 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 		RefreshInterval: o.refresh,
 	})
 	go eng.Run(ctx)
-
-	startPorts(ctx, ports, o.baud, eng, hubAddr, logger)
 
 	nodes, err := buildNodes(inv, eng)
 	if err != nil {
@@ -111,7 +97,7 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 		logger.Info("serving node", "node", n.Name, "registers", len(n.Registers), "channel", n.Channel)
 	}
 
-	logger.Info("hub running; press Ctrl-C to stop", "ports", len(ports), "nodes", len(nodes))
+	logger.Info("hub running; press Ctrl-C to stop", "nodes", len(nodes))
 	<-ctx.Done()
 	logger.Info("hub shutting down")
 	return nil
@@ -138,59 +124,6 @@ func buildNodes(inv inventory.Inventory, eng *engine.Engine) ([]*node.Node, erro
 type port struct {
 	device  string
 	channel uint8
-}
-
-// parsePorts parses --port port specs into (device, channel) pairs.
-//
-// The device and channel are separated by ",", e.g. "/dev/ttyUSB0,37". A comma
-// never occurs in a device path, so this is unambiguous even for by-path devices
-// that themselves contain colons, such as
-// "/dev/serial/by-path/pci-0000:07:00.4-usb-0:2.1:1.0,37". (The flag uses a
-// string-array, not a string-slice, so cobra does not split values on commas.)
-func parsePorts(specs []string) ([]port, error) {
-	ports := make([]port, 0, len(specs))
-	for _, s := range specs {
-		i := strings.LastIndex(s, ",")
-		if i < 0 {
-			return nil, fmt.Errorf("port %q: expected device,channel", s)
-		}
-		device, chStr := s[:i], s[i+1:]
-		if device == "" {
-			return nil, fmt.Errorf("port %q: empty device", s)
-		}
-		ch, err := strconv.ParseUint(chStr, 10, 8)
-		if err != nil {
-			return nil, fmt.Errorf("port %q: invalid channel %q: %w", s, chStr, err)
-		}
-		ports = append(ports, port{device: device, channel: uint8(ch)})
-	}
-	return ports, nil
-}
-
-// startPorts registers a self-healing radio Port for each serial device with the
-// engine. Each Port opens its device lazily and reconnects on its own, so the
-// hub starts even when a device is absent and recovers when it (re)appears.
-func startPorts(ctx context.Context, ports []port, baud int, eng *engine.Engine, hubAddr [node.AddrLen]byte, logger *slog.Logger) {
-	if baud == 0 {
-		baud = 115200
-	}
-	for _, pc := range ports {
-		device := pc.device
-		portLog := logger.With("port", device)
-		open := func() (io.ReadWriteCloser, error) {
-			return serial.Open(device, &serial.Mode{BaudRate: baud})
-		}
-		p := modem.NewPort(modem.PortConfig{
-			Open:       open,
-			Channel:    pc.channel,
-			Addr:       hubAddr,
-			RecvBuffer: 32,
-			Logger:     portLog,
-		})
-		go p.Run(ctx)
-		eng.AddRadio(ctx, pc.channel, p)
-		logger.Info("radio registered", "port", device, "channel", pc.channel, "baud", baud)
-	}
 }
 
 // newRegistry creates the registry client and returns it along with the resolved
