@@ -18,25 +18,26 @@ const (
 const ledHold = 100 * time.Millisecond
 
 // led is one status LED driven by a single MCP2210 GPIO output, with an
-// auto-off timer.
+// auto-off timer. It drives the pin through the supplied set function, which is
+// responsible for any locking.
 type led struct {
-	r   *Radio
+	set func(pin uint8, on bool)
 	pin uint8
 
 	mu  sync.Mutex
 	off *time.Timer
 }
 
-func newLED(r *Radio, pin uint8) *led {
-	return &led{r: r, pin: pin}
+func newLED(set func(pin uint8, on bool), pin uint8) *led {
+	return &led{set: set, pin: pin}
 }
 
 // trigger lights the LED and (re)arms its auto-off timer for ledHold.
 func (l *led) trigger() {
-	l.r.setGPIO(l.pin, true)
+	l.set(l.pin, true)
 	l.mu.Lock()
 	if l.off == nil {
-		l.off = time.AfterFunc(ledHold, func() { l.r.setGPIO(l.pin, false) })
+		l.off = time.AfterFunc(ledHold, func() { l.set(l.pin, false) })
 	} else {
 		l.off.Reset(ledHold)
 	}
@@ -50,13 +51,5 @@ func (l *led) stop() {
 		l.off.Stop()
 	}
 	l.mu.Unlock()
-	l.r.setGPIO(l.pin, false)
-}
-
-// setGPIO drives a dongle GPIO pin under the shared USB lock. LED errors are
-// non-fatal: a missed status-LED update must never break radio traffic.
-func (r *Radio) setGPIO(pin uint8, on bool) {
-	r.mu.Lock()
-	_ = r.dev.SetGPIO(pin, on)
-	r.mu.Unlock()
+	l.set(l.pin, false)
 }
