@@ -8,8 +8,8 @@ node register to the Registry, and turns Registry change requests into radio
 writes.
 
 This repository is a multi-module mono-repo containing the protocol definition,
-the host hub, the MCU radio-modem firmware, the host-side code generator, and
-the reference hardware design.
+the host hub, an example device firmware and site binary, and the reference
+hardware designs.
 
 ---
 
@@ -28,32 +28,37 @@ the reference hardware design.
 │  XTEA keys, retries, watch  │
 └─────────────────────────────┘
               ▲
-              │  link protocol (COBS / UART)
+              │  USB-HID  (MCP2210 USB-to-SPI bridge)
               ▼
 ┌─────────────────────────────┐
-│            hub/fw           │
-│   MCU "dumb radio modem"    │
+│        USB radio dongle     │
+│   MCP2210 ─SPI─ PAN211x RF  │
+│     (no microcontroller)    │
 └─────────────────────────────┘
               ▲
-              │  RF · 250 kbps GFSK
+              │  RF · BLE-compatible radio link
               ▼
 ┌─────────────────────────────┐
 │          node (×N)          │
 └─────────────────────────────┘
 ```
 
-The hub is deliberately split in two:
+The hub runs entirely on the Linux host:
 
 - **`cli`** (the BleRiot host library) owns all protocol intelligence — per-node
   XTEA keys, register tables, retries/timeouts, push-subscription bookkeeping,
-  and the Registry client. A site repository drives it with inventory-as-code
-  (see [`example/hub`](example/hub)) and runs it on a Linux SBC.
-- **`hub/fw`** is a "dumb radio modem": TinyGo firmware that owns only the PAN211x
-  radio and holds no secrets. It bridges a COBS-framed serial link to the air.
+  and the Registry client — and drives the radio directly. A site repository
+  drives it with inventory-as-code (see [`example/hub`](example/hub)) and runs it
+  on a Linux SBC.
+- The **USB radio dongle** is a passive USB-to-SPI bridge: an
+  [MCP2210](usb) drives a PAN211x radio over SPI with **no microcontroller and no
+  firmware**. The host runs the PAN211x register sequence for every packet over
+  USB-HID; the dongle holds no secrets and no protocol state.
 
-The two halves speak the **link protocol** (`hub/link`). One modem drives exactly
-one radio over one serial port; the host fans out across several modems, so
-multiplexing lives in the host, above the wire.
+The transport is abstracted (`cli/pkg/radio`): the MCP2210 dongle is one
+implementation, and a future smart MCU-resident dongle would slot in unchanged.
+One dongle is one radio on one channel; the host fans out across several dongles,
+so multiplexing lives in the host, above the wire.
 
 ---
 
@@ -62,12 +67,11 @@ multiplexing lives in the host, above the wire.
 | Path | Module | What it is | Docs |
 |------|--------|------------|------|
 | [`protocol/`](protocol) | `protocol` | Neutral, dependency-free RF wire format: packet codec + XTEA. Compiles for host and TinyGo alike. | [protocol/README.md](protocol/README.md) — the full **protocol specification** |
-| [`cli/`](cli) | `cli` | The BleRiot host library (Linux SBC): protocol engine, modem clients, inventory model, provisioning, Registry bridge. | [cli/README.md](cli/README.md) |
-| [`hub/fw/`](hub/fw) | `hub/fw` | TinyGo "dumb radio modem" firmware for the PY32F030 + PAN211x board. | [hub/fw/README.md](hub/fw/README.md) |
-| [`hub/link/`](hub/link) | `hub/link` | Standalone COBS-framed serial link protocol shared by host and firmware. | [hub/link/README.md](hub/link/README.md) |
+| [`cli/`](cli) | `cli` | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, inventory model, provisioning, Registry bridge. | [cli/README.md](cli/README.md) |
+| [`usb/`](usb) | — | KiCad design for the USB radio dongle (MCP2210 USB-to-SPI bridge + PAN211x). | — |
 | [`example/hub/`](example/hub) | `hub` | Example site binary: declares an inventory-as-code deployment and runs the host runtime. | — |
 | [`example/thermostat/`](example/thermostat) | `thermostat` | Example dual-target device-type module (`Config` + `Type()` + TinyGo firmware). | — |
-| [`bob/`](bob) | — | KiCad PCB design (breakout board v1.3, the reference hardware). | — |
+| [`bob/`](bob) | — | KiCad PCB design (breakout board v1.3, the reference node hardware). | — |
 | [`sub/hw-kicad/`](sub/hw-kicad) | — | Shared KiCad symbol/footprint library (git submodule). | — |
 
 ---
@@ -85,9 +89,10 @@ multiplexing lives in the host, above the wire.
    stores raw `int32` per wire ID, encrypts each packet with its XTEA key, and
    answers `GET`/`SET`/`WATCH` over the air. See [protocol §4–§10](protocol/README.md#4-packet-format).
 
-3. **On the modem** ([hub/fw](hub/fw/README.md)). The modem applies channel +
-   receive address, transmits host packets, and forwards received packets — no
-   secrets, no retries.
+3. **On the dongle** ([usb](usb)). The MCP2210 is a passive USB-to-SPI bridge:
+   the host clocks the PAN211x's registers over it to apply channel + receive
+   address, transmit packets, and poll for received ones — no secrets, no
+   retries, no firmware.
 
 4. **On the host** ([cli](cli/README.md)). The engine handles XTEA,
    timeouts/retries, and watch refresh; the bridge maps every node register to a
@@ -101,19 +106,14 @@ multiplexing lives in the host, above the wire.
 
 ```sh
 cd example/hub
-go run . hub --registry http://localhost:8080 --port /dev/ttyACM0,37
+go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
 ```
 
-See [cli/README.md](cli/README.md) for the inventory model, commands and flags.
-
-### Modem firmware
-
-```sh
-cd hub/fw
-make flash          # build + flash via PyOCD, then attach RTT log
-```
-
-See [hub/fw/README.md](hub/fw/README.md) for hardware pinout and toolchain notes.
+The `--dongle` value is `scheme:selector,channel`: the scheme selects the dongle
+type (`mcp2210`), the selector is a `/dev/hidraw*` path or a USB serial, and the
+channel is the RF channel. `/dev/hidraw*` is root-only, so run the hub as root or
+via `sudo`. See [cli/README.md](cli/README.md) for the inventory model, commands
+and flags.
 
 ### Provisioning a device
 
@@ -130,14 +130,12 @@ See [cli/README.md](cli/README.md#provision--new-flags) for the SWD flags.
 ## Module dependencies
 
 ```
-protocol  ──────────────┐
- (codec + XTEA)          ├─► cli       (also: hub/link, github.com/burgrp/reg)
-                         └─► hub/fw    (also: hub/link, pan211x driver)
-hub/link  ──────────────┴─► cli, hub/fw
+protocol  ──────────────┬─► cli       (also: github.com/burgrp/reg)
+ (codec + XTEA)          └─► thermostat firmware (also: pan211x driver, TinyGo)
 ```
 
-`protocol` and `hub/link` are intentionally dependency-free and build-tag-free so
-the exact same source compiles into both the Linux host and the TinyGo firmware,
+`protocol` is intentionally dependency-free and build-tag-free so the exact same
+source compiles into both the Linux host and the TinyGo node firmware,
 single-sourcing the on-wire formats.
 
 ---
@@ -146,7 +144,5 @@ single-sourcing the on-wire formats.
 
 - **[Protocol specification](protocol/README.md)** — the authoritative wire-format,
   security, transaction, and register-model spec.
-- **[Host library](cli/README.md)** — inventory-as-code model, the `hub`/`provision`/`new` commands, and internal packages.
-- **[Modem firmware](hub/fw/README.md)** — build/flash, hardware, PAN211x notes.
-- **[Link protocol](hub/link/README.md)** — host↔modem COBS framing.
+- **[Host library](cli/README.md)** — inventory-as-code model, the `hub`/`provision`/`new` commands, the USB radio dongle drivers, and internal packages.
 

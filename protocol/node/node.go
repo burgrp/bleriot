@@ -10,9 +10,9 @@ package node
 
 import "protocol"
 
-// Radio is the minimal transport the runtime needs. It matches the way the modem
-// firmware drives its PAN211x (see hub/fw): the caller configures the channel and
-// receive address once, before handing the radio to the Node.
+// Radio is the minimal transport the runtime needs. It matches the way a PAN211x
+// is driven directly: the caller configures the channel and receive address
+// once, before handing the radio to the Node.
 type Radio interface {
 	// Send transmits a single packet to dst. It must not retain packet.
 	Send(dst [4]byte, packet []byte) error

@@ -3,7 +3,7 @@
 // correlation, and push-subscription bookkeeping.
 //
 // The engine is transport-agnostic: it talks to radios through the small Radio
-// interface (satisfied by *modem.Modem) and identifies nodes by their address
+// interface (satisfied by *radio.Radio) and identifies nodes by their address
 // using per-node XTEA codecs. Routing to a radio is by node channel; routing of
 // received packets to a node is by source address.
 package engine
@@ -42,7 +42,7 @@ const DefaultRefreshInterval = 15 * time.Second
 // tolerating a single lost refresh.
 const DefaultLivenessMisses = 2
 
-// Radio is the minimal transmit/receive surface the engine needs. *modem.Modem
+// Radio is the minimal transmit/receive surface the engine needs. *radio.Radio
 // satisfies it.
 type Radio interface {
 	Send(dst [node.AddrLen]byte, payload []byte) error

@@ -2,7 +2,7 @@
 // inventory-as-code and hands it to the shared host runtime, which provides the
 // hub, provision and new subcommands.
 //
-//	go run . hub --registry http://localhost:8080 --port /dev/ttyUSB0:37
+//	go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
 //	go run . provision
 //	go run . new
 package main
