@@ -1,4 +1,3 @@
-package functest
 //go:build dongles
 
 package functest

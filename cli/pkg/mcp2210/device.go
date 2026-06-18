@@ -24,6 +24,10 @@ const (
 // exactly this many bytes on the wire.
 const reportLen = 64
 
+// maxStaleDrain bounds how many mismatched (stale) responses command will
+// discard while looking for the one matching its request, before giving up.
+const maxStaleDrain = 16
+
 // ErrNotFound is returned by Open when no matching MCP2210 device exists.
 var ErrNotFound = errors.New("mcp2210: device not found")
 
@@ -71,6 +75,13 @@ func (d *Device) Close() error {
 // command sends one 64-byte request report and returns the 64-byte response.
 // The Linux hidraw write contract prepends the report number (0 for the
 // MCP2210, which does not use numbered reports); reads return the bare report.
+//
+// If a previous, aborted session left an unread response queued on the device's
+// interrupt-IN endpoint, the first read would return that stale report instead
+// of this command's. Since every command yields exactly one response, the wanted
+// reply is queued behind any stale ones, so reports whose opcode does not match
+// the request are discarded until the matching response arrives (bounded, to
+// avoid looping forever on a wedged device).
 func (d *Device) command(req [reportLen]byte) ([reportLen]byte, error) {
 	var resp [reportLen]byte
 	buf := make([]byte, reportLen+1) // [0]=report number, then payload
@@ -78,17 +89,22 @@ func (d *Device) command(req [reportLen]byte) ([reportLen]byte, error) {
 	if _, err := d.f.Write(buf); err != nil {
 		return resp, fmt.Errorf("mcp2210: write report: %w", err)
 	}
-	n, err := d.f.Read(resp[:])
-	if err != nil {
-		return resp, fmt.Errorf("mcp2210: read report: %w", err)
+	for attempts := 0; ; attempts++ {
+		n, err := d.f.Read(resp[:])
+		if err != nil {
+			return resp, fmt.Errorf("mcp2210: read report: %w", err)
+		}
+		if n != reportLen {
+			return resp, fmt.Errorf("mcp2210: short response: %d bytes", n)
+		}
+		if resp[0] == req[0] {
+			return resp, nil
+		}
+		if attempts >= maxStaleDrain {
+			return resp, fmt.Errorf("mcp2210: response opcode 0x%02X for command 0x%02X", resp[0], req[0])
+		}
+		// Stale response from an earlier aborted command; drop it and read on.
 	}
-	if n != reportLen {
-		return resp, fmt.Errorf("mcp2210: short response: %d bytes", n)
-	}
-	if resp[0] != req[0] {
-		return resp, fmt.Errorf("mcp2210: response opcode 0x%02X for command 0x%02X", resp[0], req[0])
-	}
-	return resp, nil
 }
 
 // resolve maps a selector to a /dev/hidraw* device node.

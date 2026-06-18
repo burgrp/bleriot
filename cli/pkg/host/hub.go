@@ -21,6 +21,7 @@ import (
 	"cli/pkg/mcp2210"
 	"cli/pkg/node"
 	"cli/pkg/radio"
+	"cli/pkg/radio/mcpdongle"
 )
 
 // hubOptions holds the runtime/deploy settings for the hub, all sourced from
@@ -32,7 +33,7 @@ type hubOptions struct {
 	retries    int
 	refresh    time.Duration
 	ttl        time.Duration
-	dongles    []string // each "selector,channel", e.g. "/dev/hidraw0,37"
+	dongles    []string // each "scheme:selector,channel", e.g. "mcp2210:/dev/hidraw0,37"
 }
 
 // newHubCmd builds the "hub" subcommand: bridge the inventory's nodes to the
@@ -57,8 +58,9 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	f.IntVar(&o.retries, "retries", 3, "retransmissions after the first attempt")
 	f.DurationVar(&o.refresh, "refresh", 15*time.Second, "how often to re-WATCH active subscriptions")
 	f.DurationVar(&o.ttl, "ttl", 30*time.Second, "Registry provider TTL for each register")
-	f.StringArrayVar(&o.dongles, "dongle", nil, "USB radio dongle as selector,channel (repeatable); "+
-		"selector is a /dev/hidraw* path or a USB serial, e.g. /dev/hidraw0,37")
+	f.StringArrayVar(&o.dongles, "dongle", nil, "USB radio dongle as scheme:selector,channel (repeatable); "+
+		"scheme selects the dongle type (e.g. \"mcp2210\"), selector is a /dev/hidraw* path or a USB serial, "+
+		"e.g. mcp2210:/dev/hidraw0,37 or mcp2210:0001746423,37")
 	return cmd
 }
 
@@ -127,57 +129,85 @@ func buildNodes(inv inventory.Inventory, eng *engine.Engine) ([]*node.Node, erro
 	return nodes, nil
 }
 
-// dongleSpec is a parsed USB radio dongle: a device selector on an RF channel.
+// dongleSpec is a parsed USB radio dongle: a typed device selector on an RF
+// channel. scheme selects which dongle implementation opens the selector.
 type dongleSpec struct {
+	scheme   string
 	selector string
 	channel  uint8
 }
 
-// startDongles parses each --dongle flag, opens the MCP2210, brings up its
-// PAN211x radio on the requested channel, and registers it with the engine. At
-// least one dongle is required.
+// dongleOpener opens one dongle of a particular type and returns it as a
+// radio.Dongle. New dongle types (e.g. a smart MCU-based dongle) are added by
+// registering another opener in dongleOpeners.
+type dongleOpener func(selector string, channel uint8, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
+
+// dongleOpeners maps a scheme to its opener. To support a new dongle type, add
+// an entry here; the flag parsing and startup wiring need no other changes.
+var dongleOpeners = map[string]dongleOpener{
+	"mcp2210": openMCP2210,
+}
+
+// openMCP2210 opens an MCP2210 USB-to-SPI bridge by selector and brings up its
+// PAN211x radio on the given channel.
+func openMCP2210(selector string, channel uint8, hubAddr [node.AddrLen]byte) (radio.Dongle, error) {
+	dev, err := mcp2210.Open(selector)
+	if err != nil {
+		return nil, err
+	}
+	return mcpdongle.Open(dev, channel, hubAddr)
+}
+
+// startDongles parses each --dongle flag, opens its dongle via the registered
+// opener for its scheme, brings up the radio on the requested channel, and
+// registers it with the engine. At least one dongle is required.
 func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, logger *slog.Logger) error {
 	specs, err := parseDongles(flags)
 	if err != nil {
 		return err
 	}
 	if len(specs) == 0 {
-		return fmt.Errorf("no radio dongle: set at least one --dongle selector,channel")
+		return fmt.Errorf("no radio dongle: set at least one --dongle scheme:selector,channel")
 	}
 	for _, s := range specs {
-		dev, err := mcp2210.Open(s.selector)
+		d, err := dongleOpeners[s.scheme](s.selector, s.channel, hubAddr)
 		if err != nil {
 			return fmt.Errorf("dongle %q: %w", s.selector, err)
 		}
-		r, err := radio.New(ctx, dev, s.channel, hubAddr)
-		if err != nil {
-			dev.Close()
-			return fmt.Errorf("dongle %q: %w", s.selector, err)
-		}
-		eng.AddRadio(ctx, s.channel, r)
-		logger.Info("radio dongle ready", "selector", s.selector, "channel", s.channel)
+		eng.AddRadio(ctx, s.channel, radio.New(ctx, d))
+		logger.Info("radio dongle ready", "type", s.scheme, "selector", s.selector, "channel", s.channel)
 	}
 	return nil
 }
 
-// parseDongles parses "selector,channel" entries. The channel is split off after
-// the last comma so device paths or serials containing commas are preserved.
+// parseDongles parses "scheme:selector,channel" entries. The channel is split
+// off after the last comma so device paths or serials containing commas are
+// preserved; the "scheme:" prefix (before the first colon) selects the dongle
+// type and is required — there is no default.
 func parseDongles(flags []string) ([]dongleSpec, error) {
 	specs := make([]dongleSpec, 0, len(flags))
 	for _, f := range flags {
 		i := strings.LastIndex(f, ",")
 		if i < 0 {
-			return nil, fmt.Errorf("dongle %q: expected selector,channel", f)
+			return nil, fmt.Errorf("dongle %q: expected scheme:selector,channel", f)
 		}
-		selector := f[:i]
-		if selector == "" {
-			return nil, fmt.Errorf("dongle %q: empty selector", f)
-		}
+		target := f[:i]
 		ch, err := strconv.ParseUint(f[i+1:], 10, 8)
 		if err != nil {
 			return nil, fmt.Errorf("dongle %q: invalid channel: %w", f, err)
 		}
-		specs = append(specs, dongleSpec{selector: selector, channel: uint8(ch)})
+		j := strings.Index(target, ":")
+		if j < 0 {
+			return nil, fmt.Errorf("dongle %q: missing scheme: prefix (e.g. mcp2210:)", f)
+		}
+		scheme, selector := target[:j], target[j+1:]
+		if selector == "" {
+			return nil, fmt.Errorf("dongle %q: empty selector", f)
+		}
+		if _, ok := dongleOpeners[scheme]; !ok {
+			return nil, fmt.Errorf("dongle %q: unknown dongle type %q", f, scheme)
+		}
+		specs = append(specs, dongleSpec{scheme: scheme, selector: selector, channel: uint8(ch)})
 	}
 	return specs, nil
 }

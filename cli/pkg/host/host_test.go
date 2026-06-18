@@ -162,27 +162,32 @@ func TestRunNewPrintsStub(t *testing.T) {
 }
 
 func TestParseDongles(t *testing.T) {
-	specs, err := parseDongles([]string{"/dev/hidraw0,37", "ABC123,11"})
+	specs, err := parseDongles([]string{"mcp2210:/dev/hidraw0,37", "mcp2210:ABC123,11", "mcp2210:/dev/hidraw1,5"})
 	if err != nil {
 		t.Fatalf("parseDongles: %v", err)
 	}
-	if len(specs) != 2 {
-		t.Fatalf("got %d specs, want 2", len(specs))
+	if len(specs) != 3 {
+		t.Fatalf("got %d specs, want 3", len(specs))
 	}
-	if specs[0].selector != "/dev/hidraw0" || specs[0].channel != 37 {
-		t.Fatalf("spec[0] = %+v, want /dev/hidraw0 ch 37", specs[0])
+	if specs[0].scheme != "mcp2210" || specs[0].selector != "/dev/hidraw0" || specs[0].channel != 37 {
+		t.Fatalf("spec[0] = %+v, want mcp2210 /dev/hidraw0 ch 37", specs[0])
 	}
-	if specs[1].selector != "ABC123" || specs[1].channel != 11 {
-		t.Fatalf("spec[1] = %+v, want ABC123 ch 11", specs[1])
+	if specs[1].scheme != "mcp2210" || specs[1].selector != "ABC123" || specs[1].channel != 11 {
+		t.Fatalf("spec[1] = %+v, want mcp2210 ABC123 ch 11", specs[1])
+	}
+	if specs[2].scheme != "mcp2210" || specs[2].selector != "/dev/hidraw1" || specs[2].channel != 5 {
+		t.Fatalf("spec[2] = %+v, want mcp2210 /dev/hidraw1 ch 5", specs[2])
 	}
 }
 
 func TestParseDonglesErrors(t *testing.T) {
 	cases := []string{
-		"/dev/hidraw0",     // missing channel
-		",37",              // empty selector
-		"/dev/hidraw0,x",   // non-numeric channel
-		"/dev/hidraw0,300", // channel out of uint8 range
+		"mcp2210:/dev/hidraw0",     // missing channel
+		"mcp2210:,37",              // empty selector
+		"mcp2210:/dev/hidraw0,x",   // non-numeric channel
+		"mcp2210:/dev/hidraw0,300", // channel out of uint8 range
+		"bogus:ABC123,37",          // unknown dongle type
+		"ABC123,37",                // missing scheme prefix
 	}
 	for _, c := range cases {
 		if _, err := parseDongles([]string{c}); err == nil {

@@ -10,10 +10,12 @@
 // These tests are gated behind the "dongles" build tag and require two MCP2210
 // dongles. Run them with:
 //
-//	BLERIOT_DONGLE_HUB=/dev/hidraw3 BLERIOT_DONGLE_NODE=/dev/hidraw4 \
+//	BLERIOT_DONGLE_HUB=mcp2210:/dev/hidraw3 BLERIOT_DONGLE_NODE=mcp2210:/dev/hidraw4 \
 //	    go test -tags dongles -v ./functest/...
 //
-// A dongle selector is either a /dev/hidraw* path or a USB serial string (see
+// Each dongle env var is "scheme:selector"; the scheme is required (only
+// "mcp2210" is supported here, mirroring the hub --dongle flag, which has no
+// default) and the selector is a /dev/hidraw* path or a USB serial string (see
 // mcp2210.Open). BLERIOT_CHANNEL (default 37) sets the shared BLE channel. When
 // the dongle env vars are unset the tests skip, so a normal `go test ./...` and
 // CI are unaffected.
@@ -23,6 +25,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +36,7 @@ import (
 	"cli/pkg/mcp2210"
 	"cli/pkg/node"
 	"cli/pkg/radio"
+	"cli/pkg/radio/mcpdongle"
 )
 
 // Fixed test identities. The hub and node listen on distinct RF addresses on the
@@ -71,6 +75,26 @@ func mustAddr(s string) [node.AddrLen]byte {
 		panic(err)
 	}
 	return a
+}
+
+// mcpSelector requires a dongle env value to carry the "mcp2210:" scheme (the
+// only dongle type these hardware tests support) and returns the bare device
+// selector to pass to mcp2210.Open. Keeping the scheme explicit mirrors the hub
+// --dongle flag, which has no default scheme.
+func mcpSelector(tb testing.TB, env, val string) string {
+	tb.Helper()
+	i := strings.Index(val, ":")
+	if i < 0 {
+		tb.Fatalf("%s=%q: expected scheme:selector, e.g. mcp2210:0001746423", env, val)
+	}
+	scheme, sel := val[:i], val[i+1:]
+	if scheme != "mcp2210" {
+		tb.Fatalf("%s=%q: unsupported dongle scheme %q (only mcp2210)", env, val, scheme)
+	}
+	if sel == "" {
+		tb.Fatalf("%s=%q: empty selector", env, val)
+	}
+	return sel
 }
 
 // sensorEvent is an out-of-band register change applied inside the node loop so
@@ -137,19 +161,19 @@ type harness struct {
 	dev     *memDevice
 	sensor  chan sensorEvent
 	paused  chan bool
-	hubDev  *mcp2210.Device
-	nodeDev *mcp2210.Device
 	noderad *radio.NodeRadio
 	wg      sync.WaitGroup
 }
 
 func setup(tb testing.TB) *harness {
 	tb.Helper()
-	hubSel := os.Getenv("BLERIOT_DONGLE_HUB")
-	nodeSel := os.Getenv("BLERIOT_DONGLE_NODE")
-	if hubSel == "" || nodeSel == "" {
+	hubEnv := os.Getenv("BLERIOT_DONGLE_HUB")
+	nodeEnv := os.Getenv("BLERIOT_DONGLE_NODE")
+	if hubEnv == "" || nodeEnv == "" {
 		tb.Skip("set BLERIOT_DONGLE_HUB and BLERIOT_DONGLE_NODE to run dongle functional tests")
 	}
+	hubSel := mcpSelector(tb, "BLERIOT_DONGLE_HUB", hubEnv)
+	nodeSel := mcpSelector(tb, "BLERIOT_DONGLE_NODE", nodeEnv)
 	channel := uint8(37)
 	if s := os.Getenv("BLERIOT_CHANNEL"); s != "" {
 		v, err := strconv.ParseUint(s, 10, 8)
@@ -163,28 +187,27 @@ func setup(tb testing.TB) *harness {
 	if err != nil {
 		tb.Fatalf("open hub dongle %q: %v", hubSel, err)
 	}
+	hubD, err := mcpdongle.Open(hubDev, channel, hubAddr)
+	if err != nil {
+		tb.Fatalf("hub dongle %q: %v", hubSel, err) // Open closed hubDev
+	}
 	nodeDev, err := mcp2210.Open(nodeSel)
 	if err != nil {
-		hubDev.Close()
+		hubD.Close()
 		tb.Fatalf("open node dongle %q: %v", nodeSel, err)
+	}
+	nodeD, err := mcpdongle.Open(nodeDev, channel, nodeAddr)
+	if err != nil {
+		hubD.Close()
+		tb.Fatalf("node dongle %q: %v", nodeSel, err) // Open closed nodeDev
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	hubRadio, err := radio.New(ctx, hubDev, channel, hubAddr)
-	if err != nil {
-		cancel()
-		hubDev.Close()
-		nodeDev.Close()
-		tb.Fatalf("hub radio: %v", err)
-	}
-	nodeRadio, err := radio.NewNode(nodeDev, channel, nodeAddr)
-	if err != nil {
-		cancel()
-		hubDev.Close()
-		nodeDev.Close()
-		tb.Fatalf("node radio: %v", err)
-	}
+	// The hub radio's receive loop owns hubD and closes it when ctx is cancelled;
+	// the node radio owns nodeD and closes it on nodeRadio.Close().
+	hubRadio := radio.New(ctx, hubD)
+	nodeRadio := radio.NewNode(nodeD)
 
 	eng := engine.New(engine.Options{
 		HubAddr:         hubAddr,
@@ -199,8 +222,7 @@ func setup(tb testing.TB) *harness {
 	n := node.NewNode("functest", channel, &node.Descriptor{}, node.Identity{Address: nodeAddr, Key: nodeKey})
 	if err := eng.AddNode(n); err != nil {
 		cancel()
-		hubDev.Close()
-		nodeDev.Close()
+		nodeRadio.Close()
 		tb.Fatalf("add node: %v", err)
 	}
 
@@ -208,8 +230,7 @@ func setup(tb testing.TB) *harness {
 	nrt, err := pnode.New(nodeRadio, nodeAddr, nodeKey, dev)
 	if err != nil {
 		cancel()
-		hubDev.Close()
-		nodeDev.Close()
+		nodeRadio.Close()
 		tb.Fatalf("node runtime: %v", err)
 	}
 	dev.nrt = nrt
@@ -220,8 +241,6 @@ func setup(tb testing.TB) *harness {
 		dev:     dev,
 		sensor:  make(chan sensorEvent, 8),
 		paused:  make(chan bool, 1),
-		hubDev:  hubDev,
-		nodeDev: nodeDev,
 		noderad: nodeRadio,
 	}
 
@@ -255,9 +274,11 @@ func setup(tb testing.TB) *harness {
 	tb.Cleanup(func() {
 		cancel()
 		h.wg.Wait()
+		// Wait for the hub receive loop to exit and close its dongle, then close
+		// the node dongle, so neither physical device is still in use when the
+		// next test re-opens it (overlapping sessions desync the HID stream).
+		<-hubRadio.Done()
 		nodeRadio.Close()
-		hubDev.Close()
-		nodeDev.Close()
 	})
 	return h
 }

@@ -1,4 +1,4 @@
-package radio
+package mcpdongle
 
 // transport is the SPI transaction surface the register layer needs. It is
 // satisfied by *mcp2210.Device and faked in tests.

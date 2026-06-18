@@ -4,9 +4,10 @@
 # (cli/, example/...). This top-level Makefile collects targets that span the
 # whole repo or need special handling (e.g. hardware-in-the-loop tests).
 
-# MCP2210 dongle USB serials used by the two-dongle functional tests.
-DONGLE_HUB  ?= 0001746423
-DONGLE_NODE ?= 0001744916
+# USB radio dongle selectors used by the two-dongle functional tests. Each is a
+# "scheme:selector" pair: "mcp2210:" plus a USB serial.
+DONGLE_HUB  ?= mcp2210:0001746423
+DONGLE_NODE ?= mcp2210:0001744916
 
 # functest runs the hardware-in-the-loop functional tests: the real hub engine
 # and node runtime exchanging packets over the air across two MCP2210 dongles.

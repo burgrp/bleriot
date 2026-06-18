@@ -1,131 +1,64 @@
-// Package radio implements the BleRiot host radio over a USB dongle: an MCP2210
-// USB-to-SPI bridge driving a PAN211x in BLE LongRange mode. It satisfies the
-// engine's Radio interface (Send / Received), so the hub can talk to RF nodes
-// with no microcontroller in between — all radio register access happens on the
-// host over USB HID.
+// Package radio adapts an RF dongle to the BleRiot hub and node radio
+// interfaces. It is transport-agnostic: a Dongle is any single-channel RF
+// endpoint that can Send and Receive whole packets. The MCP2210 + PAN211x
+// USB-to-SPI bridge (subpackage mcpdongle) is one implementation; a smart
+// MCU-resident dongle speaking a framed USB protocol would be another, slotting
+// in with no change to the engine, the node runtime, or this package.
 package radio
 
 import (
 	"context"
-	"sync"
 	"time"
 
-	"github.com/burgrp/tinygo-drivers/pan211x"
-
 	"protocol"
-
-	"cli/pkg/mcp2210"
 )
 
-// pollInterval is how often the receive loop checks the radio for an inbound
-// packet. The hub is the master in every transaction, so replies arrive well
-// within the engine's per-attempt timeout; a short interval keeps latency low
-// without a dedicated interrupt line (the dongle has none wired to the host).
+// pollInterval is how often the hub receive loop checks the dongle for an
+// inbound packet. The hub is the master in every transaction, so replies arrive
+// well within the engine's per-attempt timeout; a short interval keeps latency
+// low for dongles without a packet-ready push (e.g. the MCP2210 has no interrupt
+// line wired to the host).
 const pollInterval = time.Millisecond
 
-// dongle is the shared transport over one MCP2210 + PAN211x: the device handle,
-// the radio driver, a lock serialising all USB access, and the two status LEDs.
-// Both the hub-side Radio and the node-side NodeRadio embed it.
-type dongle struct {
-	dev    *mcp2210.Device
-	driver *pan211x.DriverBLELongRange
-	// mu serialises USB access: transmit, the receive poll, and LED updates all
-	// share the one HID device.
-	mu    sync.Mutex
-	red   *led // lit while transmitting
-	green *led // lit when a packet arrives
+// Dongle is one RF endpoint: a radio brought up on a single channel and receive
+// address, reachable over some host transport. Implementations serialise their
+// own access as needed. Receive is non-blocking; Close releases the dongle and
+// any underlying device.
+type Dongle interface {
+	// Send transmits payload to dst. It blocks until transmission completes.
+	Send(dst [4]byte, payload []byte) error
+	// Receive copies at most one received packet into buf and reports how many
+	// bytes were written and whether a packet was available. It never blocks.
+	Receive(buf []byte) (n int, ok bool)
+	// Close releases the dongle (and any underlying device).
+	Close() error
 }
 
-// openDongle configures the MCP2210, brings up its PAN211x for BLE LongRange on
-// the given channel, and sets the pipe-0 receive address. rxAddr is the address
-// this endpoint listens on (the hub address on the hub side, the node address on
-// the node side).
-func openDongle(dev *mcp2210.Device, channel uint8, rxAddr pan211x.AddressBLE) (*dongle, error) {
-	if err := dev.Configure(mcp2210.DefaultSPIConfig, ledRedPin, ledGreenPin); err != nil {
-		return nil, err
-	}
-	driver := pan211x.NewDriverBLELongRange(newRegisters(dev))
-	if err := driver.Init(pan211x.ConfigBLELongRange{
-		PayloadLen:      protocol.PacketLen,
-		SerialInterface: pan211x.SerialInterfaceSPI3W,
-		SpreadFactor:    pan211x.SpreadFactorS8,
-	}); err != nil {
-		return nil, err
-	}
-	if err := driver.SetChannel(channel); err != nil {
-		return nil, err
-	}
-	if err := driver.EnableRxAddress(0, rxAddr); err != nil {
-		return nil, err
-	}
-	d := &dongle{dev: dev, driver: driver}
-	d.red = newLED(d.setGPIO, ledRedPin)
-	d.green = newLED(d.setGPIO, ledGreenPin)
-	return d, nil
-}
-
-// setGPIO drives a dongle GPIO pin under the shared USB lock. LED errors are
-// non-fatal: a missed status-LED update must never break radio traffic.
-func (d *dongle) setGPIO(pin uint8, on bool) {
-	d.mu.Lock()
-	_ = d.dev.SetGPIO(pin, on)
-	d.mu.Unlock()
-}
-
-// send transmits payload to dst and lights the red activity LED.
-func (d *dongle) send(dst pan211x.AddressBLE, payload []byte) error {
-	d.red.trigger()
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.driver.Send(dst, payload)
-}
-
-// receive polls for one packet, lighting the green activity LED when one
-// arrives. It never blocks.
-func (d *dongle) receive(buf []byte) (int, bool) {
-	d.mu.Lock()
-	n, ok := d.driver.Receive(buf)
-	d.mu.Unlock()
-	if ok {
-		d.green.trigger()
-	}
-	return n, ok
-}
-
-// stopLEDs turns both LEDs off and cancels their timers.
-func (d *dongle) stopLEDs() {
-	d.red.stop()
-	d.green.stop()
-}
-
-// Radio drives a single PAN211x on one RF channel through an MCP2210 dongle and
-// satisfies the hub engine's Radio interface (Send / Received).
+// Radio adapts a Dongle to the hub engine's Radio interface (Send / Received):
+// it runs a receive loop that polls the dongle and forwards each complete packet
+// on a channel.
 type Radio struct {
-	*dongle
-	in chan [protocol.PacketLen]byte
+	d    Dongle
+	in   chan [protocol.PacketLen]byte
+	done chan struct{}
 }
 
-// New initialises the dongle's radio for BLE LongRange on the given channel and
-// receive address (the hub address, so node replies are received), then starts
-// a receive loop that runs until ctx is cancelled. The caller retains ownership
-// of dev and is responsible for closing it after ctx is done.
-func New(ctx context.Context, dev *mcp2210.Device, channel uint8, hubAddr pan211x.AddressBLE) (*Radio, error) {
-	d, err := openDongle(dev, channel, hubAddr)
-	if err != nil {
-		return nil, err
-	}
+// New starts a receive loop over d that runs until ctx is cancelled, at which
+// point it closes the dongle and the Received channel. The returned Radio
+// satisfies the engine's Radio interface.
+func New(ctx context.Context, d Dongle) *Radio {
 	r := &Radio{
-		dongle: d,
-		in:     make(chan [protocol.PacketLen]byte, 16),
+		d:    d,
+		in:   make(chan [protocol.PacketLen]byte, 16),
+		done: make(chan struct{}),
 	}
 	go r.recvLoop(ctx)
-	return r, nil
+	return r
 }
 
-// Send transmits payload to dst, then re-enters receive mode. It lights the red
-// LED for the duration of the transmit-activity window.
-func (r *Radio) Send(dst pan211x.AddressBLE, payload []byte) error {
-	return r.send(dst, payload)
+// Send transmits payload to dst.
+func (r *Radio) Send(dst [4]byte, payload []byte) error {
+	return r.d.Send(dst, payload)
 }
 
 // Received returns the channel of inbound packets. It is closed once ctx (passed
@@ -134,10 +67,20 @@ func (r *Radio) Received() <-chan [protocol.PacketLen]byte {
 	return r.in
 }
 
-// recvLoop polls the radio for received packets and forwards complete ones.
+// Done returns a channel that is closed once the receive loop has exited and the
+// dongle has been closed (after the ctx passed to New is cancelled). Callers that
+// reuse the underlying device should wait on it before re-opening, to avoid
+// overlapping sessions on the same hardware.
+func (r *Radio) Done() <-chan struct{} {
+	return r.done
+}
+
+// recvLoop polls the dongle for received packets and forwards complete ones,
+// closing the dongle and the inbound channel when ctx is cancelled.
 func (r *Radio) recvLoop(ctx context.Context) {
+	defer close(r.done)
 	defer close(r.in)
-	defer r.stopLEDs()
+	defer r.d.Close()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	buf := make([]byte, protocol.PacketLen)
@@ -146,7 +89,7 @@ func (r *Radio) recvLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n, ok := r.receive(buf)
+			n, ok := r.d.Receive(buf)
 			if !ok || n != protocol.PacketLen {
 				continue
 			}
