@@ -1,0 +1,10 @@
+cd cli && go test -c -tags dongles -o /tmp/bleriot-functest.bin ./functest/
+sudo BLERIOT_DONGLE_HUB=mcp2210:0001746423 BLERIOT_DONGLE_NODE=mcp2210:0001744916 \
+	/tmp/bleriot-functest.bin -test.bench . -test.benchmem -test.run '^$' -test.benchtime 50x
+goos: linux
+goarch: amd64
+pkg: cli/functest
+cpu: AMD Ryzen 5 PRO 4650U with Radeon Graphics
+BenchmarkGet-12    	      50	 138137426 ns/op	       138.1 ms/op	    9007 B/op	     251 allocs/op
+BenchmarkSet-12    	      50	 150301693 ns/op	       150.3 ms/op	    9640 B/op	     274 allocs/op
+PASS
