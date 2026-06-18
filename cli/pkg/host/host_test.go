@@ -160,3 +160,33 @@ func TestRunNewPrintsStub(t *testing.T) {
 		t.Fatalf("generated key is all zero:\n%s", out)
 	}
 }
+
+func TestParseDongles(t *testing.T) {
+	specs, err := parseDongles([]string{"/dev/hidraw0,37", "ABC123,11"})
+	if err != nil {
+		t.Fatalf("parseDongles: %v", err)
+	}
+	if len(specs) != 2 {
+		t.Fatalf("got %d specs, want 2", len(specs))
+	}
+	if specs[0].selector != "/dev/hidraw0" || specs[0].channel != 37 {
+		t.Fatalf("spec[0] = %+v, want /dev/hidraw0 ch 37", specs[0])
+	}
+	if specs[1].selector != "ABC123" || specs[1].channel != 11 {
+		t.Fatalf("spec[1] = %+v, want ABC123 ch 11", specs[1])
+	}
+}
+
+func TestParseDonglesErrors(t *testing.T) {
+	cases := []string{
+		"/dev/hidraw0",     // missing channel
+		",37",              // empty selector
+		"/dev/hidraw0,x",   // non-numeric channel
+		"/dev/hidraw0,300", // channel out of uint8 range
+	}
+	for _, c := range cases {
+		if _, err := parseDongles([]string{c}); err == nil {
+			t.Fatalf("parseDongles(%q): expected error", c)
+		}
+	}
+}

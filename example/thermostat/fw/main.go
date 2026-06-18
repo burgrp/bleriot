@@ -1,10 +1,10 @@
 //go:build tinygo
 
 // Command (firmware) main is the BleRiot thermostat node for the BOB breakout
-// board (PY32F030 + PAN211x). Unlike the hub modem — a dumb radio bridge — this
-// is a full protocol node: it owns the radio, reads its identity and config from
-// the provisioning page in flash, and runs the BleRiot runtime (protocol/node)
-// over a thermostat device (the example package).
+// board (PY32F030 + PAN211x). It is a full protocol node: it owns the radio,
+// reads its identity and config from the provisioning page in flash, and runs
+// the BleRiot runtime (protocol/node) over a thermostat device (the example
+// package).
 //
 // On boot it:
 //   - reads the provisioning page (address, XTEA key, channel, Config) from
@@ -41,7 +41,7 @@ const (
 	pinLedRed   = machine.PB0 // lit on fatal fault (blink pattern)
 	pinLedGreen = machine.PB1 // heartbeat
 
-	// PAN211x over 3-wire SPI (same wiring as the hub modem, see hub/fw).
+	// PAN211x over 3-wire SPI.
 	pinSpiSck  = machine.PA9  // SCK  → PAN211x pin 2
 	pinSpiData = machine.PA7  // DATA → PAN211x pin 3, bidirectional
 	pinSpiCsn  = machine.PA10 // CSN  → PAN211x pin 1, active-low

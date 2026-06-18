@@ -14,6 +14,4 @@ replace cli => ../../cli
 
 replace protocol => ../../protocol
 
-replace hub/link => ../../hub/link
-
 replace github.com/burgrp/reg => ../../../reg

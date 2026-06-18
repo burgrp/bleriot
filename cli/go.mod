@@ -3,25 +3,19 @@
 // repository imports it and drives it with inventory-as-code, calling
 // host.Start(inventory.Inventory{...}) from its own main().
 //
-// The hub is split into two cooperating parts (see the protocol spec):
-//
-//   - This host module owns all protocol intelligence: per-node XTEA keys,
-//     node descriptors, retries/timeouts, push-subscription bookkeeping, and
-//     the Registry client.
-//   - A separate MCU "dumb radio modem" (TinyGo firmware) owns only the
-//     PAN211x radios and holds no secrets.
-//
-// The two halves communicate over a COBS-framed byte stream (UART now, USB-CDC
-// later) defined in the standalone hub/link module. Each modem manages exactly
-// one radio over its own serial port; the host fans out across several modems
-// (one per port), so that multiplexing lives in the host above the link layer,
-// not on the wire.
+// This module owns all protocol intelligence: per-node XTEA keys, node
+// descriptors, retries/timeouts, push-subscription bookkeeping, and the
+// Registry client. The radio itself is a USB dongle — an MCP2210 USB-to-SPI
+// bridge driving a single PAN211x (no microcontroller, no firmware) — which the
+// host drives directly over USB HID (see pkg/mcp2210 and pkg/radio). One dongle
+// covers one RF channel; the hub opens one dongle per channel in use.
 module cli
 
 go 1.25.2
 
 require (
 	github.com/burgrp/reg v0.0.0-00010101000000-000000000000
+	github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486
 	github.com/lmittmann/tint v1.1.2
 	github.com/spf13/cobra v1.10.2
 	protocol v0.0.0
@@ -33,7 +27,5 @@ require (
 )
 
 replace protocol => ../protocol
-
-replace hub/link => ../hub/link
 
 replace github.com/burgrp/reg => ../../reg
