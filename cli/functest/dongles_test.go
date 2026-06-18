@@ -143,30 +143,30 @@ type harness struct {
 	wg      sync.WaitGroup
 }
 
-func setup(t *testing.T) *harness {
-	t.Helper()
+func setup(tb testing.TB) *harness {
+	tb.Helper()
 	hubSel := os.Getenv("BLERIOT_DONGLE_HUB")
 	nodeSel := os.Getenv("BLERIOT_DONGLE_NODE")
 	if hubSel == "" || nodeSel == "" {
-		t.Skip("set BLERIOT_DONGLE_HUB and BLERIOT_DONGLE_NODE to run dongle functional tests")
+		tb.Skip("set BLERIOT_DONGLE_HUB and BLERIOT_DONGLE_NODE to run dongle functional tests")
 	}
 	channel := uint8(37)
 	if s := os.Getenv("BLERIOT_CHANNEL"); s != "" {
 		v, err := strconv.ParseUint(s, 10, 8)
 		if err != nil {
-			t.Fatalf("BLERIOT_CHANNEL: %v", err)
+			tb.Fatalf("BLERIOT_CHANNEL: %v", err)
 		}
 		channel = uint8(v)
 	}
 
 	hubDev, err := mcp2210.Open(hubSel)
 	if err != nil {
-		t.Fatalf("open hub dongle %q: %v", hubSel, err)
+		tb.Fatalf("open hub dongle %q: %v", hubSel, err)
 	}
 	nodeDev, err := mcp2210.Open(nodeSel)
 	if err != nil {
 		hubDev.Close()
-		t.Fatalf("open node dongle %q: %v", nodeSel, err)
+		tb.Fatalf("open node dongle %q: %v", nodeSel, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -176,14 +176,14 @@ func setup(t *testing.T) *harness {
 		cancel()
 		hubDev.Close()
 		nodeDev.Close()
-		t.Fatalf("hub radio: %v", err)
+		tb.Fatalf("hub radio: %v", err)
 	}
 	nodeRadio, err := radio.NewNode(nodeDev, channel, nodeAddr)
 	if err != nil {
 		cancel()
 		hubDev.Close()
 		nodeDev.Close()
-		t.Fatalf("node radio: %v", err)
+		tb.Fatalf("node radio: %v", err)
 	}
 
 	eng := engine.New(engine.Options{
@@ -201,7 +201,7 @@ func setup(t *testing.T) *harness {
 		cancel()
 		hubDev.Close()
 		nodeDev.Close()
-		t.Fatalf("add node: %v", err)
+		tb.Fatalf("add node: %v", err)
 	}
 
 	dev := newMemDevice()
@@ -210,7 +210,7 @@ func setup(t *testing.T) *harness {
 		cancel()
 		hubDev.Close()
 		nodeDev.Close()
-		t.Fatalf("node runtime: %v", err)
+		tb.Fatalf("node runtime: %v", err)
 	}
 	dev.nrt = nrt
 
@@ -252,7 +252,7 @@ func setup(t *testing.T) *harness {
 		}
 	}()
 
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		cancel()
 		h.wg.Wait()
 		nodeRadio.Close()

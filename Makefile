@@ -18,8 +18,16 @@ functest:
 	sudo BLERIOT_DONGLE_HUB=$(DONGLE_HUB) BLERIOT_DONGLE_NODE=$(DONGLE_NODE) \
 		/tmp/bleriot-functest.bin -test.v -test.timeout 120s
 
+# bench measures end-to-end transaction latency (GET/SET round trips) over the
+# real RF link between the two dongles. Same gating and sudo handling as functest.
+bench:
+	cd cli && go test -c -tags dongles -o /tmp/bleriot-functest.bin ./functest/
+	sudo BLERIOT_DONGLE_HUB=$(DONGLE_HUB) BLERIOT_DONGLE_NODE=$(DONGLE_NODE) \
+		/tmp/bleriot-functest.bin -test.bench . -test.benchmem -test.run '^$$' -test.benchtime 50x
+
 # test runs the regular (non-hardware) unit tests for the host runtime.
 test:
 	cd cli && go test ./...
 
-.PHONY: functest test
+.PHONY: functest bench test
+
