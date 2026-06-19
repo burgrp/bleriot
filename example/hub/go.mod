@@ -3,7 +3,7 @@ module hub
 go 1.25.2
 
 require (
-	cli v0.0.0
+	site v0.0.0
 	thermostat v0.0.0
 )
 
@@ -17,7 +17,7 @@ require (
 	protocol v0.0.0 // indirect
 )
 
-replace cli => ../../cli
+replace site => ../../site
 
 replace thermostat => ../thermostat
 

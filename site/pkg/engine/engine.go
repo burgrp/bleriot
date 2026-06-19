@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"cli/pkg/node"
 	"protocol"
+	"site/pkg/node"
 )
 
 // PacketLen is the fixed BleRiot on-wire packet size (§4).

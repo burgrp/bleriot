@@ -2,7 +2,7 @@ go 1.25.2
 
 use .
 use ../thermostat
-use ../../cli
+use ../../site
 use ../../protocol
 use ../../../reg
 use ../../../tinygo-drivers/pan211x

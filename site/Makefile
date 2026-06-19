@@ -1,4 +1,4 @@
-# cli is a library (the BleRiot host runtime). A deployment is a separate
+# site is a library (the BleRiot host runtime). A deployment is a separate
 # site binary that imports it; see ../example/hub.
 
 test:

@@ -1,4 +1,4 @@
-// Module cli is the BleRiot host library: the host (Linux SBC) half of the
+// Module site is the BleRiot host library: the host (Linux SBC) half of the
 // bridge between BleRiot RF nodes and the external Registry service. A site
 // repository imports it and drives it with inventory-as-code, calling
 // host.Start(inventory.Inventory{...}) from its own main().
@@ -9,7 +9,7 @@
 // bridge driving a single PAN211x (no microcontroller, no firmware) — which the
 // host drives directly over USB HID (see pkg/mcp2210 and pkg/radio). One dongle
 // covers one RF channel; the hub opens one dongle per channel in use.
-module cli
+module site
 
 go 1.25.2
 

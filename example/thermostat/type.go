@@ -1,6 +1,6 @@
 package thermostat
 
-import "cli/pkg/inventory"
+import "site/pkg/inventory"
 
 // Type returns the thermostat device type: its name and register table. It is
 // host-only (excluded from the firmware build) because only the host needs the

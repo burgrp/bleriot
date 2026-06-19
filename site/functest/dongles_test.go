@@ -35,11 +35,11 @@ import (
 
 	"github.com/burgrp/tinygo-drivers/pan211x"
 
-	"cli/pkg/engine"
-	"cli/pkg/mcp2210"
-	"cli/pkg/node"
-	"cli/pkg/radio"
-	"cli/pkg/radio/mcpdongle"
+	"site/pkg/engine"
+	"site/pkg/mcp2210"
+	"site/pkg/node"
+	"site/pkg/radio"
+	"site/pkg/radio/mcpdongle"
 )
 
 // Fixed test identities. The hub and node listen on distinct RF addresses on the

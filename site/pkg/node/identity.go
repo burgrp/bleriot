@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"hash/crc32"
 
-	"cli/pkg/config"
+	"site/pkg/config"
 )
 
 // AddrLen is the BleRiot device address length in bytes (§3).

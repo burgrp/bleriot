@@ -28,9 +28,9 @@ import (
 	"time"
 	"unsafe"
 
-	"cli/pkg/config"
 	"protocol"
 	"protocol/node"
+	"site/pkg/config"
 	"thermostat"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
@@ -51,7 +51,7 @@ const (
 )
 
 // Provisioning page location in flash for the PY32F030 (see
-// cli/pkg/inventory: page 0x0800F800). pageBytes is a fixed read window large
+// site/pkg/inventory: page 0x0800F800). pageBytes is a fixed read window large
 // enough for the header (30) + thermostat Config (8) + CRC (4); config.Unmarshal
 // tolerates the trailing slack.
 const (

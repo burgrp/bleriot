@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"cli/pkg/config"
-	"cli/pkg/inventory"
-	"cli/pkg/node"
+	"site/pkg/config"
+	"site/pkg/inventory"
+	"site/pkg/node"
 )
 
 // newProvisionCmd builds the "provision" subcommand: read the attached device's

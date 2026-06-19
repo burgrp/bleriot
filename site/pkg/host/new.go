@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"cli/pkg/config"
-	"cli/pkg/inventory"
+	"site/pkg/config"
+	"site/pkg/inventory"
 )
 
 // newNewCmd builds the "new" subcommand: read an attached, not-yet-known

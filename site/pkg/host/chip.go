@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"cli/pkg/inventory"
+	"site/pkg/inventory"
 )
 
 // builtinChips are chip profiles the provisioning commands know without the

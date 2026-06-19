@@ -8,9 +8,9 @@
 package main
 
 import (
-	"cli/pkg/config"
-	"cli/pkg/host"
-	"cli/pkg/inventory"
+	"site/pkg/config"
+	"site/pkg/host"
+	"site/pkg/inventory"
 
 	"thermostat"
 )

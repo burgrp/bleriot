@@ -17,7 +17,7 @@ package inventory
 import (
 	"fmt"
 
-	"cli/pkg/config"
+	"site/pkg/config"
 )
 
 // RegType is the hub-side interpretation of a register's int32 wire value.

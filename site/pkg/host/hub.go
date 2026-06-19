@@ -15,14 +15,14 @@ import (
 	clientfactory "github.com/burgrp/reg/pkg/client/factory"
 	"github.com/spf13/cobra"
 
-	"cli/pkg/bridge"
-	"cli/pkg/config"
-	"cli/pkg/engine"
-	"cli/pkg/inventory"
-	"cli/pkg/mcp2210"
-	"cli/pkg/node"
-	"cli/pkg/radio"
-	"cli/pkg/radio/mcpdongle"
+	"site/pkg/bridge"
+	"site/pkg/config"
+	"site/pkg/engine"
+	"site/pkg/inventory"
+	"site/pkg/mcp2210"
+	"site/pkg/node"
+	"site/pkg/radio"
+	"site/pkg/radio/mcpdongle"
 
 	"github.com/burgrp/tinygo-drivers/pan211x"
 )

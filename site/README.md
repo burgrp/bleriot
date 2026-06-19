@@ -1,6 +1,6 @@
-# cli — BleRiot host library
+# site — BleRiot host library
 
-`cli` is the host (Linux-SBC) half of the BleRiot hub, packaged as a **library**
+`site` is the host (Linux-SBC) half of the BleRiot hub, packaged as a **library**
 that a site repository drives with **inventory-as-code**. It owns all protocol
 intelligence — per-node XTEA keys, register tables, retries/timeouts, push
 subscription bookkeeping, and the Registry client — and drives the radio directly
@@ -11,7 +11,7 @@ For every BleRiot register the hub acts as a
 [Registry](https://github.com/burgrp/reg) provider: it publishes the register's
 value and turns consumer change requests into BleRiot `SET` operations.
 
-> Module path: `cli`. See the [protocol spec](../protocol/README.md) for the wire
+> Module path: `site`. See the [protocol spec](../protocol/README.md) for the wire
 > format and transaction semantics this implements.
 
 There is **no JSON configuration and no code generation**. A deployment is a Go
@@ -23,8 +23,8 @@ it.
 package main
 
 import (
-	"cli/pkg/host"
-	"cli/pkg/inventory"
+	"site/pkg/host"
+	"site/pkg/inventory"
 
 	"thermostat"
 )

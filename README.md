@@ -23,7 +23,7 @@ hardware designs.
               │  provide / consume
               ▼
 ┌─────────────────────────────┐
-│       cli (bleriot hub)     │
+│       site (bleriot hub)    │
 │  Linux SBC: protocol logic, │
 │  XTEA keys, retries, watch  │
 └─────────────────────────────┘
@@ -45,7 +45,7 @@ hardware designs.
 
 The hub runs entirely on the Linux host:
 
-- **`cli`** (the BleRiot host library) owns all protocol intelligence — per-node
+- **`site`** (the BleRiot host library) owns all protocol intelligence — per-node
   XTEA keys, register tables, retries/timeouts, push-subscription bookkeeping,
   and the Registry client — and drives the radio directly. A site repository
   drives it with inventory-as-code (see [`example/hub`](example/hub)) and runs it
@@ -55,7 +55,7 @@ The hub runs entirely on the Linux host:
   firmware**. The host runs the PAN211x register sequence for every packet over
   USB-HID; the dongle holds no secrets and no protocol state.
 
-The transport is abstracted (`cli/pkg/radio`): the MCP2210 dongle is one
+The transport is abstracted (`site/pkg/radio`): the MCP2210 dongle is one
 implementation, and a future smart MCU-resident dongle would slot in unchanged.
 One dongle is one radio on one channel; the host fans out across several dongles,
 so multiplexing lives in the host, above the wire.
@@ -67,7 +67,7 @@ so multiplexing lives in the host, above the wire.
 | Path | Module | What it is | Docs |
 |------|--------|------------|------|
 | [`protocol/`](protocol) | `protocol` | Neutral, dependency-free RF wire format: packet codec + XTEA. Compiles for host and TinyGo alike. | [protocol/README.md](protocol/README.md) — the full **protocol specification** |
-| [`cli/`](cli) | `cli` | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, inventory model, provisioning, Registry bridge. | [cli/README.md](cli/README.md) |
+| [`site/`](site) | `site` | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, inventory model, provisioning, Registry bridge. | [site/README.md](site/README.md) |
 | [`usb/`](usb) | — | KiCad design for the USB radio dongle (MCP2210 USB-to-SPI bridge + PAN211x). | — |
 | [`example/hub/`](example/hub) | `hub` | Example site binary: declares an inventory-as-code deployment and runs the host runtime. | — |
 | [`example/thermostat/`](example/thermostat) | `thermostat` | Example dual-target device-type module (`Config` + `Type()` + TinyGo firmware). | — |
@@ -78,7 +78,7 @@ so multiplexing lives in the host, above the wire.
 
 ## How the pieces fit together
 
-1. **Inventory as code** (see [cli](cli/README.md)). A deployment is a Go
+1. **Inventory as code** (see [site](site/README.md)). A deployment is a Go
    program: it declares its devices — each binding a device type's register
    table, the MCU `UID`, XTEA key, channel and config — as an
    `inventory.Inventory` and hands it to `host.Start`. Register identity on the
@@ -94,7 +94,7 @@ so multiplexing lives in the host, above the wire.
    address, transmit packets, and poll for received ones — no secrets, no
    retries, no firmware.
 
-4. **On the host** ([cli](cli/README.md)). The engine handles XTEA,
+4. **On the host** ([site](site/README.md)). The engine handles XTEA,
    timeouts/retries, and watch refresh; the bridge maps every node register to a
    Registry provider/consumer.
 
@@ -112,7 +112,7 @@ go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
 The `--dongle` value is `scheme:selector,channel`: the scheme selects the dongle
 type (`mcp2210`), the selector is a `/dev/hidraw*` path or a USB serial, and the
 channel is the RF channel. `/dev/hidraw*` is root-only, so run the hub as root or
-via `sudo`. See [cli/README.md](cli/README.md) for the inventory model, commands
+via `sudo`. See [site/README.md](site/README.md) for the inventory model, commands
 and flags.
 
 ### Provisioning a device
@@ -123,14 +123,14 @@ go run . new          # read the attached device's UID, print an Instance stub
 go run . provision    # write its identity + config to flash over SWD
 ```
 
-See [cli/README.md](cli/README.md#provision--new-flags) for the SWD flags.
+See [site/README.md](site/README.md#provision--new-flags) for the SWD flags.
 
 ---
 
 ## Module dependencies
 
 ```
-protocol  ──────────────┬─► cli       (also: github.com/burgrp/reg)
+protocol  ──────────────┬─► site      (also: github.com/burgrp/reg)
  (codec + XTEA)          └─► thermostat firmware (also: pan211x driver, TinyGo)
 ```
 
@@ -144,5 +144,5 @@ single-sourcing the on-wire formats.
 
 - **[Protocol specification](protocol/README.md)** — the authoritative wire-format,
   security, transaction, and register-model spec.
-- **[Host library](cli/README.md)** — inventory-as-code model, the `hub`/`provision`/`new` commands, the USB radio dongle drivers, and internal packages.
+- **[Host library](site/README.md)** — inventory-as-code model, the `hub`/`provision`/`new` commands, the USB radio dongle drivers, and internal packages.
 
