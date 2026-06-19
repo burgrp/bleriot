@@ -1,0 +1,12 @@
+cd site && BLERIOT_DONGLE_HUB=mcp2210:0001746423 BLERIOT_DONGLE_NODE=mcp2210:0001744916 \
+	go test -tags dongles -bench . -benchmem -run '^$' -benchtime 50x ./functest/
+goos: linux
+goarch: amd64
+pkg: site/functest
+cpu: AMD Ryzen 5 PRO 4650U with Radeon Graphics
+BenchmarkGet/S8-12 	      50	 158298323 ns/op	       158.3 ms/op	    9529 B/op	     269 allocs/op
+BenchmarkGet/S2-12 	      50	 166925856 ns/op	       166.9 ms/op	    9986 B/op	     286 allocs/op
+BenchmarkSet/S8-12 	      50	 240980449 ns/op	       241.0 ms/op	   14610 B/op	     427 allocs/op
+BenchmarkSet/S2-12 	      50	 156541650 ns/op	       156.5 ms/op	    9265 B/op	     266 allocs/op
+PASS
+ok  	site/functest	44.430s
