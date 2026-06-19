@@ -6,7 +6,7 @@
 //   - its identity: the MCU unique ID (from which the RF address is derived),
 //     the XTEA key, and the RF channel;
 //   - its device type (a shared DeviceType describing the register table);
-//   - its device-type-specific Config (a fixed-size struct, see pkg/page).
+//   - its device-type-specific Config (a fixed-size struct, see pkg/config).
 //
 // Register identity on the wire is a stable, hand-assigned Tag (like a protobuf
 // field number), not the slice position, so the register table can be reordered
@@ -17,7 +17,7 @@ package inventory
 import (
 	"fmt"
 
-	"cli/pkg/page"
+	"cli/pkg/config"
 )
 
 // RegType is the hub-side interpretation of a register's int32 wire value.
@@ -98,9 +98,9 @@ type Channel struct {
 	// Number is the BLE RF channel number.
 	Number uint8
 	// SpreadFactor is the BLE Coded PHY spreading factor used on this channel. The
-	// zero value is page.SpreadFactorS8 (highest range), so a bare
+	// zero value is config.SpreadFactorS8 (highest range), so a bare
 	// Channel{Number: n} keeps the historical behaviour.
-	SpreadFactor page.SpreadFactor
+	SpreadFactor config.SpreadFactor
 }
 
 // Instance is one physical device in the deployment.
@@ -109,16 +109,16 @@ type Instance struct {
 	// device's register names in the Registry (e.g. "kitchen").
 	Name string
 	// UID is the MCU unique ID; the RF address is derived from it.
-	UID [page.UIDLen]byte
+	UID [config.UIDLen]byte
 	// Key is the device's XTEA shared key.
-	Key [page.KeyLen]byte
+	Key [config.KeyLen]byte
 	// Channel is the device's RF channel and the spreading factor it shares with
 	// every other node on that channel.
 	Channel Channel
 	// Type is the device's type (register table).
 	Type DeviceType
 	// Config is the device-type-specific configuration written to the device's
-	// provisioning page. It must be a fixed-size value (see pkg/page); nil means
+	// provisioning page. It must be a fixed-size value (see pkg/config); nil means
 	// no config.
 	Config any
 }
@@ -185,8 +185,8 @@ func (inv Inventory) Validate() error {
 // channel number disagree: the hub drives one spreading factor per
 // channel/dongle, so a channel must be uniform. The hub uses the result to
 // configure each dongle.
-func (inv Inventory) SpreadFactorByChannel() (map[uint8]page.SpreadFactor, error) {
-	byChannel := make(map[uint8]page.SpreadFactor, len(inv))
+func (inv Inventory) SpreadFactorByChannel() (map[uint8]config.SpreadFactor, error) {
+	byChannel := make(map[uint8]config.SpreadFactor, len(inv))
 	owner := make(map[uint8]string, len(inv))
 	for _, inst := range inv {
 		ch := inst.Channel

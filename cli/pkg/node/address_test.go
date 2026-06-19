@@ -4,11 +4,11 @@ import (
 	"hash/crc32"
 	"testing"
 
-	"cli/pkg/page"
+	"cli/pkg/config"
 )
 
 func TestAddressFromUID(t *testing.T) {
-	uid := [page.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	uid := [config.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 
 	got := AddressFromUID(uid)
 

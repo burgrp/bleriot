@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"hash/crc32"
 
-	"cli/pkg/page"
+	"cli/pkg/config"
 )
 
 // AddrLen is the BleRiot device address length in bytes (§3).
@@ -19,7 +19,7 @@ const KeyLen = 16
 // ID (PROTOCOL.md §11.5): address = CRC32(UID), big-endian. Both the host
 // (provisioning, hub) and the firmware compute it the same way, so the address
 // is never stored in the inventory.
-func AddressFromUID(uid [page.UIDLen]byte) [AddrLen]byte {
+func AddressFromUID(uid [config.UIDLen]byte) [AddrLen]byte {
 	var a [AddrLen]byte
 	binary.BigEndian.PutUint32(a[:], crc32.ChecksumIEEE(uid[:]))
 	return a

@@ -28,7 +28,7 @@ import (
 	"time"
 	"unsafe"
 
-	"cli/pkg/page"
+	"cli/pkg/config"
 	"protocol"
 	"protocol/node"
 	"thermostat"
@@ -52,7 +52,7 @@ const (
 
 // Provisioning page location in flash for the PY32F030 (see
 // cli/pkg/inventory: page 0x0800F800). pageBytes is a fixed read window large
-// enough for the header (30) + thermostat Config (8) + CRC (4); page.Unmarshal
+// enough for the header (30) + thermostat Config (8) + CRC (4); config.Unmarshal
 // tolerates the trailing slack.
 const (
 	pageAddr  = 0x0800F800
@@ -74,9 +74,9 @@ func main() {
 	// Identity and configuration come from the provisioning page in flash. Decode
 	// (not Unmarshal) keeps the firmware small by avoiding reflection/fmt.
 	pageData := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pageAddr))), pageBytes)
-	header, cfgBytes, err := page.Decode(pageData)
+	header, cfgBytes, err := config.Decode(pageData)
 	if err != nil {
-		if page.IsUnprovisioned(err) {
+		if config.IsUnprovisioned(err) {
 			// Fresh device: nothing to run until it is provisioned over SWD.
 			haltBlink("unprovisioned", 1000*time.Millisecond)
 		}
@@ -128,7 +128,7 @@ func run(rt *node.Node, dev *thermostat.Device) {
 }
 
 // decodeConfig reads the thermostat Config from the page's config bytes. The
-// layout matches the Config struct (page.Marshal encodes fields in declaration
+// layout matches the Config struct (config.Marshal encodes fields in declaration
 // order, little-endian): MinTemp then MaxTemp, each a float32.
 func decodeConfig(b []byte) thermostat.Config {
 	if len(b) < 8 {

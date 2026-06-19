@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"cli/pkg/config"
 	"cli/pkg/inventory"
-	"cli/pkg/page"
 )
 
 var altChip = inventory.Chip{Name: "stm32g0", Target: "stm32g030x6", UIDAddr: 0x1FFF7590, PageAddr: 0x0800F800}
@@ -47,7 +47,7 @@ func TestResolveChip(t *testing.T) {
 	t.Run("multiple chips require --chip", func(t *testing.T) {
 		alt := sampleInstance()
 		alt.Name = "other"
-		alt.UID = [page.UIDLen]byte{0x99}
+		alt.UID = [config.UIDLen]byte{0x99}
 		alt.Type.Chip = altChip
 		inv := inventory.Inventory{sampleInstance(), alt}
 

@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"cli/pkg/config"
 	"cli/pkg/inventory"
-	"cli/pkg/page"
 )
 
 // newNewCmd builds the "new" subcommand: read an attached, not-yet-known
@@ -54,7 +54,7 @@ func runNew(ctx context.Context, inv inventory.Inventory, probe Probe, w io.Writ
 
 	// Each device needs a unique secret key (§5); generate it here so it is never
 	// hand-invented. The operator commits the printed stub, key and all.
-	var key [page.KeyLen]byte
+	var key [config.KeyLen]byte
 	if _, err := rand.Read(key[:]); err != nil {
 		return fmt.Errorf("generating key: %w", err)
 	}
@@ -65,7 +65,7 @@ func runNew(ctx context.Context, inv inventory.Inventory, probe Probe, w io.Writ
 
 // instanceStub renders a paste-ready inventory.Instance literal with the given
 // UID and freshly generated key filled in and the rest left as TODO placeholders.
-func instanceStub(uid [page.UIDLen]byte, key [page.KeyLen]byte) string {
+func instanceStub(uid [config.UIDLen]byte, key [config.KeyLen]byte) string {
 	return fmt.Sprintf(`{
 	Name:    "TODO",
 	UID:     %s,

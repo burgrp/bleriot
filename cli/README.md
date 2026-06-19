@@ -161,7 +161,7 @@ dual-target Go module:
 ### Provisioning page
 
 The host and firmware agree on one flash page per device, encoded by the shared
-[`page`](pkg/page) package (`encoding/binary`, fixed-width, CRC-checked):
+[`config`](pkg/config) package (`encoding/binary`, fixed-width, CRC-checked):
 
 ```
 header  magic | layout | configLen | channel | spreadFactor | address | key
@@ -169,7 +169,7 @@ config  the device type's fixed-size Config struct
 crc32   CRC-32 (IEEE) over everything before it
 ```
 
-The firmware reads it once at boot; `page.IsUnprovisioned` distinguishes an
+The firmware reads it once at boot; `config.IsUnprovisioned` distinguishes an
 erased page from a corrupt one.
 
 ---
@@ -180,7 +180,7 @@ erased page from a corrupt one.
 |------|----------------|
 | [`pkg/host`](pkg/host) | The `bleriot` command tree (cobra): `host.Start(Inventory)` plus the `hub`, `provision` and `new` subcommands, and the `Probe` interface (SWD read-UID / write-page) with its `pyocd` implementation. |
 | [`pkg/inventory`](pkg/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. |
-| [`pkg/page`](pkg/page) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
+| [`pkg/config`](pkg/config) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
 | [`pkg/engine`](pkg/engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
 | [`pkg/radio`](pkg/radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |
 | [`pkg/radio/mcpdongle`](pkg/radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |

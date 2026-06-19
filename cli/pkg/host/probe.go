@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 
-	"cli/pkg/page"
+	"cli/pkg/config"
 )
 
 // Probe is the SWD debug-probe surface the provisioning commands need: read a
@@ -16,7 +16,7 @@ import (
 // It is a small interface so the commands can be tested without hardware.
 type Probe interface {
 	// ReadUID reads the 12-byte MCU unique ID of the attached device.
-	ReadUID(ctx context.Context) ([page.UIDLen]byte, error)
+	ReadUID(ctx context.Context) ([config.UIDLen]byte, error)
 	// WritePage writes image to the device's provisioning flash page.
 	WritePage(ctx context.Context, image []byte) error
 }
@@ -45,8 +45,8 @@ func (p *PyOCDProbe) log() *slog.Logger {
 
 // ReadUID reads the unique ID by having pyocd dump UIDLen bytes from UIDAddr
 // into a temporary file, then reading that file back.
-func (p *PyOCDProbe) ReadUID(ctx context.Context) ([page.UIDLen]byte, error) {
-	var uid [page.UIDLen]byte
+func (p *PyOCDProbe) ReadUID(ctx context.Context) ([config.UIDLen]byte, error) {
+	var uid [config.UIDLen]byte
 
 	tmp, err := os.CreateTemp("", "bleriot-uid-*.bin")
 	if err != nil {
@@ -56,7 +56,7 @@ func (p *PyOCDProbe) ReadUID(ctx context.Context) ([page.UIDLen]byte, error) {
 	tmp.Close()
 	defer os.Remove(tmpName)
 
-	cmd := fmt.Sprintf("savemem 0x%08X %d %q", p.UIDAddr, page.UIDLen, tmpName)
+	cmd := fmt.Sprintf("savemem 0x%08X %d %q", p.UIDAddr, config.UIDLen, tmpName)
 	if err := p.runCommander(ctx, cmd); err != nil {
 		return uid, fmt.Errorf("reading UID: %w", err)
 	}
@@ -65,8 +65,8 @@ func (p *PyOCDProbe) ReadUID(ctx context.Context) ([page.UIDLen]byte, error) {
 	if err != nil {
 		return uid, err
 	}
-	if len(data) < page.UIDLen {
-		return uid, fmt.Errorf("reading UID: got %d bytes, want %d", len(data), page.UIDLen)
+	if len(data) < config.UIDLen {
+		return uid, fmt.Errorf("reading UID: got %d bytes, want %d", len(data), config.UIDLen)
 	}
 	copy(uid[:], data)
 	return uid, nil

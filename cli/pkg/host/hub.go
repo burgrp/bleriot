@@ -16,11 +16,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"cli/pkg/bridge"
+	"cli/pkg/config"
 	"cli/pkg/engine"
 	"cli/pkg/inventory"
 	"cli/pkg/mcp2210"
 	"cli/pkg/node"
-	"cli/pkg/page"
 	"cli/pkg/radio"
 	"cli/pkg/radio/mcpdongle"
 
@@ -150,7 +150,7 @@ type dongleSpec struct {
 // dongleOpener opens one dongle of a particular type and returns it as a
 // radio.Dongle. New dongle types (e.g. a smart MCU-based dongle) are added by
 // registering another opener in dongleOpeners.
-type dongleOpener func(selector string, channel uint8, spreadFactor page.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
+type dongleOpener func(selector string, channel uint8, spreadFactor config.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
 
 // dongleOpeners maps a scheme to its opener. To support a new dongle type, add
 // an entry here; the flag parsing and startup wiring need no other changes.
@@ -160,7 +160,7 @@ var dongleOpeners = map[string]dongleOpener{
 
 // openMCP2210 opens an MCP2210 USB-to-SPI bridge by selector and brings up its
 // PAN211x radio on the given channel and spreading factor.
-func openMCP2210(selector string, channel uint8, spreadFactor page.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error) {
+func openMCP2210(selector string, channel uint8, spreadFactor config.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error) {
 	dev, err := mcp2210.Open(selector)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func openMCP2210(selector string, channel uint8, spreadFactor page.SpreadFactor,
 // opener for its scheme, brings up the radio on the requested channel and the
 // channel's spreading factor (from the inventory), and registers it with the
 // engine. At least one dongle is required.
-func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]page.SpreadFactor, logger *slog.Logger) error {
+func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]config.SpreadFactor, logger *slog.Logger) error {
 	specs, err := parseDongles(flags)
 	if err != nil {
 		return err

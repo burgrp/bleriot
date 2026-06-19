@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"cli/pkg/config"
 	"cli/pkg/inventory"
 	"cli/pkg/node"
-	"cli/pkg/page"
 )
 
 // newProvisionCmd builds the "provision" subcommand: read the attached device's
@@ -61,7 +61,7 @@ func runProvision(ctx context.Context, inv inventory.Inventory, chip inventory.C
 	}
 
 	addr := node.AddressFromUID(inst.UID)
-	image, err := page.Marshal(addr, inst.Key, inst.Channel.Number, inst.Channel.SpreadFactor, inst.Config)
+	image, err := config.Marshal(addr, inst.Key, inst.Channel.Number, inst.Channel.SpreadFactor, inst.Config)
 	if err != nil {
 		return fmt.Errorf("instance %q: building page: %w", inst.Name, err)
 	}
@@ -74,7 +74,7 @@ func runProvision(ctx context.Context, inv inventory.Inventory, chip inventory.C
 }
 
 // findByUID returns the instance whose UID matches uid.
-func findByUID(inv inventory.Inventory, uid [page.UIDLen]byte) (inventory.Instance, bool) {
+func findByUID(inv inventory.Inventory, uid [config.UIDLen]byte) (inventory.Instance, bool) {
 	for _, inst := range inv {
 		if inst.UID == uid {
 			return inst, true

@@ -3,7 +3,7 @@ package inventory
 import (
 	"testing"
 
-	"cli/pkg/page"
+	"cli/pkg/config"
 )
 
 func thermostatType() DeviceType {
@@ -88,8 +88,8 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("mixed spread factor on one channel", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS8}, Type: thermostatType()},
-			{Name: "living", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
+			{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: thermostatType()},
+			{Name: "living", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for mixed spread factor on one channel")
@@ -99,16 +99,16 @@ func TestInventoryValidate_Errors(t *testing.T) {
 
 func TestSpreadFactorByChannel(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
-		{Name: "hallway", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
-		{Name: "lab", Channel: Channel{Number: 11, SpreadFactor: page.SpreadFactorS8}, Type: thermostatType()},
+		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
+		{Name: "hallway", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
+		{Name: "lab", Channel: Channel{Number: 11, SpreadFactor: config.SpreadFactorS8}, Type: thermostatType()},
 		{Name: "shed", Channel: Channel{Number: 5}, Type: thermostatType()}, // omitted SF: defaults to S8
 	}
 	byChannel, err := inv.SpreadFactorByChannel()
 	if err != nil {
 		t.Fatalf("SpreadFactorByChannel: %v", err)
 	}
-	want := map[uint8]page.SpreadFactor{37: page.SpreadFactorS2, 11: page.SpreadFactorS8, 5: page.SpreadFactorS8}
+	want := map[uint8]config.SpreadFactor{37: config.SpreadFactorS2, 11: config.SpreadFactorS8, 5: config.SpreadFactorS8}
 	if len(byChannel) != len(want) {
 		t.Fatalf("got %d channels, want %d: %v", len(byChannel), len(want), byChannel)
 	}
@@ -121,8 +121,8 @@ func TestSpreadFactorByChannel(t *testing.T) {
 
 func TestSpreadFactorByChannel_Conflict(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS8}, Type: thermostatType()},
-		{Name: "living", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
+		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: thermostatType()},
+		{Name: "living", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
 	}
 	if _, err := inv.SpreadFactorByChannel(); err == nil {
 		t.Fatal("expected conflict error for mixed spread factor on one channel")

@@ -1,4 +1,4 @@
-// Package page defines the BleRiot provisioning page: a fixed flash region
+// Package config defines the BleRiot provisioning page: a fixed flash region
 // written to a device once at provisioning time and read once at boot by the
 // firmware. It carries the device identity (RF address, XTEA key, channel) and
 // the device-type-specific Config.
@@ -16,7 +16,7 @@
 // Config must be a fixed-size value: only fixed-width integers, floats, bools,
 // and arrays/structs of those. Slices, strings, maps and pointers are rejected,
 // because the firmware decodes the page without a heap allocator.
-package page
+package config
 
 import (
 	"bytes"
@@ -84,7 +84,7 @@ type Header struct {
 }
 
 // errUnprovisioned reports that a page was never written (magic mismatch).
-var errUnprovisioned = errors.New("page: unprovisioned (magic mismatch)")
+var errUnprovisioned = errors.New("config: unprovisioned (magic mismatch)")
 
 // IsUnprovisioned reports whether err indicates an unwritten/erased page, as
 // opposed to a corrupt or incompatible one. Firmware uses this to distinguish
@@ -94,15 +94,15 @@ func IsUnprovisioned(err error) bool { return errors.Is(err, errUnprovisioned) }
 // Marshal encodes the identity and config into a page image:
 // header || config || crc32. config may be nil (no config bytes); otherwise it
 // must be a fixed-size value (see the package doc).
-func Marshal(addr [AddrLen]byte, key [KeyLen]byte, channel uint8, spreadFactor SpreadFactor, config any) ([]byte, error) {
+func Marshal(addr [AddrLen]byte, key [KeyLen]byte, channel uint8, spreadFactor SpreadFactor, cfgVal any) ([]byte, error) {
 	var cfg bytes.Buffer
-	if config != nil {
-		if err := binary.Write(&cfg, byteOrder, config); err != nil {
-			return nil, fmt.Errorf("page: encode config (must be a fixed-size struct): %w", err)
+	if cfgVal != nil {
+		if err := binary.Write(&cfg, byteOrder, cfgVal); err != nil {
+			return nil, fmt.Errorf("config: encode config (must be a fixed-size struct): %w", err)
 		}
 	}
 	if cfg.Len() > int(^uint16(0)) {
-		return nil, fmt.Errorf("page: config too large (%d bytes)", cfg.Len())
+		return nil, fmt.Errorf("config: config too large (%d bytes)", cfg.Len())
 	}
 
 	h := Header{
@@ -117,48 +117,48 @@ func Marshal(addr [AddrLen]byte, key [KeyLen]byte, channel uint8, spreadFactor S
 
 	var out bytes.Buffer
 	if err := binary.Write(&out, byteOrder, &h); err != nil {
-		return nil, fmt.Errorf("page: encode header: %w", err)
+		return nil, fmt.Errorf("config: encode header: %w", err)
 	}
 	out.Write(cfg.Bytes())
 	if err := binary.Write(&out, byteOrder, crc32.ChecksumIEEE(out.Bytes())); err != nil {
-		return nil, fmt.Errorf("page: encode crc: %w", err)
+		return nil, fmt.Errorf("config: encode crc: %w", err)
 	}
 	return out.Bytes(), nil
 }
 
 // Unmarshal validates a page image (magic, layout, length, CRC) and decodes the
-// config into config, which must be a pointer to a fixed-size value matching the
+// config into cfg, which must be a pointer to a fixed-size value matching the
 // one passed to Marshal (or nil to skip config decoding). It returns the
 // identity Header.
 //
 // If the page was never written, the returned error satisfies IsUnprovisioned.
-func Unmarshal(data []byte, config any) (Header, error) {
+func Unmarshal(data []byte, cfg any) (Header, error) {
 	var h Header
 	if len(data) < headerLen+crcLen {
-		return h, errors.New("page: too short")
+		return h, errors.New("config: too short")
 	}
 	if err := binary.Read(bytes.NewReader(data[:headerLen]), byteOrder, &h); err != nil {
-		return h, fmt.Errorf("page: decode header: %w", err)
+		return h, fmt.Errorf("config: decode header: %w", err)
 	}
 	if h.Magic != Magic {
 		return h, errUnprovisioned
 	}
 	if h.Layout != LayoutVersion {
-		return h, fmt.Errorf("page: layout v%d, firmware expects v%d", h.Layout, LayoutVersion)
+		return h, fmt.Errorf("config: layout v%d, firmware expects v%d", h.Layout, LayoutVersion)
 	}
 
 	end := headerLen + int(h.ConfigLen)
 	if len(data) < end+crcLen {
-		return h, errors.New("page: truncated (config length exceeds image)")
+		return h, errors.New("config: truncated (config length exceeds image)")
 	}
 	got := byteOrder.Uint32(data[end : end+crcLen])
 	if want := crc32.ChecksumIEEE(data[:end]); got != want {
-		return h, fmt.Errorf("page: CRC mismatch (got 0x%08X, want 0x%08X)", got, want)
+		return h, fmt.Errorf("config: CRC mismatch (got 0x%08X, want 0x%08X)", got, want)
 	}
 
-	if config != nil && h.ConfigLen > 0 {
-		if err := binary.Read(bytes.NewReader(data[headerLen:end]), byteOrder, config); err != nil {
-			return h, fmt.Errorf("page: decode config: %w", err)
+	if cfg != nil && h.ConfigLen > 0 {
+		if err := binary.Read(bytes.NewReader(data[headerLen:end]), byteOrder, cfg); err != nil {
+			return h, fmt.Errorf("config: decode config: %w", err)
 		}
 	}
 	return h, nil
@@ -167,9 +167,9 @@ func Unmarshal(data []byte, config any) (Header, error) {
 // Sentinel errors returned by Decode. They carry no formatting so the firmware
 // decode path pulls in neither fmt nor reflection.
 var (
-	errTooShort = errors.New("page: too short")
-	errLayout   = errors.New("page: unsupported layout")
-	errCRC      = errors.New("page: CRC mismatch")
+	errTooShort = errors.New("config: too short")
+	errLayout   = errors.New("config: unsupported layout")
+	errCRC      = errors.New("config: CRC mismatch")
 )
 
 // Decode validates a page image and returns its identity header and the raw

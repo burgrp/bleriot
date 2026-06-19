@@ -8,9 +8,9 @@
 package main
 
 import (
+	"cli/pkg/config"
 	"cli/pkg/host"
 	"cli/pkg/inventory"
-	"cli/pkg/page"
 
 	"thermostat"
 )
@@ -21,8 +21,8 @@ import (
 // for nodes close to the hub, uses the faster, shorter-range S2 factor. The
 // dongle serving each channel is driven at that channel's factor.
 var (
-	Far  = inventory.Channel{Number: 37, SpreadFactor: page.SpreadFactorS8}
-	Near = inventory.Channel{Number: 38, SpreadFactor: page.SpreadFactorS2}
+	Far  = inventory.Channel{Number: 37, SpreadFactor: config.SpreadFactorS8}
+	Near = inventory.Channel{Number: 38, SpreadFactor: config.SpreadFactorS2}
 )
 
 func main() {

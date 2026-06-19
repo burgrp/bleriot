@@ -8,20 +8,20 @@ import (
 	"strings"
 	"testing"
 
+	"cli/pkg/config"
 	"cli/pkg/inventory"
 	"cli/pkg/node"
-	"cli/pkg/page"
 )
 
 // fakeProbe is an in-memory Probe for tests.
 type fakeProbe struct {
-	uid      [page.UIDLen]byte
+	uid      [config.UIDLen]byte
 	readErr  error
 	written  []byte
 	writeErr error
 }
 
-func (f *fakeProbe) ReadUID(context.Context) ([page.UIDLen]byte, error) {
+func (f *fakeProbe) ReadUID(context.Context) ([config.UIDLen]byte, error) {
 	return f.uid, f.readErr
 }
 
@@ -52,9 +52,9 @@ func sampleType() inventory.DeviceType {
 func sampleInstance() inventory.Instance {
 	return inventory.Instance{
 		Name:    "kitchen",
-		UID:     [page.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
-		Key:     [page.KeyLen]byte{0xAA, 0xBB, 0xCC, 0xDD},
-		Channel: inventory.Channel{Number: 37, SpreadFactor: page.SpreadFactorS2},
+		UID:     [config.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		Key:     [config.KeyLen]byte{0xAA, 0xBB, 0xCC, 0xDD},
+		Channel: inventory.Channel{Number: 37, SpreadFactor: config.SpreadFactorS2},
 		Type:    sampleType(),
 		Config:  thermostatConfig{MinTemp: 1800, MaxTemp: 2400},
 	}
@@ -101,7 +101,7 @@ func TestRunProvisionWritesPage(t *testing.T) {
 	}
 
 	var got thermostatConfig
-	h, err := page.Unmarshal(fp.written, &got)
+	h, err := config.Unmarshal(fp.written, &got)
 	if err != nil {
 		t.Fatalf("Unmarshal written page: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestRunProvisionWritesPage(t *testing.T) {
 
 func TestRunProvisionUnknownUID(t *testing.T) {
 	inv := inventory.Inventory{sampleInstance()}
-	fp := &fakeProbe{uid: [page.UIDLen]byte{0xFF}} // not in inventory
+	fp := &fakeProbe{uid: [config.UIDLen]byte{0xFF}} // not in inventory
 
 	err := runProvision(context.Background(), inv, inventory.PY32F030, fp, discardLogger())
 	if err == nil {
@@ -137,7 +137,7 @@ func TestRunProvisionUnknownUID(t *testing.T) {
 
 func TestRunNewPrintsStub(t *testing.T) {
 	inv := inventory.Inventory{sampleInstance()}
-	uid := [page.UIDLen]byte{0x10, 0x20, 0x30}
+	uid := [config.UIDLen]byte{0x10, 0x20, 0x30}
 	fp := &fakeProbe{uid: uid}
 
 	var buf bytes.Buffer
