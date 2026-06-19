@@ -19,37 +19,51 @@ import (
 //
 // Report ms/op as well as ns/op since these are millisecond-scale operations.
 
-func BenchmarkGet(b *testing.B) {
-	h := setup(b)
-	h.seed(tagTemp, 2137)
-	ctx := context.Background()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		u, err := h.eng.Get(ctx, nodeAddr, tagTemp)
-		if err != nil {
-			b.Fatalf("Get: %v", err)
-		}
-		if u.Null {
-			b.Fatalf("Get returned null")
-		}
+// forEachSpreadBench runs fn once per spreading factor in spreadConfigs, each as
+// a named sub-benchmark ("S8", "S2") with a freshly set-up harness on that
+// factor's channel, so latency is reported for both BLE Coded PHY factors.
+func forEachSpreadBench(b *testing.B, fn func(b *testing.B, h *harness)) {
+	b.Helper()
+	for _, sc := range spreadConfigs {
+		b.Run(sc.name, func(b *testing.B) {
+			fn(b, setup(b, sc))
+		})
 	}
-	b.StopTimer()
-	reportLatency(b)
+}
+
+func BenchmarkGet(b *testing.B) {
+	forEachSpreadBench(b, func(b *testing.B, h *harness) {
+		h.seed(tagTemp, 2137)
+		ctx := context.Background()
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			u, err := h.eng.Get(ctx, nodeAddr, tagTemp)
+			if err != nil {
+				b.Fatalf("Get: %v", err)
+			}
+			if u.Null {
+				b.Fatalf("Get returned null")
+			}
+		}
+		b.StopTimer()
+		reportLatency(b)
+	})
 }
 
 func BenchmarkSet(b *testing.B) {
-	h := setup(b)
-	ctx := context.Background()
+	forEachSpreadBench(b, func(b *testing.B, h *harness) {
+		ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := h.eng.Set(ctx, nodeAddr, tagSetting, int32(i)); err != nil {
-			b.Fatalf("Set: %v", err)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if err := h.eng.Set(ctx, nodeAddr, tagSetting, int32(i)); err != nil {
+				b.Fatalf("Set: %v", err)
+			}
 		}
-	}
-	b.StopTimer()
-	reportLatency(b)
+		b.StopTimer()
+		reportLatency(b)
+	})
 }
 
 // reportLatency adds a human-friendly ms/op metric alongside the default ns/op.

@@ -111,9 +111,10 @@ go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
 
 The `--dongle` value is `scheme:selector,channel`: the scheme selects the dongle
 type (`mcp2210`), the selector is a `/dev/hidraw*` path or a USB serial, and the
-channel is the RF channel. `/dev/hidraw*` is root-only, so run the hub as root or
-via `sudo`. See [site/README.md](site/README.md) for the inventory model, commands
-and flags.
+channel is the RF channel. The dongle's `/dev/hidraw*` node is owned by the
+`plugdev` group via the shipped udev rule, so no `sudo` is needed (see
+[USB access](site/README.md#usb-access)). See [site/README.md](site/README.md)
+for the inventory model, commands and flags.
 
 ### Provisioning a device
 

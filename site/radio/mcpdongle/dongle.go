@@ -109,9 +109,27 @@ func (d *Dongle) Receive(buf []byte) (int, bool) {
 // request and the node honours it before replying.
 func (d *Dongle) ReplyGuard() time.Duration { return d.guard }
 
-// replyGuard returns the reply turnaround guard for a spreading factor. The value
-// is dominated by USB-HID latency, which is largely independent of the spreading
-// factor, but is kept per-factor so each can be tuned to its measured turnaround.
+// replyGuard returns the reply turnaround guard for a spreading factor.
+//
+// Timing budget (MCP2210, "dumb" host-resident dongle):
+//   - After an on-air transmit the driver's enterRX() issues three PAN211x
+//     register writes (STATE_CFG=STB3, RFIRQFLG=IRQ_ALL, STATE_CFG=RX). On the
+//     MCP2210 each register access is at least one USB-HID round trip, frame-
+//     bounded at USB full speed, so the transmit→receive switch costs roughly
+//     6–11 ms in practice.
+//   - 20 ms is an empirical safety value: about 2× the worst observed turnaround,
+//     and well under the engine's per-attempt timeout (DefaultTimeout 50 ms, and
+//     500 ms in the dongle functional tests).
+//   - Once the PAN211x reaches STATE_RX it captures the reply autonomously into
+//     its 128-byte FIFO, so only *reaching* RX before the reply starts matters;
+//     host poll latency afterwards does not.
+//
+// The guard is essentially independent of the spreading factor. On-air time does
+// differ by factor (~1.4 ms S8 vs ~0.64 ms S2 for a 13-byte packet) but it
+// cancels out: the request's on-air time anchors both endpoints to the same
+// end-of-transmission instant, and all that remains is the SF-independent enterRX
+// USB cost. The value is kept per-factor only as a tuning hook for a future smart
+// (MCU-local) dongle, whose microsecond turnaround would let on-air time dominate.
 func replyGuard(sf pan211x.SpreadFactor) time.Duration {
 	switch sf {
 	case pan211x.SpreadFactorS2:

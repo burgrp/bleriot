@@ -11,20 +11,18 @@ DONGLE_NODE ?= mcp2210:0001744916
 
 # functest runs the hardware-in-the-loop functional tests: the real hub engine
 # and node runtime exchanging packets over the air across two MCP2210 dongles.
-# The tests are gated behind the "dongles" build tag. /dev/hidraw* are root-only,
-# so we compile the test binary as the current user (to use the Go toolchain and
-# module cache) and run it under sudo.
+# The tests are gated behind the "dongles" build tag. The dongles' /dev/hidraw*
+# nodes are owned by the plugdev group (see usb/99-bleriot-mcp2210.rules), so the
+# tests run directly as the current user — no sudo needed.
 functest:
-	cd site && go test -c -tags dongles -o /tmp/bleriot-functest.bin ./functest/
-	sudo BLERIOT_DONGLE_HUB=$(DONGLE_HUB) BLERIOT_DONGLE_NODE=$(DONGLE_NODE) \
-		/tmp/bleriot-functest.bin -test.v -test.timeout 120s
+	cd site && BLERIOT_DONGLE_HUB=$(DONGLE_HUB) BLERIOT_DONGLE_NODE=$(DONGLE_NODE) \
+		go test -tags dongles -v -timeout 120s ./functest/
 
 # bench measures end-to-end transaction latency (GET/SET round trips) over the
-# real RF link between the two dongles. Same gating and sudo handling as functest.
+# real RF link between the two dongles. Same gating as functest, also no sudo.
 bench:
-	cd site && go test -c -tags dongles -o /tmp/bleriot-functest.bin ./functest/
-	sudo BLERIOT_DONGLE_HUB=$(DONGLE_HUB) BLERIOT_DONGLE_NODE=$(DONGLE_NODE) \
-		/tmp/bleriot-functest.bin -test.bench . -test.benchmem -test.run '^$$' -test.benchtime 50x
+	cd site && BLERIOT_DONGLE_HUB=$(DONGLE_HUB) BLERIOT_DONGLE_NODE=$(DONGLE_NODE) \
+		go test -tags dongles -bench . -benchmem -run '^$$' -benchtime 50x ./functest/
 
 # test runs the regular (non-hardware) unit tests for the host runtime.
 test:

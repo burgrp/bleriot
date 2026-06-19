@@ -4,8 +4,14 @@
 // BleRiot protocol stack. They run the real hub engine on one USB dongle and the
 // real node runtime (protocol/node) on a second USB dongle, exchanging packets
 // over the air with no microcontroller and no mocks — exercising the XTEA codec,
-// packet framing, GET/SET/WATCH transactions, retries, push subscriptions, and
-// liveness detection end to end.
+// packet framing, GET/SET/WATCH transactions, retries, push subscriptions, the
+// reply turnaround guard (PROTOCOL.md §6), and liveness detection end to end.
+//
+// Every test runs twice, once per BLE Coded PHY spreading factor: S8 (long
+// range, ~125 kbps) on channel 37 and S2 (shorter range, ~500 kbps) on channel
+// 38, mirroring the example inventory's Far/Near channels. The spreading factor
+// is never selected by an environment variable — both are always covered, as
+// subtests named "S8" and "S2".
 //
 // These tests are gated behind the "dongles" build tag and require two MCP2210
 // dongles. Run them with:
@@ -13,19 +19,18 @@
 //	BLERIOT_DONGLE_HUB=mcp2210:/dev/hidraw3 BLERIOT_DONGLE_NODE=mcp2210:/dev/hidraw4 \
 //	    go test -tags dongles -v ./functest/...
 //
-// Each dongle env var is "scheme:selector"; the scheme is required (only
+// Each dongle env var is "scheme:selector": the scheme is required (only
 // "mcp2210" is supported here, mirroring the hub --dongle flag, which has no
 // default) and the selector is a /dev/hidraw* path or a USB serial string (see
-// mcp2210.Open). BLERIOT_CHANNEL (default 37) sets the shared BLE channel, and
-// BLERIOT_SPREAD (default "s8"; "s2" for the faster/shorter-range factor) sets
-// the shared spreading factor. When the dongle env vars are unset the tests
-// skip, so a normal `go test ./...` and CI are unaffected.
+// mcp2210.Open). The two env vars only say *which* physical dongles to use; the
+// channel and spreading factor are fixed by the test matrix (see spreadConfigs).
+// When the dongle env vars are unset the tests skip, so a normal `go test ./...`
+// and CI are unaffected.
 package functest
 
 import (
 	"context"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -61,9 +66,32 @@ const (
 	tagUnknown uint16 = 99
 )
 
+// spreadConfig pairs a spreading factor with the channel it is tested on. Every
+// test runs against each entry so both BLE Coded PHY factors are exercised over
+// real RF, named as subtests "S8" and "S2".
+type spreadConfig struct {
+	name    string
+	channel uint8
+	spread  pan211x.SpreadFactor
+}
+
+// spreadConfigs is the full test matrix: S8 (long range) on channel 37 and S2
+// (faster, shorter range) on channel 38, matching the example inventory's Far
+// and Near channels. There is deliberately no environment-variable override —
+// both factors are always covered.
+var spreadConfigs = []spreadConfig{
+	{name: "S8", channel: 37, spread: pan211x.SpreadFactorS8},
+	{name: "S2", channel: 38, spread: pan211x.SpreadFactorS2},
+}
+
 // Engine tuning for the relatively slow USB-HID round trips: each protocol
-// transaction is many SPI ops on both dongles, so timeouts are generous and the
-// refresh interval is short enough to detect a silent node within a few seconds.
+// transaction is many SPI register accesses on both dongles, and on the MCP2210
+// "dumb" dongle every register access is a full USB-HID round trip (~1 ms at USB
+// full speed). The per-attempt timeout is therefore generous, and it comfortably
+// clears the dongle's reply turnaround guard (mcpdongle.replyGuard, ~20 ms) plus
+// the engine's minReplyHeadroom, so a deferred reply always lands inside the
+// window. The refresh interval is short enough to detect a silent node within a
+// few seconds (refreshInterval × livenessMisses).
 const (
 	opTimeout       = 500 * time.Millisecond
 	opRetries       = 3
@@ -168,7 +196,7 @@ type harness struct {
 	wg      sync.WaitGroup
 }
 
-func setup(tb testing.TB) *harness {
+func setup(tb testing.TB, sc spreadConfig) *harness {
 	tb.Helper()
 	hubEnv := os.Getenv("BLERIOT_DONGLE_HUB")
 	nodeEnv := os.Getenv("BLERIOT_DONGLE_NODE")
@@ -177,26 +205,8 @@ func setup(tb testing.TB) *harness {
 	}
 	hubSel := mcpSelector(tb, "BLERIOT_DONGLE_HUB", hubEnv)
 	nodeSel := mcpSelector(tb, "BLERIOT_DONGLE_NODE", nodeEnv)
-	channel := uint8(37)
-	if s := os.Getenv("BLERIOT_CHANNEL"); s != "" {
-		v, err := strconv.ParseUint(s, 10, 8)
-		if err != nil {
-			tb.Fatalf("BLERIOT_CHANNEL: %v", err)
-		}
-		channel = uint8(v)
-	}
-
-	// Both dongles must share one spreading factor (they talk to each other).
-	// BLERIOT_SPREAD selects it: "s8" (default, highest range) or "s2".
-	spread := pan211x.SpreadFactorS8
-	switch strings.ToLower(os.Getenv("BLERIOT_SPREAD")) {
-	case "", "s8":
-		spread = pan211x.SpreadFactorS8
-	case "s2":
-		spread = pan211x.SpreadFactorS2
-	default:
-		tb.Fatalf("BLERIOT_SPREAD: want s8 or s2, got %q", os.Getenv("BLERIOT_SPREAD"))
-	}
+	channel := sc.channel
+	spread := sc.spread
 
 	hubDev, err := mcp2210.Open(hubSel)
 	if err != nil {
@@ -321,122 +331,139 @@ func opCtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), waitTimeout)
 }
 
-func TestGet(t *testing.T) {
-	h := setup(t)
-	h.seed(tagTemp, 2137)
+// forEachSpread runs fn once per spreading factor in spreadConfigs, each as a
+// named subtest ("S8", "S2") with a freshly set-up harness on that factor's
+// channel. This is how every functional test covers both BLE Coded PHY factors
+// without any environment-variable selection.
+func forEachSpread(t *testing.T, fn func(t *testing.T, h *harness)) {
+	t.Helper()
+	for _, sc := range spreadConfigs {
+		t.Run(sc.name, func(t *testing.T) {
+			fn(t, setup(t, sc))
+		})
+	}
+}
 
-	ctx, cancel := opCtx()
-	defer cancel()
-	u, err := h.eng.Get(ctx, nodeAddr, tagTemp)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if u.Null || u.Value != 2137 {
-		t.Fatalf("Get = %+v, want value 2137", u)
-	}
+func TestGet(t *testing.T) {
+	forEachSpread(t, func(t *testing.T, h *harness) {
+		h.seed(tagTemp, 2137)
+
+		ctx, cancel := opCtx()
+		defer cancel()
+		u, err := h.eng.Get(ctx, nodeAddr, tagTemp)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if u.Null || u.Value != 2137 {
+			t.Fatalf("Get = %+v, want value 2137", u)
+		}
+	})
 }
 
 func TestGetUnknownIsNull(t *testing.T) {
-	h := setup(t)
-
-	ctx, cancel := opCtx()
-	defer cancel()
-	u, err := h.eng.Get(ctx, nodeAddr, tagUnknown)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !u.Null {
-		t.Fatalf("Get unknown tag = %+v, want null", u)
-	}
+	forEachSpread(t, func(t *testing.T, h *harness) {
+		ctx, cancel := opCtx()
+		defer cancel()
+		u, err := h.eng.Get(ctx, nodeAddr, tagUnknown)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if !u.Null {
+			t.Fatalf("Get unknown tag = %+v, want null", u)
+		}
+	})
 }
 
 func TestSetThenGet(t *testing.T) {
-	h := setup(t)
-
-	ctx, cancel := opCtx()
-	defer cancel()
-	if err := h.eng.Set(ctx, nodeAddr, tagSetting, 555); err != nil {
-		t.Fatalf("Set: %v", err)
-	}
-	u, err := h.eng.Get(ctx, nodeAddr, tagSetting)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if u.Null || u.Value != 555 {
-		t.Fatalf("Get after Set = %+v, want value 555", u)
-	}
+	forEachSpread(t, func(t *testing.T, h *harness) {
+		ctx, cancel := opCtx()
+		defer cancel()
+		if err := h.eng.Set(ctx, nodeAddr, tagSetting, 555); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+		u, err := h.eng.Get(ctx, nodeAddr, tagSetting)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if u.Null || u.Value != 555 {
+			t.Fatalf("Get after Set = %+v, want value 555", u)
+		}
+	})
 }
 
 func TestSetNullClears(t *testing.T) {
-	h := setup(t)
-	h.seed(tagSetting, 12)
+	forEachSpread(t, func(t *testing.T, h *harness) {
+		h.seed(tagSetting, 12)
 
-	ctx, cancel := opCtx()
-	defer cancel()
-	if err := h.eng.SetNull(ctx, nodeAddr, tagSetting); err != nil {
-		t.Fatalf("SetNull: %v", err)
-	}
-	u, err := h.eng.Get(ctx, nodeAddr, tagSetting)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !u.Null {
-		t.Fatalf("Get after SetNull = %+v, want null", u)
-	}
+		ctx, cancel := opCtx()
+		defer cancel()
+		if err := h.eng.SetNull(ctx, nodeAddr, tagSetting); err != nil {
+			t.Fatalf("SetNull: %v", err)
+		}
+		u, err := h.eng.Get(ctx, nodeAddr, tagSetting)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if !u.Null {
+			t.Fatalf("Get after SetNull = %+v, want null", u)
+		}
+	})
 }
 
 func TestWatchReceivesInitialAndPush(t *testing.T) {
-	h := setup(t)
-	h.seed(tagPush, 100)
+	forEachSpread(t, func(t *testing.T, h *harness) {
+		h.seed(tagPush, 100)
 
-	updates := make(chan engine.Update, 8)
-	ctx, cancel := opCtx()
-	defer cancel()
-	if err := h.eng.Watch(ctx, nodeAddr, tagPush, func(u engine.Update) {
-		updates <- u
-	}); err != nil {
-		t.Fatalf("Watch: %v", err)
-	}
+		updates := make(chan engine.Update, 8)
+		ctx, cancel := opCtx()
+		defer cancel()
+		if err := h.eng.Watch(ctx, nodeAddr, tagPush, func(u engine.Update) {
+			updates <- u
+		}); err != nil {
+			t.Fatalf("Watch: %v", err)
+		}
 
-	// Initial IS reply carries the current value.
-	if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 100 }); u.Value != 100 {
-		t.Fatalf("initial update = %+v, want 100", u)
-	}
+		// Initial IS reply carries the current value.
+		if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 100 }); u.Value != 100 {
+			t.Fatalf("initial update = %+v, want 100", u)
+		}
 
-	// An autonomous change is pushed to the watcher.
-	h.pushSensor(tagPush, 200)
-	if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 200 }); u.Value != 200 {
-		t.Fatalf("pushed update = %+v, want 200", u)
-	}
+		// An autonomous change is pushed to the watcher.
+		h.pushSensor(tagPush, 200)
+		if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 200 }); u.Value != 200 {
+			t.Fatalf("pushed update = %+v, want 200", u)
+		}
+	})
 }
 
 func TestLivenessNullOnSilentNode(t *testing.T) {
-	h := setup(t)
-	h.seed(tagPush, 7)
+	forEachSpread(t, func(t *testing.T, h *harness) {
+		h.seed(tagPush, 7)
 
-	updates := make(chan engine.Update, 8)
-	ctx, cancel := opCtx()
-	defer cancel()
-	if err := h.eng.Watch(ctx, nodeAddr, tagPush, func(u engine.Update) {
-		updates <- u
-	}); err != nil {
-		t.Fatalf("Watch: %v", err)
-	}
-	// Drain the initial live value.
-	waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null })
+		updates := make(chan engine.Update, 8)
+		ctx, cancel := opCtx()
+		defer cancel()
+		if err := h.eng.Watch(ctx, nodeAddr, tagPush, func(u engine.Update) {
+			updates <- u
+		}); err != nil {
+			t.Fatalf("Watch: %v", err)
+		}
+		// Drain the initial live value.
+		waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null })
 
-	// Take the node offline: refreshes now time out, and after livenessMisses
-	// the engine must report the register as NULL.
-	h.setPaused(true)
-	if u := waitUpdate(t, updates, func(u engine.Update) bool { return u.Null }); !u.Null {
-		t.Fatalf("offline update = %+v, want null", u)
-	}
+		// Take the node offline: refreshes now time out, and after livenessMisses
+		// the engine must report the register as NULL.
+		h.setPaused(true)
+		if u := waitUpdate(t, updates, func(u engine.Update) bool { return u.Null }); !u.Null {
+			t.Fatalf("offline update = %+v, want null", u)
+		}
 
-	// Bringing the node back must restore a live value to the watcher.
-	h.setPaused(false)
-	if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 7 }); u.Value != 7 {
-		t.Fatalf("recovered update = %+v, want 7", u)
-	}
+		// Bringing the node back must restore a live value to the watcher.
+		h.setPaused(false)
+		if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 7 }); u.Value != 7 {
+			t.Fatalf("recovered update = %+v, want 7", u)
+		}
+	})
 }
 
 // waitUpdate waits for an update matching pred or fails after waitTimeout.
