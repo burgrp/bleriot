@@ -8,9 +8,9 @@
 package main
 
 import (
-	"site/pkg/config"
-	"site/pkg/host"
-	"site/pkg/inventory"
+	"site/cli"
+	"site/config"
+	"site/inventory"
 
 	"thermostat"
 )
@@ -26,7 +26,7 @@ var (
 )
 
 func main() {
-	host.Start(inventory.Inventory{
+	cli.Start(inventory.Inventory{
 		{
 			Name:    "kitchen",
 			UID:     [12]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B},

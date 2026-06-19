@@ -1,4 +1,4 @@
-package host
+package cli
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"site/pkg/config"
-	"site/pkg/inventory"
-	"site/pkg/node"
+	"site/config"
+	"site/inventory"
+	"site/node"
 )
 
 // newProvisionCmd builds the "provision" subcommand: read the attached device's

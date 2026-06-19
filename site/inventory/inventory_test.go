@@ -3,7 +3,7 @@ package inventory
 import (
 	"testing"
 
-	"site/pkg/config"
+	"site/config"
 )
 
 func thermostatType() DeviceType {

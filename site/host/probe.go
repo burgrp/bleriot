@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 
-	"site/pkg/config"
+	"site/config"
 )
 
 // Probe is the SWD debug-probe surface the provisioning commands need: read a

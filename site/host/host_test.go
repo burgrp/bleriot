@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"site/pkg/config"
-	"site/pkg/inventory"
-	"site/pkg/node"
+	"site/config"
+	"site/inventory"
+	"site/node"
 )
 
 // fakeProbe is an in-memory Probe for tests.

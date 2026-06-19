@@ -55,7 +55,7 @@ The hub runs entirely on the Linux host:
   firmware**. The host runs the PAN211x register sequence for every packet over
   USB-HID; the dongle holds no secrets and no protocol state.
 
-The transport is abstracted (`site/pkg/radio`): the MCP2210 dongle is one
+The transport is abstracted (`site/radio`): the MCP2210 dongle is one
 implementation, and a future smart MCU-resident dongle would slot in unchanged.
 One dongle is one radio on one channel; the host fans out across several dongles,
 so multiplexing lives in the host, above the wire.
@@ -81,7 +81,7 @@ so multiplexing lives in the host, above the wire.
 1. **Inventory as code** (see [site](site/README.md)). A deployment is a Go
    program: it declares its devices — each binding a device type's register
    table, the MCU `UID`, XTEA key, channel and config — as an
-   `inventory.Inventory` and hands it to `host.Start`. Register identity on the
+   `inventory.Inventory` and hands it to `cli.Start`. Register identity on the
    wire is a permanent per-type `Tag`; there is no JSON and no code generation.
    See [protocol §11](protocol/README.md#11-register-model-and-provisioning).
 

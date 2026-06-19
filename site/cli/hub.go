@@ -1,4 +1,4 @@
-package host
+package cli
 
 import (
 	"context"
@@ -15,14 +15,14 @@ import (
 	clientfactory "github.com/burgrp/reg/pkg/client/factory"
 	"github.com/spf13/cobra"
 
-	"site/pkg/bridge"
-	"site/pkg/config"
-	"site/pkg/engine"
-	"site/pkg/inventory"
-	"site/pkg/mcp2210"
-	"site/pkg/node"
-	"site/pkg/radio"
-	"site/pkg/radio/mcpdongle"
+	"site/bridge"
+	"site/config"
+	"site/engine"
+	"site/inventory"
+	"site/mcp2210"
+	"site/node"
+	"site/radio"
+	"site/radio/mcpdongle"
 
 	"github.com/burgrp/tinygo-drivers/pan211x"
 )

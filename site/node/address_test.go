@@ -4,7 +4,7 @@ import (
 	"hash/crc32"
 	"testing"
 
-	"site/pkg/config"
+	"site/config"
 )
 
 func TestAddressFromUID(t *testing.T) {

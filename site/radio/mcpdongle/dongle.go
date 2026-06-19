@@ -13,7 +13,7 @@ import (
 
 	"protocol"
 
-	"site/pkg/mcp2210"
+	"site/mcp2210"
 )
 
 // Dongle is one MCP2210 + PAN211x RF endpoint on a single channel. It owns the

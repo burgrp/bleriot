@@ -1,7 +1,7 @@
 // Module site is the BleRiot host library: the host (Linux SBC) half of the
 // bridge between BleRiot RF nodes and the external Registry service. A site
 // repository imports it and drives it with inventory-as-code, calling
-// host.Start(inventory.Inventory{...}) from its own main().
+// cli.Start(inventory.Inventory{...}) from its own main().
 //
 // This module owns all protocol intelligence: per-node XTEA keys, node
 // descriptors, retries/timeouts, push-subscription bookkeeping, and the

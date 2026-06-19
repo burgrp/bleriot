@@ -15,22 +15,22 @@ value and turns consumer change requests into BleRiot `SET` operations.
 > format and transaction semantics this implements.
 
 There is **no JSON configuration and no code generation**. A deployment is a Go
-program: it declares an [`inventory.Inventory`](pkg/inventory) and hands it to
-[`host.Start`](pkg/host), which builds the `bleriot` command tree (cobra) around
+program: it declares an [`inventory.Inventory`](inventory) and hands it to
+[`cli.Start`](cli), which builds the `bleriot` command tree (cobra) around
 it.
 
 ```go
 package main
 
 import (
-	"site/pkg/host"
-	"site/pkg/inventory"
+	"site/cli"
+	"site/inventory"
 
 	"thermostat"
 )
 
 func main() {
-	host.Start(inventory.Inventory{
+	cli.Start(inventory.Inventory{
 		{
 			Name:    "kitchen",
 			UID:     [12]byte{ /* MCU unique ID */ },
@@ -49,7 +49,7 @@ A complete, runnable site binary lives in [`../example/hub`](../example/hub).
 
 ## Commands
 
-`host.Start` provides three subcommands:
+`cli.Start` provides three subcommands:
 
 ```
 hub        bridge the inventory's RF nodes to the Registry
@@ -127,7 +127,7 @@ $USER` and re-login). The rule matches the MCP2210 by its USB ID `04d8:00de`.
 
 ## Inventory model
 
-The [`inventory`](pkg/inventory) package is the type-safe model of a deployment.
+The [`inventory`](inventory) package is the type-safe model of a deployment.
 
 - **`Register`** — one register of a device type. Its `Tag` (a `uint8`, like a
   protobuf field number) is its permanent wire identity: unique and non-zero
@@ -161,7 +161,7 @@ dual-target Go module:
 ### Provisioning page
 
 The host and firmware agree on one flash page per device, encoded by the shared
-[`config`](pkg/config) package (`encoding/binary`, fixed-width, CRC-checked):
+[`config`](config) package (`encoding/binary`, fixed-width, CRC-checked):
 
 ```
 header  magic | layout | configLen | channel | spreadFactor | address | key
@@ -178,15 +178,15 @@ erased page from a corrupt one.
 
 | Path | Responsibility |
 |------|----------------|
-| [`pkg/host`](pkg/host) | The `bleriot` command tree (cobra): `host.Start(Inventory)` plus the `hub`, `provision` and `new` subcommands, and the `Probe` interface (SWD read-UID / write-page) with its `pyocd` implementation. |
-| [`pkg/inventory`](pkg/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. |
-| [`pkg/config`](pkg/config) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
-| [`pkg/engine`](pkg/engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
-| [`pkg/radio`](pkg/radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |
-| [`pkg/radio/mcpdongle`](pkg/radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |
-| [`pkg/mcp2210`](pkg/mcp2210) | Low-level MCP2210 USB-HID-to-SPI driver (open by `/dev/hidraw*` path or USB serial, chip/GPIO/SPI config, SPI transfers), self-healing against stale/desynced HID responses. |
-| [`pkg/node`](pkg/node) | Host-side node model: a register descriptor (wire ID → name/type/scaling) built from a device type, plus the provisioned identity (address + key). Bridges values to/from the Registry. |
-| [`pkg/bridge`](pkg/bridge) | Connects the engine to the Registry: each register becomes a provider (seeded by `GET`, kept current by `WATCH`), and consumer writes become `SET`. Generic — no per-register knowledge beyond the descriptor. |
+| [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `provision` and `new` subcommands, and the `Probe` interface (SWD read-UID / write-page) with its `pyocd` implementation. |
+| [`inventory`](inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. |
+| [`config`](config) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
+| [`engine`](engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
+| [`radio`](radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |
+| [`radio/mcpdongle`](radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |
+| [`mcp2210`](mcp2210) | Low-level MCP2210 USB-HID-to-SPI driver (open by `/dev/hidraw*` path or USB serial, chip/GPIO/SPI config, SPI transfers), self-healing against stale/desynced HID responses. |
+| [`node`](node) | Host-side node model: a register descriptor (wire ID → name/type/scaling) built from a device type, plus the provisioned identity (address + key). Bridges values to/from the Registry. |
+| [`bridge`](bridge) | Connects the engine to the Registry: each register becomes a provider (seeded by `GET`, kept current by `WATCH`), and consumer writes become `SET`. Generic — no per-register knowledge beyond the descriptor. |
 
 ---
 

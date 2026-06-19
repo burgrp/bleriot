@@ -27,8 +27,8 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/spf13/cobra"
 
-	"site/pkg/inventory"
-	"site/pkg/node"
+	"site/inventory"
+	"site/node"
 )
 
 // debug is the global verbosity flag, applied before any subcommand runs.
