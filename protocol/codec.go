@@ -23,6 +23,32 @@ const (
 // FLAGS bits (§6).
 const FlagNULL byte = 0x01 // VALUE is absent; register has no value
 
+// Reply turnaround guard (§6, §9). FLAGS bits 1–7 carry GUARD: the number of
+// milliseconds a node waits, after receiving a request, before it transmits its
+// reply. It gives a slow half-duplex hub radio time to switch from transmit back
+// to receive so it does not miss the answer. The hub sets GUARD on every request
+// (GET/SET/WATCH); replies (node → hub) leave it zero. 0 means reply immediately.
+const (
+	guardShift          = 1
+	guardMask      byte = 0x7F // 7 bits → 0–127 ms, in FLAGS bits 1–7
+	MaxGuardMillis      = guardMask
+)
+
+// FlagsWithGuard packs guardMillis (clamped to MaxGuardMillis) into the GUARD
+// field of flags, preserving the low NULL bit.
+func FlagsWithGuard(flags, guardMillis byte) byte {
+	if guardMillis > MaxGuardMillis {
+		guardMillis = MaxGuardMillis
+	}
+	return (flags &^ (guardMask << guardShift)) | (guardMillis << guardShift)
+}
+
+// GuardMillis returns the reply turnaround guard (milliseconds) encoded in the
+// GUARD field of a FLAGS byte.
+func GuardMillis(flags byte) byte {
+	return (flags >> guardShift) & guardMask
+}
+
 var (
 	errShortPacket       = errors.New("short packet")
 	errUnsupportedPacket = errors.New("unsupported packet version")

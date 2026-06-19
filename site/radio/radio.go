@@ -30,6 +30,11 @@ type Dongle interface {
 	// Receive copies at most one received packet into buf and reports how many
 	// bytes were written and whether a packet was available. It never blocks.
 	Receive(buf []byte) (n int, ok bool)
+	// ReplyGuard reports the reply turnaround guard (PROTOCOL.md §6) the hub must
+	// ask nodes to wait before answering a request sent through this dongle, so a
+	// slow half-duplex dongle has switched back to receive in time. It is a
+	// per-dongle constant.
+	ReplyGuard() time.Duration
 	// Close releases the dongle (and any underlying device).
 	Close() error
 }
@@ -60,6 +65,10 @@ func New(ctx context.Context, d Dongle) *Radio {
 func (r *Radio) Send(dst [4]byte, payload []byte) error {
 	return r.d.Send(dst, payload)
 }
+
+// ReplyGuard reports the dongle's reply turnaround guard (PROTOCOL.md §6),
+// forwarded to the engine so it can ask nodes to defer their replies accordingly.
+func (r *Radio) ReplyGuard() time.Duration { return r.d.ReplyGuard() }
 
 // Received returns the channel of inbound packets. It is closed once ctx (passed
 // to New) is cancelled.

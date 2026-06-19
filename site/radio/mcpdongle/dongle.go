@@ -8,6 +8,7 @@ package mcpdongle
 
 import (
 	"sync"
+	"time"
 
 	"github.com/burgrp/tinygo-drivers/pan211x"
 
@@ -22,6 +23,9 @@ import (
 type Dongle struct {
 	dev    *mcp2210.Device
 	driver *pan211x.DriverBLELongRange
+	// guard is the reply turnaround delay this dongle asks nodes to honour, fixed
+	// at Open from the spreading factor (see ReplyGuard).
+	guard time.Duration
 	// mu serialises USB access: transmit, the receive poll, and LED updates all
 	// share the one HID device.
 	mu     sync.Mutex
@@ -58,7 +62,7 @@ func Open(dev *mcp2210.Device, channel uint8, spreadFactor pan211x.SpreadFactor,
 		dev.Close()
 		return nil, err
 	}
-	d := &Dongle{dev: dev, driver: driver}
+	d := &Dongle{dev: dev, driver: driver, guard: replyGuard(spreadFactor)}
 	d.red = newLED(d.setGPIO, ledRedPin)
 	d.green = newLED(d.setGPIO, ledGreenPin)
 	return d, nil
@@ -95,6 +99,26 @@ func (d *Dongle) Receive(buf []byte) (int, bool) {
 		d.green.trigger()
 	}
 	return n, ok
+}
+
+// ReplyGuard reports the reply turnaround delay this dongle asks nodes to wait
+// before answering a request (PROTOCOL.md §6, GUARD). The MCP2210 is a
+// host-resident "dumb" dongle: after transmitting a request it needs several
+// USB-HID round trips to switch the PAN211x back to receive, during which a node
+// that replied immediately would be missed. The hub puts this delay in every
+// request and the node honours it before replying.
+func (d *Dongle) ReplyGuard() time.Duration { return d.guard }
+
+// replyGuard returns the reply turnaround guard for a spreading factor. The value
+// is dominated by USB-HID latency, which is largely independent of the spreading
+// factor, but is kept per-factor so each can be tuned to its measured turnaround.
+func replyGuard(sf pan211x.SpreadFactor) time.Duration {
+	switch sf {
+	case pan211x.SpreadFactorS2:
+		return 20 * time.Millisecond
+	default: // SpreadFactorS8
+		return 20 * time.Millisecond
+	}
 }
 
 // Close turns both status LEDs off, cancels their timers, and closes the

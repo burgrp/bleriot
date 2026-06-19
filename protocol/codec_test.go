@@ -70,6 +70,36 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestGuardRoundTrip checks the GUARD field packs into FLAGS bits 1–7 without
+// disturbing the NULL bit, survives an XTEA round trip, and clamps to the field
+// width.
+func TestGuardRoundTrip(t *testing.T) {
+	for _, g := range []byte{0, 1, 20, 127} {
+		flags := FlagsWithGuard(FlagNULL, g)
+		if flags&FlagNULL == 0 {
+			t.Errorf("guard %d: NULL bit lost", g)
+		}
+		if got := GuardMillis(flags); got != g {
+			t.Errorf("guard %d: GuardMillis = %d", g, got)
+		}
+	}
+	if got := GuardMillis(FlagsWithGuard(0, 200)); got != MaxGuardMillis {
+		t.Errorf("guard clamp: got %d, want %d", got, MaxGuardMillis)
+	}
+
+	c := mustCodec(t)
+	buf := make([]byte, PacketLen)
+	in := FlagsWithGuard(FlagNULL, 20)
+	c.Encode(buf, testSrc, TypeSET, in, 0x0007, 42)
+	_, _, flags, _, _, err := c.Decode(buf)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if flags != in {
+		t.Errorf("flags through codec: got 0x%02x, want 0x%02x", flags, in)
+	}
+}
+
 // TestPacketLength checks that Encode writes exactly PacketLen bytes.
 func TestPacketLength(t *testing.T) {
 	c := mustCodec(t)

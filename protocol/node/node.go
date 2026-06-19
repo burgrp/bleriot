@@ -8,7 +8,11 @@
 // never allocates: all buffers live on the Node.
 package node
 
-import "protocol"
+import (
+	"time"
+
+	"protocol"
+)
 
 // Radio is the minimal transport the runtime needs. It matches the way a PAN211x
 // is driven directly: the caller configures the channel and receive address
@@ -101,6 +105,15 @@ func (n *Node) Poll() bool {
 	src, typ, flags, reg, value, err := n.codec.Decode(n.rxBuf[:])
 	if err != nil {
 		return false
+	}
+	// Reply turnaround guard (PROTOCOL.md §6): the hub tells us, in the request's
+	// GUARD field, how long to wait before answering so its half-duplex radio has
+	// finished switching from transmit back to receive. A fast MCU would otherwise
+	// reply into a window when the hub is not yet listening and the reply would be
+	// lost. Spontaneous pushes (Notify) carry no guard: the hub is already
+	// listening when they arrive.
+	if g := protocol.GuardMillis(flags); g != 0 {
+		time.Sleep(time.Duration(g) * time.Millisecond)
 	}
 	switch typ {
 	case protocol.TypeGET:

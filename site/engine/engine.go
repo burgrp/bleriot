@@ -47,6 +47,10 @@ const DefaultLivenessMisses = 2
 type Radio interface {
 	Send(dst [node.AddrLen]byte, payload []byte) error
 	Received() <-chan [PacketLen]byte
+	// ReplyGuard reports the reply turnaround guard (PROTOCOL.md §6) this radio
+	// needs nodes to honour before answering: the engine carries it in every
+	// request's GUARD field.
+	ReplyGuard() time.Duration
 }
 
 // Update is an observed register value delivered to a Watch callback.
@@ -336,6 +340,9 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 	}()
 
 	var pkt [PacketLen]byte
+	// Carry the radio's turnaround guard (PROTOCOL.md §6) so the node defers its
+	// reply until this hub's radio is listening again.
+	flags = protocol.FlagsWithGuard(flags, guardMillis(r.ReplyGuard()))
 	ns.codec.Encode(pkt[:], e.hubAddr, typ, flags, reg, value)
 
 	for attempt := 0; attempt <= e.retries; attempt++ {
@@ -355,6 +362,19 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 		}
 	}
 	return Update{}, ErrTimeout
+}
+
+// guardMillis converts a radio's reply turnaround guard to the millisecond GUARD
+// field carried in a request (PROTOCOL.md §6), clamped to the field width.
+func guardMillis(d time.Duration) byte {
+	ms := d.Milliseconds()
+	if ms <= 0 {
+		return 0
+	}
+	if ms > int64(protocol.MaxGuardMillis) {
+		return protocol.MaxGuardMillis
+	}
+	return byte(ms)
 }
 
 func (e *Engine) recvLoop(ctx context.Context, r Radio) {

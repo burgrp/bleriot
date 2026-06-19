@@ -80,11 +80,13 @@ The hub decrypts each received packet using the shared key associated with the S
 ## 6. FLAGS Byte
 
 ```
-Bit 7–1  — reserved, must be 0
+Bit 7–1  — GUARD: reply turnaround guard, 0–127 ms (hub → node requests only)
 Bit 0    — NULL: VALUE field is absent; register has no value
 ```
 
 When NULL=1 the VALUE field is undefined and must be ignored by the receiver.
+
+GUARD is the number of milliseconds a node waits, after receiving a request, before it transmits its reply (§9). A half-duplex hub radio needs time to switch from transmit back to receive after sending a request; a fast node that replied immediately would answer into a window when the hub is not yet listening, and the reply would be lost. The hub sets GUARD on every request from the turnaround time of the radio that carries it (a slower radio asks for a larger guard), and a node honours it before any IS or ACK reply. Replies (node → hub) carry GUARD = 0, and a GUARD of 0 means reply immediately. GUARD must be smaller than the hub's response timeout `T_timeout` (§9).
 
 ---
 
@@ -148,6 +150,7 @@ Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
 The protocol is **best-effort at the RF layer**. Reliability is the hub's responsibility:
 
 - After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `REG == sent REG`, and the expected reply TYPE: ACK for a SET, IS for a GET/WATCH).
+- The hub asks the node to defer its reply by `GUARD` milliseconds (§6), chosen from the hub radio's transmit-to-receive turnaround time, so the radio is listening again before the reply arrives. `GUARD` is always smaller than `T_timeout`.
 - If no response arrives within `T_timeout`, the hub may retransmit the same request up to `N_retry` times (recommended: 3).
 
 ---

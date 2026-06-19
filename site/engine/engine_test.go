@@ -24,10 +24,11 @@ var (
 
 // fakeRadio captures sent packets and lets a simulated node inject replies.
 type fakeRadio struct {
-	sent chan [PacketLen]byte
-	recv chan [PacketLen]byte
-	drop int // drop the first n Send calls (to exercise retries)
-	mu   sync.Mutex
+	sent  chan [PacketLen]byte
+	recv  chan [PacketLen]byte
+	drop  int           // drop the first n Send calls (to exercise retries)
+	guard time.Duration // reply turnaround guard reported to the engine
+	mu    sync.Mutex
 }
 
 func newFakeRadio() *fakeRadio {
@@ -53,6 +54,8 @@ func (f *fakeRadio) Send(dst [4]byte, payload []byte) error {
 }
 
 func (f *fakeRadio) Received() <-chan [PacketLen]byte { return f.recv }
+
+func (f *fakeRadio) ReplyGuard() time.Duration { return f.guard }
 
 // simulateNode reads one request, decodes it, and replies: an ACK for a SET
 // (§8.2), or an IS for a GET/WATCH. reply transforms the request value into the
@@ -119,6 +122,46 @@ func TestEngine_Get(t *testing.T) {
 	}
 	if u.Value != 4242 || u.Null {
 		t.Fatalf("Get = %+v, want {4242 false}", u)
+	}
+}
+
+// TestEngine_RequestCarriesGuard checks the engine packs the radio's reply
+// turnaround guard (PROTOCOL.md §6) into the GUARD field of every request.
+func TestEngine_RequestCarriesGuard(t *testing.T) {
+	c, err := protocol.NewCodec(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(Options{HubAddr: hubAddr, Timeout: 50 * time.Millisecond, Retries: 3})
+	f := newFakeRadio()
+	f.guard = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.AddRadio(ctx, testChannel, f)
+	n := node.NewNode("t", testChannel, &node.Descriptor{}, node.Identity{Address: nodeAddr, Key: testKey})
+	if err := e.AddNode(n); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reply so the transaction completes; assert the request's GUARD field.
+	go func() {
+		for req := range f.sent {
+			_, _, flags, reg, _, derr := c.Decode(req[:])
+			if derr != nil {
+				t.Errorf("decode: %v", derr)
+				continue
+			}
+			if got := protocol.GuardMillis(flags); got != 20 {
+				t.Errorf("request GUARD = %d ms, want 20", got)
+			}
+			var resp [PacketLen]byte
+			c.Encode(resp[:], nodeAddr, protocol.TypeIS, 0, reg, 1)
+			f.recv <- resp
+		}
+	}()
+
+	if _, err := e.Get(context.Background(), nodeAddr, regTemp); err != nil {
+		t.Fatalf("Get: %v", err)
 	}
 }
 
