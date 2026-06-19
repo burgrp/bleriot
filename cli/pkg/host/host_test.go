@@ -54,7 +54,7 @@ func sampleInstance() inventory.Instance {
 		Name:    "kitchen",
 		UID:     [page.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
 		Key:     [page.KeyLen]byte{0xAA, 0xBB, 0xCC, 0xDD},
-		Channel: 37,
+		Channel: inventory.Channel{Number: 37, SpreadFactor: page.SpreadFactorS2},
 		Type:    sampleType(),
 		Config:  thermostatConfig{MinTemp: 1800, MaxTemp: 2400},
 	}
@@ -111,8 +111,11 @@ func TestRunProvisionWritesPage(t *testing.T) {
 	if h.Key != inst.Key {
 		t.Fatalf("page key mismatch")
 	}
-	if h.Channel != inst.Channel {
-		t.Fatalf("page channel = %d, want %d", h.Channel, inst.Channel)
+	if h.Channel != inst.Channel.Number {
+		t.Fatalf("page channel = %d, want %d", h.Channel, inst.Channel.Number)
+	}
+	if h.SpreadFactor != inst.Channel.SpreadFactor {
+		t.Fatalf("page spread factor = %d, want %d", h.SpreadFactor, inst.Channel.SpreadFactor)
 	}
 	if got != inst.Config {
 		t.Fatalf("page config = %+v, want %+v", got, inst.Config)

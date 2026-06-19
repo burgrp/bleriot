@@ -83,7 +83,7 @@ func main() {
 		haltBlink("bad page: "+err.Error(), 100*time.Millisecond)
 	}
 	cfg := decodeConfig(cfgBytes)
-	println("Provisioned: channel", int(header.Channel))
+	println("Provisioned: channel", int(header.Channel), "spreadFactor", int(header.SpreadFactor))
 
 	// Radio: PAN211x in BLE LongRange mode, then apply the page's channel and
 	// receive address once (the runtime never reconfigures the radio).
@@ -92,7 +92,7 @@ func main() {
 	must(radio.Init(pan211x.ConfigBLELongRange{
 		PayloadLen:      protocol.PacketLen,
 		SerialInterface: pan211x.SerialInterfaceSPI3W,
-		SpreadFactor:    pan211x.SpreadFactorS8,
+		SpreadFactor:    pan211x.SpreadFactor(header.SpreadFactor),
 	}))
 	must(radio.SetChannel(header.Channel))
 	must(radio.EnableRxAddress(0, header.Address))

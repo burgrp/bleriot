@@ -16,9 +16,10 @@
 // Each dongle env var is "scheme:selector"; the scheme is required (only
 // "mcp2210" is supported here, mirroring the hub --dongle flag, which has no
 // default) and the selector is a /dev/hidraw* path or a USB serial string (see
-// mcp2210.Open). BLERIOT_CHANNEL (default 37) sets the shared BLE channel. When
-// the dongle env vars are unset the tests skip, so a normal `go test ./...` and
-// CI are unaffected.
+// mcp2210.Open). BLERIOT_CHANNEL (default 37) sets the shared BLE channel, and
+// BLERIOT_SPREAD (default "s8"; "s2" for the faster/shorter-range factor) sets
+// the shared spreading factor. When the dongle env vars are unset the tests
+// skip, so a normal `go test ./...` and CI are unaffected.
 package functest
 
 import (
@@ -31,6 +32,8 @@ import (
 	"time"
 
 	pnode "protocol/node"
+
+	"github.com/burgrp/tinygo-drivers/pan211x"
 
 	"cli/pkg/engine"
 	"cli/pkg/mcp2210"
@@ -183,11 +186,23 @@ func setup(tb testing.TB) *harness {
 		channel = uint8(v)
 	}
 
+	// Both dongles must share one spreading factor (they talk to each other).
+	// BLERIOT_SPREAD selects it: "s8" (default, highest range) or "s2".
+	spread := pan211x.SpreadFactorS8
+	switch strings.ToLower(os.Getenv("BLERIOT_SPREAD")) {
+	case "", "s8":
+		spread = pan211x.SpreadFactorS8
+	case "s2":
+		spread = pan211x.SpreadFactorS2
+	default:
+		tb.Fatalf("BLERIOT_SPREAD: want s8 or s2, got %q", os.Getenv("BLERIOT_SPREAD"))
+	}
+
 	hubDev, err := mcp2210.Open(hubSel)
 	if err != nil {
 		tb.Fatalf("open hub dongle %q: %v", hubSel, err)
 	}
-	hubD, err := mcpdongle.Open(hubDev, channel, hubAddr)
+	hubD, err := mcpdongle.Open(hubDev, channel, spread, hubAddr)
 	if err != nil {
 		tb.Fatalf("hub dongle %q: %v", hubSel, err) // Open closed hubDev
 	}
@@ -196,7 +211,7 @@ func setup(tb testing.TB) *harness {
 		hubD.Close()
 		tb.Fatalf("open node dongle %q: %v", nodeSel, err)
 	}
-	nodeD, err := mcpdongle.Open(nodeDev, channel, nodeAddr)
+	nodeD, err := mcpdongle.Open(nodeDev, channel, spread, nodeAddr)
 	if err != nil {
 		hubD.Close()
 		tb.Fatalf("node dongle %q: %v", nodeSel, err) // Open closed nodeDev

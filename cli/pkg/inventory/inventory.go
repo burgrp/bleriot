@@ -88,6 +88,21 @@ var PY32F030 = Chip{
 	PageAddr: 0x0800F800,
 }
 
+// Channel is an RF channel together with the spreading factor every node on it
+// uses. Spreading factor is a property of the channel as driven by a dongle (a
+// dongle transmits one factor at a time), not of an individual node, so binding
+// the two in a single value makes it impossible to give two nodes on the same
+// channel different factors. Declare each channel once and share that value
+// across the instances that use it.
+type Channel struct {
+	// Number is the BLE RF channel number.
+	Number uint8
+	// SpreadFactor is the BLE Coded PHY spreading factor used on this channel. The
+	// zero value is page.SpreadFactorS8 (highest range), so a bare
+	// Channel{Number: n} keeps the historical behaviour.
+	SpreadFactor page.SpreadFactor
+}
+
 // Instance is one physical device in the deployment.
 type Instance struct {
 	// Name uniquely identifies this device within the inventory; it scopes the
@@ -97,8 +112,9 @@ type Instance struct {
 	UID [page.UIDLen]byte
 	// Key is the device's XTEA shared key.
 	Key [page.KeyLen]byte
-	// Channel is the device's RF channel.
-	Channel uint8
+	// Channel is the device's RF channel and the spreading factor it shares with
+	// every other node on that channel.
+	Channel Channel
 	// Type is the device's type (register table).
 	Type DeviceType
 	// Config is the device-type-specific configuration written to the device's
@@ -142,7 +158,8 @@ func (dt DeviceType) Validate() error {
 }
 
 // Validate checks the whole inventory: every device type's register table is
-// valid and every instance name is non-empty and unique.
+// valid, every instance name is non-empty and unique, and every channel uses a
+// single spreading factor (a dongle drives one factor at a time).
 func (inv Inventory) Validate() error {
 	seenName := make(map[string]bool, len(inv))
 	for i, inst := range inv {
@@ -157,5 +174,28 @@ func (inv Inventory) Validate() error {
 			return fmt.Errorf("instance %q: %w", inst.Name, err)
 		}
 	}
+	if _, err := inv.SpreadFactorByChannel(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// SpreadFactorByChannel maps each RF channel number in the inventory to the
+// spreading factor its nodes use. It returns an error if two nodes on the same
+// channel number disagree: the hub drives one spreading factor per
+// channel/dongle, so a channel must be uniform. The hub uses the result to
+// configure each dongle.
+func (inv Inventory) SpreadFactorByChannel() (map[uint8]page.SpreadFactor, error) {
+	byChannel := make(map[uint8]page.SpreadFactor, len(inv))
+	owner := make(map[uint8]string, len(inv))
+	for _, inst := range inv {
+		ch := inst.Channel
+		if prev, ok := byChannel[ch.Number]; ok && prev != ch.SpreadFactor {
+			return nil, fmt.Errorf("channel %d: instance %q uses spreading factor %d but %q uses %d; "+
+				"a channel must use one spreading factor", ch.Number, inst.Name, ch.SpreadFactor, owner[ch.Number], prev)
+		}
+		byChannel[ch.Number] = ch.SpreadFactor
+		owner[ch.Number] = inst.Name
+	}
+	return byChannel, nil
 }

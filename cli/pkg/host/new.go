@@ -70,7 +70,7 @@ func instanceStub(uid [page.UIDLen]byte, key [page.KeyLen]byte) string {
 	Name:    "TODO",
 	UID:     %s,
 	Key:     %s,
-	Channel: 0, // TODO
+	Channel: inventory.Channel{Number: 0}, // TODO: e.g. a shared channel var
 	Type:    TODO, // device type, e.g. thermostat.Type()
 	Config:  nil,  // TODO: device config, e.g. thermostat.Config{...}
 },

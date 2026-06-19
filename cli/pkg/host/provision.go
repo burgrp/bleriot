@@ -61,7 +61,7 @@ func runProvision(ctx context.Context, inv inventory.Inventory, chip inventory.C
 	}
 
 	addr := node.AddressFromUID(inst.UID)
-	image, err := page.Marshal(addr, inst.Key, inst.Channel, inst.Config)
+	image, err := page.Marshal(addr, inst.Key, inst.Channel.Number, inst.Channel.SpreadFactor, inst.Config)
 	if err != nil {
 		return fmt.Errorf("instance %q: building page: %w", inst.Name, err)
 	}
@@ -69,7 +69,7 @@ func runProvision(ctx context.Context, inv inventory.Inventory, chip inventory.C
 		return fmt.Errorf("instance %q: writing page: %w", inst.Name, err)
 	}
 
-	logger.Info("provisioned device", "name", inst.Name, "address", fmt.Sprintf("%X", addr), "channel", inst.Channel, "bytes", len(image))
+	logger.Info("provisioned device", "name", inst.Name, "address", fmt.Sprintf("%X", addr), "channel", inst.Channel.Number, "spreadFactor", inst.Channel.SpreadFactor, "bytes", len(image))
 	return nil
 }
 

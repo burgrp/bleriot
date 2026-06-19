@@ -31,11 +31,12 @@ type Dongle struct {
 }
 
 // Open configures the MCP2210, brings up its PAN211x for BLE LongRange on the
-// given channel, and sets the pipe-0 receive address (the address this endpoint
-// listens on: the hub address on the hub side, the node address on the node
-// side). Open takes ownership of dev: Close closes it, and a failed Open closes
-// it before returning.
-func Open(dev *mcp2210.Device, channel uint8, rxAddr [4]byte) (*Dongle, error) {
+// given channel and spreading factor, and sets the pipe-0 receive address (the
+// address this endpoint listens on: the hub address on the hub side, the node
+// address on the node side). The spreading factor must match the nodes this
+// dongle talks to. Open takes ownership of dev: Close closes it, and a failed
+// Open closes it before returning.
+func Open(dev *mcp2210.Device, channel uint8, spreadFactor pan211x.SpreadFactor, rxAddr [4]byte) (*Dongle, error) {
 	if err := dev.Configure(mcp2210.DefaultSPIConfig, ledRedPin, ledGreenPin); err != nil {
 		dev.Close()
 		return nil, err
@@ -44,7 +45,7 @@ func Open(dev *mcp2210.Device, channel uint8, rxAddr [4]byte) (*Dongle, error) {
 	if err := driver.Init(pan211x.ConfigBLELongRange{
 		PayloadLen:      protocol.PacketLen,
 		SerialInterface: pan211x.SerialInterfaceSPI3W,
-		SpreadFactor:    pan211x.SpreadFactorS8,
+		SpreadFactor:    spreadFactor,
 	}); err != nil {
 		dev.Close()
 		return nil, err

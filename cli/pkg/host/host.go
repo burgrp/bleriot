@@ -84,7 +84,7 @@ func buildNode(inst inventory.Instance) (*node.Node, error) {
 		Address: node.AddressFromUID(inst.UID),
 		Key:     inst.Key,
 	}
-	return node.NewNode(inst.Name, inst.Channel, desc, id), nil
+	return node.NewNode(inst.Name, inst.Channel.Number, desc, id), nil
 }
 
 // descriptorFor builds a node.Descriptor from a device type's register table.

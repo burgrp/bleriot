@@ -9,7 +9,7 @@
 //
 // The page layout is:
 //
-//	header  (fixed)  magic | layout | configLen | channel | pad | address | key
+//	header  (fixed)  magic | layout | configLen | channel | spreadFactor | address | key
 //	config  (varies) the device type's fixed-size Config struct, binary-encoded
 //	crc32   (u32)    CRC-32 (IEEE) over everything before it
 //
@@ -33,8 +33,9 @@ const (
 	Magic uint32 = 0x424C5254
 
 	// LayoutVersion guards the header layout. Firmware refuses a page whose layout
-	// it does not understand.
-	LayoutVersion uint16 = 1
+	// it does not understand. Bumped to 2 when the spare header pad byte became the
+	// SpreadFactor field.
+	LayoutVersion uint16 = 2
 
 	// UIDLen is the MCU unique-ID length in bytes (used to derive the RF address).
 	UIDLen = 12
@@ -44,7 +45,7 @@ const (
 	KeyLen = 16
 
 	// headerLen is the encoded size of Header: magic(4) layout(2) configLen(2)
-	// channel(1) pad(1) address(4) key(16) = 30.
+	// channel(1) spreadFactor(1) address(4) key(16) = 30.
 	headerLen = 4 + 2 + 2 + 1 + 1 + AddrLen + KeyLen
 	// crcLen is the trailing CRC-32 size.
 	crcLen = 4
@@ -54,15 +55,32 @@ const (
 // the firmware can, if it wants, overlay fields without byte swaps.
 var byteOrder = binary.LittleEndian
 
+// SpreadFactor selects the PAN211x BLE Coded PHY spreading factor: the trade-off
+// between range and on-air time. A higher spreading factor reaches farther but
+// keeps the radio transmitting longer; a lower one is faster but shorter range.
+//
+// The values match github.com/burgrp/tinygo-drivers/pan211x.SpreadFactor so both
+// the host dongle and the firmware can convert with a plain cast. The zero value
+// is SpreadFactorS8, so an inventory that omits the field keeps the historical
+// behaviour.
+type SpreadFactor uint8
+
+const (
+	// SpreadFactorS8 is S=8: highest range, ~125 kbps, longest on-air time. Default.
+	SpreadFactorS8 SpreadFactor = 0
+	// SpreadFactorS2 is S=2: medium range, ~500 kbps, shorter on-air time.
+	SpreadFactorS2 SpreadFactor = 1
+)
+
 // Header is the fixed-size identity prefix of a provisioning page.
 type Header struct {
-	Magic     uint32
-	Layout    uint16
-	ConfigLen uint16
-	Channel   uint8
-	_         uint8 // padding to keep Address 16-bit aligned
-	Address   [AddrLen]byte
-	Key       [KeyLen]byte
+	Magic        uint32
+	Layout       uint16
+	ConfigLen    uint16
+	Channel      uint8
+	SpreadFactor SpreadFactor // occupies the byte that keeps Address 16-bit aligned
+	Address      [AddrLen]byte
+	Key          [KeyLen]byte
 }
 
 // errUnprovisioned reports that a page was never written (magic mismatch).
@@ -76,7 +94,7 @@ func IsUnprovisioned(err error) bool { return errors.Is(err, errUnprovisioned) }
 // Marshal encodes the identity and config into a page image:
 // header || config || crc32. config may be nil (no config bytes); otherwise it
 // must be a fixed-size value (see the package doc).
-func Marshal(addr [AddrLen]byte, key [KeyLen]byte, channel uint8, config any) ([]byte, error) {
+func Marshal(addr [AddrLen]byte, key [KeyLen]byte, channel uint8, spreadFactor SpreadFactor, config any) ([]byte, error) {
 	var cfg bytes.Buffer
 	if config != nil {
 		if err := binary.Write(&cfg, byteOrder, config); err != nil {
@@ -88,12 +106,13 @@ func Marshal(addr [AddrLen]byte, key [KeyLen]byte, channel uint8, config any) ([
 	}
 
 	h := Header{
-		Magic:     Magic,
-		Layout:    LayoutVersion,
-		ConfigLen: uint16(cfg.Len()),
-		Channel:   channel,
-		Address:   addr,
-		Key:       key,
+		Magic:        Magic,
+		Layout:       LayoutVersion,
+		ConfigLen:    uint16(cfg.Len()),
+		Channel:      channel,
+		SpreadFactor: spreadFactor,
+		Address:      addr,
+		Key:          key,
 	}
 
 	var out bytes.Buffer
@@ -176,6 +195,7 @@ func Decode(data []byte) (Header, []byte, error) {
 	}
 	h.ConfigLen = byteOrder.Uint16(data[6:8])
 	h.Channel = data[8]
+	h.SpreadFactor = SpreadFactor(data[9])
 	copy(h.Address[:], data[10:10+AddrLen])
 	copy(h.Key[:], data[10+AddrLen:10+AddrLen+KeyLen])
 

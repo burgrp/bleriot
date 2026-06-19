@@ -35,7 +35,7 @@ func main() {
 			Name:    "kitchen",
 			UID:     [12]byte{ /* MCU unique ID */ },
 			Key:     [16]byte{ /* XTEA key */ },
-			Channel: 37,
+			Channel: inventory.Channel{Number: 37},
 			Type:    thermostat.Type(),
 			Config:  thermostat.Config{MinTemp: 18, MaxTemp: 22},
 		},
@@ -77,7 +77,7 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--retries` | `3` | Retransmissions after the first attempt (§9). |
 | `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
 | `--ttl` | `30s` | Registry provider TTL. |
-| `--dongle` | — | A radio dongle as `scheme:selector,channel`, e.g. `mcp2210:/dev/hidraw0,37` or `mcp2210:0001746423,37`. The `scheme` selects the dongle type (only `mcp2210` today — there is no default); the `selector` is a `/dev/hidraw*` path or a USB serial; the channel is split off after the last `,`. Repeatable, one per dongle. `/dev/hidraw*` is root-only, so run under `sudo`. |
+| `--dongle` | — | A radio dongle as `scheme:selector,channel`, e.g. `mcp2210:/dev/hidraw0,37` or `mcp2210:0001746423,37`. The `scheme` selects the dongle type (only `mcp2210` today — there is no default); the `selector` is a `/dev/hidraw*` path or a USB serial; the channel is split off after the last `,`. Repeatable, one per dongle. The dongle's `/dev/hidraw*` node is root-only by default; install the udev rule (see [USB access](#usb-access)) to use it without `sudo`. |
 
 ### `provision` / `new` flags
 
@@ -103,6 +103,26 @@ address (derived as `CRC32(UID)`), key, channel and `Config` — to flash. `new`
 reads the UID of a device not yet in the inventory and prints a paste-ready
 `inventory.Instance{}` stub to add to the source.
 
+### USB access
+
+The MCP2210 dongle appears as a `/dev/hidraw*` node that is root-only by
+default, so the `hub` would otherwise need `sudo`. Install the udev rule shipped
+with the dongle hardware design — [`../usb/99-bleriot-mcp2210.rules`](../usb/99-bleriot-mcp2210.rules) —
+to grant access to the local desktop user and the `plugdev` group instead:
+
+```sh
+sudo cp ../usb/99-bleriot-mcp2210.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=hidraw --action=change
+```
+
+Re-plug the dongle if it was already connected, and make sure your user is in
+the `plugdev` group (`id` should list it; otherwise `sudo usermod -aG plugdev
+$USER` and re-login). The rule matches the MCP2210 by its USB ID `04d8:00de`.
+
+> Provisioning over SWD (`provision` / `new`) drives the SWD probe through
+> `pyocd`, which has its own access requirements independent of this rule.
+
 ---
 
 ## Inventory model
@@ -116,8 +136,14 @@ The [`inventory`](pkg/inventory) package is the type-safe model of a deployment.
   authored once in the device-type module and returned by its `Type()` function.
 - **`Instance`** — one physical device: its `Name`, MCU `UID`, XTEA `Key`, RF
   `Channel`, device `Type`, and device-specific `Config`.
+- **`Channel`** — an RF channel `Number` together with the `SpreadFactor` every
+  node on it uses. Spreading factor is a property of the channel (a dongle
+  transmits one factor at a time), so binding the two makes it impossible to give
+  two nodes on one channel different factors. Declare each channel once and share
+  that value across instances; the zero `SpreadFactor` is the highest-range S8.
 - **`Inventory`** — the full set of devices. `Validate()` enforces unique
-  non-zero tags per device type and unique instance names.
+  non-zero tags per device type, unique instance names, and one spreading factor
+  per channel.
 
 The RF address is never stored: both the host and the firmware derive it as
 `CRC32(UID)` ([protocol §11.5](../protocol/README.md)).
@@ -138,7 +164,7 @@ The host and firmware agree on one flash page per device, encoded by the shared
 [`page`](pkg/page) package (`encoding/binary`, fixed-width, CRC-checked):
 
 ```
-header  magic | layout | configLen | channel | pad | address | key
+header  magic | layout | configLen | channel | spreadFactor | address | key
 config  the device type's fixed-size Config struct
 crc32   CRC-32 (IEEE) over everything before it
 ```

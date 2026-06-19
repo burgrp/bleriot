@@ -1,0 +1,12 @@
+# BleRiot RF dongle: Microchip MCP2210 USB-to-SPI bridge (04d8:00de).
+# Grant the local seat user (uaccess) and the plugdev group read/write on the
+# hidraw node so the hub can open /dev/hidraw* without sudo.
+#
+# Install:
+#   sudo cp 99-bleriot-mcp2210.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --subsystem-match=hidraw --action=change
+# (re-plug the dongle if it was already connected). Make sure your user is in
+# the plugdev group: `id` should list it; if not, `sudo usermod -aG plugdev $USER`
+# and log out/in.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="00de", TAG+="uaccess", GROUP="plugdev", MODE="0660"

@@ -1,6 +1,10 @@
 package inventory
 
-import "testing"
+import (
+	"testing"
+
+	"cli/pkg/page"
+)
 
 func thermostatType() DeviceType {
 	return DeviceType{
@@ -50,8 +54,8 @@ func TestDeviceTypeValidate_Errors(t *testing.T) {
 
 func TestInventoryValidate_OK(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Channel: 37, Type: thermostatType()},
-		{Name: "living", Channel: 11, Type: thermostatType()},
+		{Name: "kitchen", Channel: Channel{Number: 37}, Type: thermostatType()},
+		{Name: "living", Channel: Channel{Number: 11}, Type: thermostatType()},
 	}
 	if err := inv.Validate(); err != nil {
 		t.Fatalf("expected valid, got %v", err)
@@ -82,4 +86,45 @@ func TestInventoryValidate_Errors(t *testing.T) {
 			t.Fatal("expected error from invalid device type")
 		}
 	})
+	t.Run("mixed spread factor on one channel", func(t *testing.T) {
+		inv := Inventory{
+			{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS8}, Type: thermostatType()},
+			{Name: "living", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
+		}
+		if err := inv.Validate(); err == nil {
+			t.Fatal("expected error for mixed spread factor on one channel")
+		}
+	})
+}
+
+func TestSpreadFactorByChannel(t *testing.T) {
+	inv := Inventory{
+		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
+		{Name: "hallway", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
+		{Name: "lab", Channel: Channel{Number: 11, SpreadFactor: page.SpreadFactorS8}, Type: thermostatType()},
+		{Name: "shed", Channel: Channel{Number: 5}, Type: thermostatType()}, // omitted SF: defaults to S8
+	}
+	byChannel, err := inv.SpreadFactorByChannel()
+	if err != nil {
+		t.Fatalf("SpreadFactorByChannel: %v", err)
+	}
+	want := map[uint8]page.SpreadFactor{37: page.SpreadFactorS2, 11: page.SpreadFactorS8, 5: page.SpreadFactorS8}
+	if len(byChannel) != len(want) {
+		t.Fatalf("got %d channels, want %d: %v", len(byChannel), len(want), byChannel)
+	}
+	for ch, sf := range want {
+		if byChannel[ch] != sf {
+			t.Errorf("channel %d: got spread factor %d, want %d", ch, byChannel[ch], sf)
+		}
+	}
+}
+
+func TestSpreadFactorByChannel_Conflict(t *testing.T) {
+	inv := Inventory{
+		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS8}, Type: thermostatType()},
+		{Name: "living", Channel: Channel{Number: 37, SpreadFactor: page.SpreadFactorS2}, Type: thermostatType()},
+	}
+	if _, err := inv.SpreadFactorByChannel(); err == nil {
+		t.Fatal("expected conflict error for mixed spread factor on one channel")
+	}
 }

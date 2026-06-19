@@ -28,7 +28,7 @@ func TestRoundTrip(t *testing.T) {
 	addr, key, channel := sampleIdentity()
 	cfg := sampleConfig{Pin: 4, SensorID: 0x1234, Cal: 1.5, Enabled: true}
 
-	data, err := Marshal(addr, key, channel, cfg)
+	data, err := Marshal(addr, key, channel, SpreadFactorS2, cfg)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -41,6 +41,9 @@ func TestRoundTrip(t *testing.T) {
 	if h.Address != addr || h.Key != key || h.Channel != channel {
 		t.Errorf("identity mismatch: %+v", h)
 	}
+	if h.SpreadFactor != SpreadFactorS2 {
+		t.Errorf("spread factor = %d, want %d", h.SpreadFactor, SpreadFactorS2)
+	}
 	if got != cfg {
 		t.Errorf("config = %+v, want %+v", got, cfg)
 	}
@@ -49,9 +52,26 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSpreadFactorDefault checks the zero value round-trips as S8, so an
+// inventory that omits the field keeps the historical behaviour.
+func TestSpreadFactorDefault(t *testing.T) {
+	addr, key, channel := sampleIdentity()
+	data, err := Marshal(addr, key, channel, SpreadFactorS8, nil)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	h, err := Unmarshal(data, nil)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if h.SpreadFactor != SpreadFactorS8 || SpreadFactorS8 != 0 {
+		t.Errorf("spread factor = %d, want 0 (S8)", h.SpreadFactor)
+	}
+}
+
 func TestRoundTripNilConfig(t *testing.T) {
 	addr, key, channel := sampleIdentity()
-	data, err := Marshal(addr, key, channel, nil)
+	data, err := Marshal(addr, key, channel, SpreadFactorS8, nil)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -69,7 +89,7 @@ func TestRoundTripNilConfig(t *testing.T) {
 
 func TestCRCDetectsCorruption(t *testing.T) {
 	addr, key, channel := sampleIdentity()
-	data, err := Marshal(addr, key, channel, sampleConfig{Pin: 9})
+	data, err := Marshal(addr, key, channel, SpreadFactorS8, sampleConfig{Pin: 9})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,14 +128,14 @@ func TestConfigMustBeFixedSize(t *testing.T) {
 	type badConfig struct {
 		Name string // variable-size: not allowed
 	}
-	if _, err := Marshal(addr, key, channel, badConfig{Name: "x"}); err == nil {
+	if _, err := Marshal(addr, key, channel, SpreadFactorS8, badConfig{Name: "x"}); err == nil {
 		t.Fatal("expected error for variable-size config")
 	}
 }
 
 func TestTruncatedConfig(t *testing.T) {
 	addr, key, channel := sampleIdentity()
-	data, err := Marshal(addr, key, channel, sampleConfig{Pin: 1})
+	data, err := Marshal(addr, key, channel, SpreadFactorS8, sampleConfig{Pin: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +152,7 @@ func TestTruncatedConfig(t *testing.T) {
 func TestDecodeMatchesUnmarshal(t *testing.T) {
 	addr, key, channel := sampleIdentity()
 	cfg := sampleConfig{Pin: 4, SensorID: 0x1234, Cal: 1.5, Enabled: true}
-	data, err := Marshal(addr, key, channel, cfg)
+	data, err := Marshal(addr, key, channel, SpreadFactorS2, cfg)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -143,6 +163,9 @@ func TestDecodeMatchesUnmarshal(t *testing.T) {
 	}
 	if h.Address != addr || h.Key != key || h.Channel != channel {
 		t.Errorf("identity mismatch: %+v", h)
+	}
+	if h.SpreadFactor != SpreadFactorS2 {
+		t.Errorf("spread factor = %d, want %d", h.SpreadFactor, SpreadFactorS2)
 	}
 	if h.Magic != Magic || h.Layout != LayoutVersion {
 		t.Errorf("header magic/layout wrong: %+v", h)
@@ -157,7 +180,7 @@ func TestDecodeMatchesUnmarshal(t *testing.T) {
 // window larger than the page: extra trailing bytes after the CRC are ignored.
 func TestDecodeToleratesTrailingSlack(t *testing.T) {
 	addr, key, channel := sampleIdentity()
-	data, err := Marshal(addr, key, channel, sampleConfig{Pin: 7})
+	data, err := Marshal(addr, key, channel, SpreadFactorS8, sampleConfig{Pin: 7})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +192,7 @@ func TestDecodeToleratesTrailingSlack(t *testing.T) {
 
 func TestDecodeCRCMismatch(t *testing.T) {
 	addr, key, channel := sampleIdentity()
-	data, err := Marshal(addr, key, channel, sampleConfig{Pin: 9})
+	data, err := Marshal(addr, key, channel, SpreadFactorS8, sampleConfig{Pin: 9})
 	if err != nil {
 		t.Fatal(err)
 	}

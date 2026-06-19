@@ -20,8 +20,11 @@ import (
 	"cli/pkg/inventory"
 	"cli/pkg/mcp2210"
 	"cli/pkg/node"
+	"cli/pkg/page"
 	"cli/pkg/radio"
 	"cli/pkg/radio/mcpdongle"
+
+	"github.com/burgrp/tinygo-drivers/pan211x"
 )
 
 // hubOptions holds the runtime/deploy settings for the hub, all sourced from
@@ -85,7 +88,14 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 	})
 	go eng.Run(ctx)
 
-	if err := startDongles(ctx, eng, o.dongles, hubAddr, logger); err != nil {
+	// Each channel/dongle drives a single spreading factor; derive the map from
+	// the inventory (Validate already proved each channel is uniform).
+	sfByChannel, err := inv.SpreadFactorByChannel()
+	if err != nil {
+		return fmt.Errorf("inventory: %w", err)
+	}
+
+	if err := startDongles(ctx, eng, o.dongles, hubAddr, sfByChannel, logger); err != nil {
 		return err
 	}
 
@@ -140,7 +150,7 @@ type dongleSpec struct {
 // dongleOpener opens one dongle of a particular type and returns it as a
 // radio.Dongle. New dongle types (e.g. a smart MCU-based dongle) are added by
 // registering another opener in dongleOpeners.
-type dongleOpener func(selector string, channel uint8, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
+type dongleOpener func(selector string, channel uint8, spreadFactor page.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
 
 // dongleOpeners maps a scheme to its opener. To support a new dongle type, add
 // an entry here; the flag parsing and startup wiring need no other changes.
@@ -149,19 +159,20 @@ var dongleOpeners = map[string]dongleOpener{
 }
 
 // openMCP2210 opens an MCP2210 USB-to-SPI bridge by selector and brings up its
-// PAN211x radio on the given channel.
-func openMCP2210(selector string, channel uint8, hubAddr [node.AddrLen]byte) (radio.Dongle, error) {
+// PAN211x radio on the given channel and spreading factor.
+func openMCP2210(selector string, channel uint8, spreadFactor page.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error) {
 	dev, err := mcp2210.Open(selector)
 	if err != nil {
 		return nil, err
 	}
-	return mcpdongle.Open(dev, channel, hubAddr)
+	return mcpdongle.Open(dev, channel, pan211x.SpreadFactor(spreadFactor), hubAddr)
 }
 
 // startDongles parses each --dongle flag, opens its dongle via the registered
-// opener for its scheme, brings up the radio on the requested channel, and
-// registers it with the engine. At least one dongle is required.
-func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, logger *slog.Logger) error {
+// opener for its scheme, brings up the radio on the requested channel and the
+// channel's spreading factor (from the inventory), and registers it with the
+// engine. At least one dongle is required.
+func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]page.SpreadFactor, logger *slog.Logger) error {
 	specs, err := parseDongles(flags)
 	if err != nil {
 		return err
@@ -170,12 +181,19 @@ func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAd
 		return fmt.Errorf("no radio dongle: set at least one --dongle scheme:selector,channel")
 	}
 	for _, s := range specs {
-		d, err := dongleOpeners[s.scheme](s.selector, s.channel, hubAddr)
+		sf, ok := sfByChannel[s.channel]
+		if !ok {
+			// No inventory node uses this channel; fall back to the default factor
+			// and warn, since such a dongle has nothing to talk to.
+			logger.Warn("dongle channel has no inventory nodes; using default spreading factor",
+				"channel", s.channel, "spreadFactor", sf)
+		}
+		d, err := dongleOpeners[s.scheme](s.selector, s.channel, sf, hubAddr)
 		if err != nil {
 			return fmt.Errorf("dongle %q: %w", s.selector, err)
 		}
 		eng.AddRadio(ctx, s.channel, radio.New(ctx, d))
-		logger.Info("radio dongle ready", "type", s.scheme, "selector", s.selector, "channel", s.channel)
+		logger.Info("radio dongle ready", "type", s.scheme, "selector", s.selector, "channel", s.channel, "spreadFactor", sf)
 	}
 	return nil
 }
