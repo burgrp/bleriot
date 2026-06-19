@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -95,7 +96,9 @@ func newEngine(t *testing.T) (*Engine, *fakeRadio, protocol.Codec, context.Cance
 	e := New(Options{HubAddr: hubAddr, Timeout: 50 * time.Millisecond, Retries: 3})
 	f := newFakeRadio()
 	ctx, cancel := context.WithCancel(context.Background())
-	e.AddRadio(ctx, testChannel, f)
+	if err := e.AddRadio(ctx, testChannel, f); err != nil {
+		t.Fatal(err)
+	}
 
 	n := node.NewNode(
 		"t",
@@ -137,7 +140,9 @@ func TestEngine_RequestCarriesGuard(t *testing.T) {
 	f.guard = 20 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e.AddRadio(ctx, testChannel, f)
+	if err := e.AddRadio(ctx, testChannel, f); err != nil {
+		t.Fatal(err)
+	}
 	n := node.NewNode("t", testChannel, &node.Descriptor{}, node.Identity{Address: nodeAddr, Key: testKey})
 	if err := e.AddNode(n); err != nil {
 		t.Fatal(err)
@@ -162,6 +167,21 @@ func TestEngine_RequestCarriesGuard(t *testing.T) {
 
 	if _, err := e.Get(context.Background(), nodeAddr, regTemp); err != nil {
 		t.Fatalf("Get: %v", err)
+	}
+}
+
+// TestEngine_AddRadioRejectsLargeGuard checks AddRadio refuses a radio whose
+// reply guard leaves no headroom under the timeout (PROTOCOL.md §6:
+// GUARD < T_timeout), so the misconfiguration surfaces at startup instead of as
+// silent, total packet loss.
+func TestEngine_AddRadioRejectsLargeGuard(t *testing.T) {
+	e := New(Options{HubAddr: hubAddr, Timeout: 20 * time.Millisecond, Retries: 3})
+	f := newFakeRadio()
+	f.guard = 20 * time.Millisecond // == timeout: no room for the reply to arrive
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := e.AddRadio(ctx, testChannel, f); !errors.Is(err, ErrGuardTooLarge) {
+		t.Fatalf("AddRadio error = %v, want ErrGuardTooLarge", err)
 	}
 }
 
@@ -317,7 +337,9 @@ func TestEngine_RefreshReWatches(t *testing.T) {
 	f := newFakeRadio()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e.AddRadio(ctx, testChannel, f)
+	if err := e.AddRadio(ctx, testChannel, f); err != nil {
+		t.Fatal(err)
+	}
 	n := node.NewNode(
 		"t",
 		testChannel,
@@ -397,7 +419,9 @@ func TestEngine_OfflineNodeReportsNull(t *testing.T) {
 	f := newFakeRadio()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e.AddRadio(ctx, testChannel, f)
+	if err := e.AddRadio(ctx, testChannel, f); err != nil {
+		t.Fatal(err)
+	}
 	n := node.NewNode("t", testChannel, &node.Descriptor{},
 		node.Identity{Address: nodeAddr, Key: testKey})
 	if err := e.AddNode(n); err != nil {

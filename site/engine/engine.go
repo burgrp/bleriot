@@ -42,6 +42,15 @@ const DefaultRefreshInterval = 15 * time.Second
 // tolerating a single lost refresh.
 const DefaultLivenessMisses = 2
 
+// minReplyHeadroom is the slack the per-attempt timeout must keep above a
+// radio's reply guard (PROTOCOL.md §6 requires GUARD < T_timeout). A node does
+// not even begin transmitting until GUARD has elapsed, so the reply then needs a
+// little longer to travel on air and be polled in: the timeout must exceed the
+// guard by at least this much or every attempt would expire before the answer
+// could arrive. It is generous relative to a 13-byte packet's on-air time plus
+// the host poll interval.
+const minReplyHeadroom = 10 * time.Millisecond
+
 // Radio is the minimal transmit/receive surface the engine needs. *radio.Radio
 // satisfies it.
 type Radio interface {
@@ -73,6 +82,11 @@ var (
 	ErrUnknownNode = errors.New("engine: unknown node address")
 	// ErrNoRadio is returned when no radio is registered for a node's channel.
 	ErrNoRadio = errors.New("engine: no radio for node channel")
+	// ErrGuardTooLarge is returned by AddRadio when a radio's reply guard leaves
+	// no room under the per-attempt timeout (PROTOCOL.md §6: GUARD < T_timeout).
+	// A node defers its reply by the guard, so a timeout at or below it would fire
+	// before any answer could arrive and every attempt would fail.
+	ErrGuardTooLarge = errors.New("engine: radio reply guard too large for timeout")
 )
 
 type key struct {
@@ -235,11 +249,22 @@ func (e *Engine) noteLiveness(k key, err error) {
 
 // AddRadio registers a radio for a channel and starts servicing its received
 // packets until ctx is cancelled or the radio's channel closes.
-func (e *Engine) AddRadio(ctx context.Context, channel uint8, r Radio) {
+//
+// It rejects a radio whose reply guard (PROTOCOL.md §6) leaves less than
+// minReplyHeadroom under the engine's per-attempt timeout: the node defers its
+// reply by the guard, so a timeout that does not clear it (plus headroom for the
+// reply to arrive) would expire on every attempt. This turns the §6 invariant
+// GUARD < T_timeout into a startup error instead of silent, total packet loss.
+func (e *Engine) AddRadio(ctx context.Context, channel uint8, r Radio) error {
+	if guard := r.ReplyGuard(); guard+minReplyHeadroom > e.timeout {
+		return fmt.Errorf("%w: guard %v + headroom %v exceeds timeout %v on channel %d",
+			ErrGuardTooLarge, guard, minReplyHeadroom, e.timeout, channel)
+	}
 	e.mu.Lock()
 	e.radios[channel] = r
 	e.mu.Unlock()
 	go e.recvLoop(ctx, r)
+	return nil
 }
 
 // AddNode registers a node, building its XTEA codec from the provisioned key.

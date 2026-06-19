@@ -232,7 +232,11 @@ func setup(tb testing.TB) *harness {
 		LivenessMisses:  livenessMisses,
 	})
 	go eng.Run(ctx)
-	eng.AddRadio(ctx, channel, hubRadio)
+	if err := eng.AddRadio(ctx, channel, hubRadio); err != nil {
+		cancel()
+		nodeRadio.Close()
+		tb.Fatalf("AddRadio: %v", err)
+	}
 
 	n := node.NewNode("functest", channel, &node.Descriptor{}, node.Identity{Address: nodeAddr, Key: nodeKey})
 	if err := eng.AddNode(n); err != nil {

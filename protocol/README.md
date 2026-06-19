@@ -150,7 +150,7 @@ Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
 The protocol is **best-effort at the RF layer**. Reliability is the hub's responsibility:
 
 - After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `REG == sent REG`, and the expected reply TYPE: ACK for a SET, IS for a GET/WATCH).
-- The hub asks the node to defer its reply by `GUARD` milliseconds (§6), chosen from the hub radio's transmit-to-receive turnaround time, so the radio is listening again before the reply arrives. `GUARD` is always smaller than `T_timeout`.
+- The hub asks the node to defer its reply by `GUARD` milliseconds (§6), chosen from the hub radio's transmit-to-receive turnaround time, so the radio is listening again before the reply arrives. `GUARD` is always smaller than `T_timeout` — a hub that cannot honour this (its radio's guard would not leave room for a reply under the timeout) must refuse to start rather than lose every reply.
 - If no response arrives within `T_timeout`, the hub may retransmit the same request up to `N_retry` times (recommended: 3).
 
 ---

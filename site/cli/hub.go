@@ -192,7 +192,9 @@ func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAd
 		if err != nil {
 			return fmt.Errorf("dongle %q: %w", s.selector, err)
 		}
-		eng.AddRadio(ctx, s.channel, radio.New(ctx, d))
+		if err := eng.AddRadio(ctx, s.channel, radio.New(ctx, d)); err != nil {
+			return fmt.Errorf("dongle %q: %w", s.selector, err)
+		}
 		logger.Info("radio dongle ready", "type", s.scheme, "selector", s.selector, "channel", s.channel, "spreadFactor", sf)
 	}
 	return nil
