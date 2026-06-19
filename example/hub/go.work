@@ -5,3 +5,4 @@ use ../thermostat
 use ../../cli
 use ../../protocol
 use ../../../reg
+use ../../../tinygo-drivers/pan211x
