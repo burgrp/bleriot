@@ -109,6 +109,13 @@ func (d *Dongle) Receive(buf []byte) (int, bool) {
 // request and the node honours it before replying.
 func (d *Dongle) ReplyGuard() time.Duration { return d.guard }
 
+// ReplyGuard returns the reply turnaround guard (PROTOCOL.md §6) an MCP2210
+// dongle running at the given spreading factor asks nodes to honour. It is a
+// device-independent constant, so a caller can learn the guard without an open
+// device — e.g. to supervise a not-yet-connected dongle whose guard the engine
+// must know before the hardware appears.
+func ReplyGuard(sf pan211x.SpreadFactor) time.Duration { return replyGuard(sf) }
+
 // replyGuard returns the reply turnaround guard for a spreading factor.
 //
 // Timing budget (MCP2210, "dumb" host-resident dongle):

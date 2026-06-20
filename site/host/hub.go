@@ -149,13 +149,21 @@ type dongleSpec struct {
 
 // dongleOpener opens one dongle of a particular type and returns it as a
 // radio.Dongle. New dongle types (e.g. a smart MCU-based dongle) are added by
-// registering another opener in dongleOpeners.
+// registering another opener in dongleTypes.
 type dongleOpener func(selector string, channel uint8, spreadFactor config.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
 
-// dongleOpeners maps a scheme to its opener. To support a new dongle type, add
-// an entry here; the flag parsing and startup wiring need no other changes.
-var dongleOpeners = map[string]dongleOpener{
-	"mcp2210": openMCP2210,
+// dongleType describes one supported dongle scheme: how to open a device and how
+// to learn its reply guard (PROTOCOL.md §6) without opening one, so the hub can
+// supervise a dongle that is not yet connected.
+type dongleType struct {
+	open  dongleOpener
+	guard func(spreadFactor config.SpreadFactor) time.Duration
+}
+
+// dongleTypes maps a scheme to its dongle type. To support a new dongle, add an
+// entry here; the flag parsing and startup wiring need no other changes.
+var dongleTypes = map[string]dongleType{
+	"mcp2210": {open: openMCP2210, guard: mcp2210Guard},
 }
 
 // openMCP2210 opens an MCP2210 USB-to-SPI bridge by selector and brings up its
@@ -168,10 +176,18 @@ func openMCP2210(selector string, channel uint8, spreadFactor config.SpreadFacto
 	return mcpdongle.Open(dev, channel, pan211x.SpreadFactor(spreadFactor), hubAddr)
 }
 
-// startDongles parses each --dongle flag, opens its dongle via the registered
-// opener for its scheme, brings up the radio on the requested channel and the
-// channel's spreading factor (from the inventory), and registers it with the
-// engine. At least one dongle is required.
+// mcp2210Guard reports an MCP2210 dongle's reply guard for a spreading factor,
+// without opening a device.
+func mcp2210Guard(spreadFactor config.SpreadFactor) time.Duration {
+	return mcpdongle.ReplyGuard(pan211x.SpreadFactor(spreadFactor))
+}
+
+// startDongles parses each --dongle flag and brings up a self-healing radio for
+// it: a supervised dongle that opens its device, reopens it after a disconnect,
+// and tolerates the device being absent at startup. The radio is registered with
+// the engine immediately (its reply guard is known from the channel's spreading
+// factor, not the hardware), so the hub starts even with every dongle unplugged.
+// At least one dongle is required.
 func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]config.SpreadFactor, logger *slog.Logger) error {
 	specs, err := parseDongles(flags)
 	if err != nil {
@@ -188,14 +204,18 @@ func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAd
 			logger.Warn("dongle channel has no inventory nodes; using default spreading factor",
 				"channel", s.channel, "spreadFactor", sf)
 		}
-		d, err := dongleOpeners[s.scheme](s.selector, s.channel, sf, hubAddr)
-		if err != nil {
-			return fmt.Errorf("dongle %q: %w", s.selector, err)
+		dt := dongleTypes[s.scheme]
+		s := s // capture per iteration for the opener closure
+		open := func() (radio.Dongle, error) {
+			return dt.open(s.selector, s.channel, sf, hubAddr)
 		}
+		log := logger.With("type", s.scheme, "selector", s.selector, "channel", s.channel)
+		d := radio.NewReconnecting(ctx, open, dt.guard(sf), radio.DefaultReconnectBackoff, log)
 		if err := eng.AddRadio(ctx, s.channel, radio.New(ctx, d)); err != nil {
+			d.Close()
 			return fmt.Errorf("dongle %q: %w", s.selector, err)
 		}
-		logger.Info("radio dongle ready", "type", s.scheme, "selector", s.selector, "channel", s.channel, "spreadFactor", sf)
+		log.Info("radio dongle supervised", "spreadFactor", sf)
 	}
 	return nil
 }
@@ -224,7 +244,7 @@ func parseDongles(flags []string) ([]dongleSpec, error) {
 		if selector == "" {
 			return nil, fmt.Errorf("dongle %q: empty selector", f)
 		}
-		if _, ok := dongleOpeners[scheme]; !ok {
+		if _, ok := dongleTypes[scheme]; !ok {
 			return nil, fmt.Errorf("dongle %q: unknown dongle type %q", f, scheme)
 		}
 		specs = append(specs, dongleSpec{scheme: scheme, selector: selector, channel: uint8(ch)})
