@@ -69,6 +69,7 @@ func (f *fakeTx) push(u engine.Update) {
 
 // fakeReg is a fake Registry capturing the Provide call and exposing channels.
 type fakeReg struct {
+	mu       sync.Mutex
 	name     string
 	initial  any
 	metadata map[string]any
@@ -81,10 +82,20 @@ func newFakeReg() *fakeReg {
 }
 
 func (r *fakeReg) Provide(ctx context.Context, name string, value any, metadata map[string]any, ttl time.Duration) (chan<- any, <-chan any, error) {
+	r.mu.Lock()
 	r.name = name
 	r.initial = value
 	r.metadata = metadata
+	r.mu.Unlock()
 	return r.updates, r.requests, nil
+}
+
+// provided returns the captured arguments of the most recent Provide call under
+// the lock, so a test can read them without racing the goroutine that calls it.
+func (r *fakeReg) provided() (name string, initial any, metadata map[string]any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.name, r.initial, r.metadata
 }
 
 func floatReg() *node.Register {
@@ -123,21 +134,26 @@ func TestBridge_SeedsInitialValue(t *testing.T) {
 
 	// Give ServeNode goroutines a moment to call Provide.
 	deadline := time.After(time.Second)
-	for reg.name == "" {
+	for {
+		name, _, _ := reg.provided()
+		if name != "" {
+			break
+		}
 		select {
 		case <-deadline:
 			t.Fatal("Provide was not called")
 		case <-time.After(2 * time.Millisecond):
 		}
 	}
-	if reg.name != "test.outdoor.temperature" {
-		t.Errorf("provided name = %q", reg.name)
+	name, initial, md := reg.provided()
+	if name != "test.outdoor.temperature" {
+		t.Errorf("provided name = %q", name)
 	}
-	if reg.initial != 12.34 {
-		t.Errorf("initial value = %v, want 12.34", reg.initial)
+	if initial != 12.34 {
+		t.Errorf("initial value = %v, want 12.34", initial)
 	}
-	if reg.metadata["unit"] != "celsius" || reg.metadata["type"] != "float" || reg.metadata["device"] != "test" {
-		t.Errorf("metadata = %v", reg.metadata)
+	if md["unit"] != "celsius" || md["type"] != "float" || md["device"] != "test" {
+		t.Errorf("metadata = %v", md)
 	}
 }
 
