@@ -193,7 +193,7 @@ type nodeMetricSet struct {
 	ring   ring
 }
 
-func (m *nodeMetricSet) prefixDot() string { return m.prefix + ".nodes." + m.name + "." }
+func (m *nodeMetricSet) prefixDot() string { return m.prefix + ".node." + m.name + "." }
 
 func (m *nodeMetricSet) names() []namedType {
 	p := m.prefixDot()

@@ -211,7 +211,7 @@ erased page from a corrupt one.
 With `--diagnostics <prefix>` the hub publishes a set of synthetic, **read-only**
 Registry registers describing its own RF health, in addition to the device
 registers. They are off by default; the prefix namespaces every register (e.g.
-`--diagnostics diag` yields `diag.nodes.kitchen.online`). Change requests to these
+`--diagnostics diag` yields `diag.node.kitchen.online`). Change requests to these
 registers are ignored.
 
 Each per-node and per-dongle traffic counter is exposed twice: a cumulative
@@ -219,7 +219,7 @@ Each per-node and per-dongle traffic counter is exposed twice: a cumulative
 over the trailing `--diag-window`, default `30s`). Values are sampled and
 republished every 5 s.
 
-**Per node** — `<prefix>.nodes.<node>.<reg>`:
+**Per node** — `<prefix>.node.<node>.<reg>`:
 
 | Register | Type | Meaning |
 |----------|------|---------|

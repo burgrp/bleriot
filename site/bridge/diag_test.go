@@ -112,17 +112,17 @@ func TestDiagnostics_PublishesNodeAndDongle(t *testing.T) {
 		name string
 		want any
 	}{
-		{"diag.nodes.lab.online", true},
-		{"diag.nodes.lab.seen", int64(1700000000)},
-		{"diag.nodes.lab.misses", int64(0)},
-		{"diag.nodes.lab.count.rx.all", int64(12)},
-		{"diag.nodes.lab.count.rx.is", int64(7)},
-		{"diag.nodes.lab.count.rx.acks", int64(3)},
-		{"diag.nodes.lab.count.rx.corrupt", int64(2)},
-		{"diag.nodes.lab.count.tx.all", int64(20)},
-		{"diag.nodes.lab.count.tx.retries", int64(4)},
-		{"diag.nodes.lab.count.timeouts", int64(1)},
-		{"diag.nodes.lab.rate.tx.all", float64(0)}, // first sample: no rate yet
+		{"diag.node.lab.online", true},
+		{"diag.node.lab.seen", int64(1700000000)},
+		{"diag.node.lab.misses", int64(0)},
+		{"diag.node.lab.count.rx.all", int64(12)},
+		{"diag.node.lab.count.rx.is", int64(7)},
+		{"diag.node.lab.count.rx.acks", int64(3)},
+		{"diag.node.lab.count.rx.corrupt", int64(2)},
+		{"diag.node.lab.count.tx.all", int64(20)},
+		{"diag.node.lab.count.tx.retries", int64(4)},
+		{"diag.node.lab.count.timeouts", int64(1)},
+		{"diag.node.lab.rate.tx.all", float64(0)}, // first sample: no rate yet
 		{"diag.dongle.far.connected", true},
 		{"diag.dongle.far.reconnects", int64(2)},
 		{"diag.dongle.far.since", int64(1700000001)},
