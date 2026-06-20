@@ -277,6 +277,7 @@ func checkChannelsCovered(specs []dongleSpec, chNames map[uint8]string) error {
 // type and is required — there is no default.
 func parseDongles(flags []string) ([]dongleSpec, error) {
 	specs := make([]dongleSpec, 0, len(flags))
+	seen := make(map[uint8]string, len(flags))
 	for _, f := range flags {
 		i := strings.LastIndex(f, ",")
 		if i < 0 {
@@ -298,6 +299,13 @@ func parseDongles(flags []string) ([]dongleSpec, error) {
 		if _, ok := dongleTypes[scheme]; !ok {
 			return nil, fmt.Errorf("dongle %q: unknown dongle type %q", f, scheme)
 		}
+		// Each channel is served by exactly one dongle: the engine keys its radios
+		// by channel, so a second dongle on the same channel would silently
+		// displace the first. Reject it instead.
+		if prev, dup := seen[uint8(ch)]; dup {
+			return nil, fmt.Errorf("dongle %q: channel %d already served by dongle %q", f, ch, prev)
+		}
+		seen[uint8(ch)] = selector
 		specs = append(specs, dongleSpec{scheme: scheme, selector: selector, channel: uint8(ch)})
 	}
 	return specs, nil

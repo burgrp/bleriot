@@ -197,6 +197,11 @@ func TestParseDonglesErrors(t *testing.T) {
 			t.Fatalf("parseDongles(%q): expected error", c)
 		}
 	}
+
+	// Two dongles on the same channel is rejected (each channel needs its own).
+	if _, err := parseDongles([]string{"mcp2210:ABC,38", "mcp2210:DEF,38"}); err == nil {
+		t.Fatal("parseDongles(duplicate channel): expected error")
+	}
 }
 
 func TestCheckChannelsCovered(t *testing.T) {

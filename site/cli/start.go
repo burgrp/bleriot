@@ -20,6 +20,7 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -36,10 +37,11 @@ var debug bool
 
 // Start builds and runs the host command tree for the given inventory. It is the
 // single entry point a site binary calls from main(). Start never returns on
-// error; it logs and exits non-zero, matching a CLI's behaviour.
+// error; it prints a plain message and exits non-zero, matching a CLI's
+// behaviour.
 func Start(inv inventory.Inventory) {
 	if err := newRootCmd(inv).Execute(); err != nil {
-		slog.Error("command failed", "err", err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }
