@@ -241,7 +241,8 @@ func (m *dongleMetricSet) names() []namedType {
 	out := []namedType{
 		{p + "connected", "bool"},
 		{p + "reconnects", "int"},
-		{p + "since", "int"},
+		{p + "up", "int"},
+		{p + "down", "int"},
 	}
 	for _, c := range dongleCounters {
 		out = append(out, namedType{p + "count." + c, "int"}, namedType{p + "rate." + c, "float"})
@@ -257,7 +258,8 @@ func (m *dongleMetricSet) values(now time.Time) map[string]any {
 	out := map[string]any{
 		p + "connected":  s.Connected,
 		p + "reconnects": int64(s.Reconnects),
-		p + "since":      s.Since,
+		p + "up":         s.Up,
+		p + "down":       s.Down,
 	}
 	for i, c := range dongleCounters {
 		out[p+"count."+c] = int64(vec[i])

@@ -241,7 +241,8 @@ channel's `Name`):
 |----------|------|---------|
 | `connected` | bool | A physical device is currently open. |
 | `reconnects` | int | Times the device has been reopened after the first connect. |
-| `since` | int | Unix time (s) of the most recent successful open. |
+| `up` | int | Unix time (s) of the most recent successful open (start of the current uptime). |
+| `down` | int | Unix time (s) of the most recent disconnect (start of the current outage). |
 | `count.tx.all` / `rate.tx.all` | int / float | Transmit attempts. |
 | `count.tx.err` / `rate.tx.err` | int / float | Failed transmit attempts (including while offline). |
 | `count.rx.all` / `rate.rx.all` | int / float | Packets received. |

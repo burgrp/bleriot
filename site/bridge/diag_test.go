@@ -100,7 +100,7 @@ func TestDiagnostics_PublishesNodeAndDongle(t *testing.T) {
 	defer cancel()
 
 	dongleStats := radio.DongleStats{
-		Connected: true, Reconnects: 2, Since: 1700000001,
+		Connected: true, Reconnects: 2, Up: 1700000001, Down: 1700000000,
 		TxAll: 30, TxErr: 1, RxAll: 9,
 	}
 	d.Serve(ctx,
@@ -125,7 +125,8 @@ func TestDiagnostics_PublishesNodeAndDongle(t *testing.T) {
 		{"diag.node.lab.rate.tx.all", float64(0)}, // first sample: no rate yet
 		{"diag.dongle.far.connected", true},
 		{"diag.dongle.far.reconnects", int64(2)},
-		{"diag.dongle.far.since", int64(1700000001)},
+		{"diag.dongle.far.up", int64(1700000001)},
+		{"diag.dongle.far.down", int64(1700000000)},
 		{"diag.dongle.far.count.tx.all", int64(30)},
 		{"diag.dongle.far.count.tx.err", int64(1)},
 		{"diag.dongle.far.count.rx.all", int64(9)},
