@@ -120,11 +120,13 @@ func (n *Node) Poll() bool {
 		v, null := n.dev.Read(reg)
 		n.replyIS(src, reg, v, null)
 	case protocol.TypeSET:
-		n.dev.Write(reg, value, flags&protocol.FlagNULL != 0)
-		// Acknowledge receipt with an ACK (PROTOCOL.md §8.2); it carries no value.
-		// The write may settle asynchronously — the eventual value is pushed to
-		// any watcher via Notify.
+		// Acknowledge receipt first (PROTOCOL.md §8.2); the ACK carries no value.
+		// It must go out before dev.Write because Write may push one or more IS
+		// Notify packets to watchers (and itself settle asynchronously); sending
+		// those first would delay the ACK past the hub's response timeout. The
+		// eventual settled value reaches any watcher via Notify.
 		n.send(src, protocol.TypeACK, 0, reg, 0)
+		n.dev.Write(reg, value, flags&protocol.FlagNULL != 0)
 	case protocol.TypeWATCH:
 		if value != 0 {
 			n.subscribe(src, reg)
