@@ -215,7 +215,7 @@ func (m *nodeMetricSet) values(src DiagNodeSource, now time.Time) map[string]any
 	p := m.prefixDot()
 	out := map[string]any{
 		p + "online": s.Online,
-		p + "seen":   s.LastRx,
+		p + "seen":   ts(s.LastRx),
 		p + "misses": int64(s.Misses),
 	}
 	for i, c := range nodeCounters {
@@ -258,8 +258,8 @@ func (m *dongleMetricSet) values(now time.Time) map[string]any {
 	out := map[string]any{
 		p + "connected":  s.Connected,
 		p + "reconnects": int64(s.Reconnects),
-		p + "up":         s.Up,
-		p + "down":       s.Down,
+		p + "up":         ts(s.Up),
+		p + "down":       ts(s.Down),
 	}
 	for i, c := range dongleCounters {
 		out[p+"count."+c] = int64(vec[i])
@@ -297,6 +297,16 @@ func (r *ring) sample(now time.Time, v []uint64) []float64 {
 		}
 	}
 	return rates
+}
+
+// ts renders a unix-seconds timestamp register value: the raw seconds, or nil
+// when no event has occurred yet (a zero timestamp), so consumers see null
+// rather than the epoch.
+func ts(unix int64) any {
+	if unix == 0 {
+		return nil
+	}
+	return unix
 }
 
 // diagMeta builds the registry metadata for a diagnostic register: its hub-side
