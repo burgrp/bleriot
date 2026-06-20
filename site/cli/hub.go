@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -212,6 +213,9 @@ func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAd
 	if len(specs) == 0 {
 		return nil, fmt.Errorf("no radio dongle: set at least one --dongle scheme:selector,channel")
 	}
+	if err := checkChannelsCovered(specs, chNames); err != nil {
+		return nil, err
+	}
 	diag := make([]bridge.DiagDongle, 0, len(specs))
 	for _, s := range specs {
 		sf, ok := sfByChannel[s.channel]
@@ -242,6 +246,29 @@ func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAd
 		log.Info("radio dongle supervised", "spreadFactor", sf)
 	}
 	return diag, nil
+}
+
+// checkChannelsCovered ensures every channel the inventory uses (chNames, keyed
+// by channel number) has at least one --dongle on it. A node on an uncovered
+// channel could never be reached — the engine would fail every transaction with
+// ErrNoRadio — so this turns a silent run-time dead end into a startup error
+// listing the missing channels by name.
+func checkChannelsCovered(specs []dongleSpec, chNames map[uint8]string) error {
+	covered := make(map[uint8]bool, len(specs))
+	for _, s := range specs {
+		covered[s.channel] = true
+	}
+	var missing []string
+	for ch, name := range chNames {
+		if !covered[ch] {
+			missing = append(missing, fmt.Sprintf("%s (channel %d)", name, ch))
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("no --dongle for inventory channel(s): %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // parseDongles parses "scheme:selector,channel" entries. The channel is split

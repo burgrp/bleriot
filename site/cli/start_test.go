@@ -198,3 +198,22 @@ func TestParseDonglesErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckChannelsCovered(t *testing.T) {
+	chNames := map[uint8]string{37: "far", 38: "near"}
+
+	// All inventory channels have a dongle (extra dongles are allowed).
+	ok := []dongleSpec{{channel: 37}, {channel: 38}, {channel: 5}}
+	if err := checkChannelsCovered(ok, chNames); err != nil {
+		t.Fatalf("checkChannelsCovered(all covered): %v", err)
+	}
+
+	// A required channel has no dongle: error names the missing channel.
+	err := checkChannelsCovered([]dongleSpec{{channel: 37}}, chNames)
+	if err == nil {
+		t.Fatal("checkChannelsCovered(missing near): expected error")
+	}
+	if !strings.Contains(err.Error(), "near") || !strings.Contains(err.Error(), "38") {
+		t.Fatalf("error %q does not name the missing channel", err)
+	}
+}
