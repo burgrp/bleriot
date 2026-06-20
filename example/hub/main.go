@@ -56,8 +56,8 @@ func main() {
 			Channel: Far,
 			Type:    thermostat.Type(),
 			Config: thermostat.Config{
-				MinTemp: 19.0,
-				MaxTemp: 21.0,
+				MinTemp: 10.0,
+				MaxTemp: 30.0,
 			},
 		},
 		{
@@ -69,8 +69,8 @@ func main() {
 			Channel: Near,
 			Type:    thermostat.Type(),
 			Config: thermostat.Config{
-				MinTemp: 19.0,
-				MaxTemp: 21.0,
+				MinTemp: 10.0,
+				MaxTemp: 30.0,
 			},
 		},
 	})
