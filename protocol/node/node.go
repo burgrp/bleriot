@@ -70,6 +70,13 @@ type Node struct {
 	subs    [maxSubs]sub
 	nextSub int
 
+	// guard is the hub's turnaround guard (PROTOCOL.md §6) learned from the GUARD
+	// field of the last request. lastTx is when the last packet was handed to the
+	// radio. Together they pace consecutive transmits so the hub's half-duplex
+	// dongle has time to read one packet out and re-arm before the next arrives.
+	guard  time.Duration
+	lastTx time.Time
+
 	rxBuf [protocol.PacketLen]byte
 	txBuf [protocol.PacketLen]byte
 }
@@ -106,14 +113,20 @@ func (n *Node) Poll() bool {
 	if err != nil {
 		return false
 	}
+	// Remember the hub's turnaround guard (PROTOCOL.md §6) from this request's
+	// GUARD field. It is used both for the reply below and, in send, to pace any
+	// later spontaneous pushes the dispatch produces.
+	if g := protocol.GuardMillis(flags); g != 0 {
+		n.guard = time.Duration(g) * time.Millisecond
+	}
 	// Reply turnaround guard (PROTOCOL.md §6): the hub tells us, in the request's
 	// GUARD field, how long to wait before answering so its half-duplex radio has
 	// finished switching from transmit back to receive. A fast MCU would otherwise
 	// reply into a window when the hub is not yet listening and the reply would be
-	// lost. Spontaneous pushes (Notify) carry no guard: the hub is already
-	// listening when they arrive.
-	if g := protocol.GuardMillis(flags); g != 0 {
-		time.Sleep(time.Duration(g) * time.Millisecond)
+	// lost. This is measured from the request's arrival (the hub's transmit→receive
+	// switch); send adds the separate spacing between consecutive transmits.
+	if n.guard != 0 {
+		time.Sleep(n.guard)
 	}
 	switch typ {
 	case protocol.TypeGET:
@@ -165,10 +178,23 @@ func (n *Node) replyIS(dst [4]byte, reg uint16, value int32, null bool) {
 	n.send(dst, protocol.TypeIS, flags, reg, value)
 }
 
-// send encodes one packet into txBuf and hands it to the radio.
+// send encodes one packet into txBuf and hands it to the radio, pacing it behind
+// the previous transmit by the hub's turnaround guard (PROTOCOL.md §6). The hub's
+// half-duplex dongle needs that long to read one packet out and re-arm its
+// receiver, so two packets sent back-to-back — a SET's ACK and the IS push the
+// write produces, or two pushes from one change — would see the second arrive
+// before the hub is listening again and be lost. Pacing is from the node's last
+// transmit (the hub's receive readout), distinct from the reply guard in Poll
+// (the hub's transmit→receive switch).
 func (n *Node) send(dst [4]byte, typ, flags byte, reg uint16, value int32) {
+	if n.guard != 0 {
+		if wait := n.guard - time.Since(n.lastTx); wait > 0 {
+			time.Sleep(wait)
+		}
+	}
 	n.codec.Encode(n.txBuf[:], n.self, typ, flags, reg, value)
 	_ = n.radio.Send(dst, n.txBuf[:])
+	n.lastTx = time.Now()
 }
 
 // subscribe records a (hub, tag) watch, refreshing it if it already exists.
