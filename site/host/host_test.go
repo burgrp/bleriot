@@ -54,7 +54,7 @@ func sampleInstance() inventory.Instance {
 		Name:    "kitchen",
 		UID:     [config.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
 		Key:     [config.KeyLen]byte{0xAA, 0xBB, 0xCC, 0xDD},
-		Channel: inventory.Channel{Number: 37, SpreadFactor: config.SpreadFactorS2},
+		Channel: inventory.Channel{Name: "near", Number: 37, SpreadFactor: config.SpreadFactorS2},
 		Type:    sampleType(),
 		Config:  thermostatConfig{MinTemp: 1800, MaxTemp: 2400},
 	}

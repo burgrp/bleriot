@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,6 +47,44 @@ type Reconnecting struct {
 	mu     sync.Mutex
 	cur    Dongle // the live device, or nil while offline
 	closed bool
+
+	// Diagnostic counters, updated lock-free. connected mirrors cur!=nil for
+	// snapshotting without taking mu; reconnects counts reopens after the first
+	// connect; lastConnect is the unix-seconds time of the most recent open.
+	connected   atomic.Bool
+	reconnects  atomic.Uint64
+	lastConnect atomic.Int64
+	txAll       atomic.Uint64 // Send calls
+	txErr       atomic.Uint64 // Send calls that failed (including while offline)
+	rxAll       atomic.Uint64 // packets actually received
+}
+
+// DongleStats is a point-in-time snapshot of a Reconnecting dongle's connection
+// state and cumulative traffic counters, as published by the diagnostics bridge.
+type DongleStats struct {
+	// Connected reports whether a physical device is currently open.
+	Connected bool
+	// Reconnects counts how many times the device has been reopened after the
+	// first successful connect (a measure of link instability).
+	Reconnects uint64
+	// Since is the unix-seconds time of the most recent successful open, or 0 if
+	// the device has never connected.
+	Since int64
+	TxAll uint64 // transmit attempts
+	TxErr uint64 // failed transmit attempts (including those made while offline)
+	RxAll uint64 // packets received
+}
+
+// Stats returns a snapshot of the dongle's connection state and traffic counters.
+func (r *Reconnecting) Stats() DongleStats {
+	return DongleStats{
+		Connected:  r.connected.Load(),
+		Reconnects: r.reconnects.Load(),
+		Since:      r.lastConnect.Load(),
+		TxAll:      r.txAll.Load(),
+		TxErr:      r.txErr.Load(),
+		RxAll:      r.rxAll.Load(),
+	}
 }
 
 // NewReconnecting creates a Reconnecting dongle and starts its supervisor, which
@@ -81,10 +120,13 @@ func (r *Reconnecting) Send(dst [4]byte, payload []byte) error {
 	r.mu.Lock()
 	d := r.cur
 	r.mu.Unlock()
+	r.txAll.Add(1)
 	if d == nil {
+		r.txErr.Add(1)
 		return ErrOffline
 	}
 	if err := d.Send(dst, payload); err != nil {
+		r.txErr.Add(1)
 		r.drop(d, err)
 		return err
 	}
@@ -99,7 +141,11 @@ func (r *Reconnecting) Receive(buf []byte) (int, bool) {
 	if d == nil {
 		return 0, false
 	}
-	return d.Receive(buf)
+	n, ok := d.Receive(buf)
+	if ok {
+		r.rxAll.Add(1)
+	}
+	return n, ok
 }
 
 // Close stops the supervisor and closes the live device, if any. After Close the
@@ -110,6 +156,7 @@ func (r *Reconnecting) Close() error {
 	d := r.cur
 	r.cur = nil
 	r.mu.Unlock()
+	r.connected.Store(false)
 	r.nudge()
 	if d != nil {
 		return d.Close()
@@ -127,6 +174,7 @@ func (r *Reconnecting) drop(d Dongle, err error) {
 	}
 	r.cur = nil
 	r.mu.Unlock()
+	r.connected.Store(false)
 	d.Close()
 	r.log.Warn("radio dongle disconnected; reconnecting", "err", err)
 	r.nudge()
@@ -145,6 +193,7 @@ func (r *Reconnecting) nudge() {
 // retries every backoff. It exits when ctx is cancelled or Close is called.
 func (r *Reconnecting) supervise(ctx context.Context) {
 	var loggedFail bool
+	var opened bool // whether the device has ever connected (to count reopens)
 	for {
 		r.mu.Lock()
 		closed := r.closed
@@ -188,6 +237,12 @@ func (r *Reconnecting) supervise(ctx context.Context) {
 		}
 		r.cur = d
 		r.mu.Unlock()
+		if opened {
+			r.reconnects.Add(1)
+		}
+		opened = true
+		r.lastConnect.Store(time.Now().Unix())
+		r.connected.Store(true)
 		r.log.Info("radio dongle connected")
 		loggedFail = false
 	}

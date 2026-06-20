@@ -95,11 +95,16 @@ var PY32F030 = Chip{
 // channel different factors. Declare each channel once and share that value
 // across the instances that use it.
 type Channel struct {
+	// Name is the channel's human-readable identity, e.g. "far". It is required
+	// and must be unique: the hub uses it to scope per-dongle diagnostic registers
+	// (e.g. "diag.dongle.far.connected"), so two channels may not share a name and
+	// one channel number may not carry two names.
+	Name string
 	// Number is the BLE RF channel number.
 	Number uint8
 	// SpreadFactor is the BLE Coded PHY spreading factor used on this channel. The
 	// zero value is config.SpreadFactorS8 (highest range), so a bare
-	// Channel{Number: n} keeps the historical behaviour.
+	// Channel{Name: n, Number: m} keeps the historical spreading factor.
 	SpreadFactor config.SpreadFactor
 }
 
@@ -174,10 +179,49 @@ func (inv Inventory) Validate() error {
 			return fmt.Errorf("instance %q: %w", inst.Name, err)
 		}
 	}
+	if err := inv.validateChannels(); err != nil {
+		return err
+	}
 	if _, err := inv.SpreadFactorByChannel(); err != nil {
 		return err
 	}
 	return nil
+}
+
+// validateChannels checks that every channel has a non-empty name and that names
+// and numbers form a one-to-one mapping: a channel number must not carry two
+// names, and a name must not be reused for two numbers. The hub scopes per-dongle
+// diagnostic registers by channel name, so a collision would mix two dongles'
+// metrics under one register.
+func (inv Inventory) validateChannels() error {
+	nameByNum := make(map[uint8]string, len(inv))
+	numByName := make(map[string]uint8, len(inv))
+	for _, inst := range inv {
+		ch := inst.Channel
+		if ch.Name == "" {
+			return fmt.Errorf("instance %q: channel %d has no name", inst.Name, ch.Number)
+		}
+		if prev, ok := nameByNum[ch.Number]; ok && prev != ch.Name {
+			return fmt.Errorf("channel %d has two names %q and %q", ch.Number, prev, ch.Name)
+		}
+		if prev, ok := numByName[ch.Name]; ok && prev != ch.Number {
+			return fmt.Errorf("channel name %q used for two numbers %d and %d", ch.Name, prev, ch.Number)
+		}
+		nameByNum[ch.Number] = ch.Name
+		numByName[ch.Name] = ch.Number
+	}
+	return nil
+}
+
+// ChannelNames maps each RF channel number in the inventory to its name. The hub
+// uses it to label per-dongle diagnostic registers by channel name. Call
+// Validate first to ensure the mapping is one-to-one.
+func (inv Inventory) ChannelNames() map[uint8]string {
+	names := make(map[uint8]string, len(inv))
+	for _, inst := range inv {
+		names[inst.Channel.Number] = inst.Channel.Name
+	}
+	return names
 }
 
 // SpreadFactorByChannel maps each RF channel number in the inventory to the

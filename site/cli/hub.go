@@ -30,13 +30,15 @@ import (
 // hubOptions holds the runtime/deploy settings for the hub, all sourced from
 // command-line flags (not the inventory).
 type hubOptions struct {
-	registry   string
-	hubAddress string
-	timeout    time.Duration
-	retries    int
-	refresh    time.Duration
-	ttl        time.Duration
-	dongles    []string // each "scheme:selector,channel", e.g. "mcp2210:/dev/hidraw0,37"
+	registry    string
+	hubAddress  string
+	timeout     time.Duration
+	retries     int
+	refresh     time.Duration
+	ttl         time.Duration
+	dongles     []string // each "scheme:selector,channel", e.g. "mcp2210:/dev/hidraw0,37"
+	diagnostics string   // registry namespace prefix for diagnostic registers; empty disables them
+	diagWindow  time.Duration
 }
 
 // newHubCmd builds the "hub" subcommand: bridge the inventory's nodes to the
@@ -64,6 +66,9 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	f.StringArrayVar(&o.dongles, "dongle", nil, "USB radio dongle as scheme:selector,channel (repeatable); "+
 		"scheme selects the dongle type (e.g. \"mcp2210\"), selector is a /dev/hidraw* path or a USB serial, "+
 		"e.g. mcp2210:/dev/hidraw0,37 or mcp2210:0001746423,37")
+	f.StringVar(&o.diagnostics, "diagnostics", "", "publish hub-synthesised diagnostic registers under this "+
+		"registry namespace prefix (e.g. \"diag\"); empty disables them")
+	f.DurationVar(&o.diagWindow, "diag-window", 30*time.Second, "averaging window for diagnostic rate.* registers")
 	return cmd
 }
 
@@ -95,7 +100,8 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 		return fmt.Errorf("inventory: %w", err)
 	}
 
-	if err := startDongles(ctx, eng, o.dongles, hubAddr, sfByChannel, logger); err != nil {
+	dongles, err := startDongles(ctx, eng, o.dongles, hubAddr, sfByChannel, inv.ChannelNames(), logger)
+	if err != nil {
 		return err
 	}
 
@@ -114,6 +120,15 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 	for _, n := range nodes {
 		br.ServeNode(ctx, n)
 		logger.Info("serving node", "node", n.Name, "registers", len(n.Registers), "channel", n.Channel)
+	}
+
+	if o.diagnostics != "" {
+		diag := bridge.NewDiagnostics(eng, regClient, o.diagnostics, o.diagWindow, o.ttl, bridge.WithDiagLogger(logger))
+		diagNodes := make([]bridge.DiagNode, len(nodes))
+		for i, n := range nodes {
+			diagNodes[i] = bridge.DiagNode{Name: n.Name, Addr: n.Address}
+		}
+		diag.Serve(ctx, diagNodes, dongles)
 	}
 
 	logger.Info("hub running; press Ctrl-C to stop", "nodes", len(nodes))
@@ -187,15 +202,17 @@ func mcp2210Guard(spreadFactor config.SpreadFactor) time.Duration {
 // and tolerates the device being absent at startup. The radio is registered with
 // the engine immediately (its reply guard is known from the channel's spreading
 // factor, not the hardware), so the hub starts even with every dongle unplugged.
-// At least one dongle is required.
-func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]config.SpreadFactor, logger *slog.Logger) error {
+// At least one dongle is required. It returns one bridge.DiagDongle per dongle
+// (labelled by channel name) so the caller can publish per-dongle diagnostics.
+func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]config.SpreadFactor, chNames map[uint8]string, logger *slog.Logger) ([]bridge.DiagDongle, error) {
 	specs, err := parseDongles(flags)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(specs) == 0 {
-		return fmt.Errorf("no radio dongle: set at least one --dongle scheme:selector,channel")
+		return nil, fmt.Errorf("no radio dongle: set at least one --dongle scheme:selector,channel")
 	}
+	diag := make([]bridge.DiagDongle, 0, len(specs))
 	for _, s := range specs {
 		sf, ok := sfByChannel[s.channel]
 		if !ok {
@@ -213,11 +230,18 @@ func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAd
 		d := radio.NewReconnecting(ctx, open, dt.guard(sf), radio.DefaultReconnectBackoff, log)
 		if err := eng.AddRadio(ctx, s.channel, radio.New(ctx, d)); err != nil {
 			d.Close()
-			return fmt.Errorf("dongle %q: %w", s.selector, err)
+			return nil, fmt.Errorf("dongle %q: %w", s.selector, err)
 		}
+		// Label per-dongle diagnostics by channel name; fall back to the channel
+		// number for a dongle on a channel with no inventory nodes.
+		name := chNames[s.channel]
+		if name == "" {
+			name = fmt.Sprintf("ch%d", s.channel)
+		}
+		diag = append(diag, bridge.DiagDongle{Name: name, Stats: d.Stats})
 		log.Info("radio dongle supervised", "spreadFactor", sf)
 	}
-	return nil
+	return diag, nil
 }
 
 // parseDongles parses "scheme:selector,channel" entries. The channel is split

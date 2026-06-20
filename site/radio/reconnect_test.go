@@ -1,5 +1,4 @@
 package radio
-package radio
 
 import (
 	"context"

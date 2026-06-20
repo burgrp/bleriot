@@ -135,7 +135,8 @@ type Engine struct {
 	nodes   map[[node.AddrLen]byte]*nodeState
 	pending map[key]pendingReq
 	subs    map[key]Callback
-	misses  map[key]int // consecutive unanswered WATCH refreshes per subscription
+	misses  map[key]int                         // consecutive unanswered WATCH refreshes per subscription
+	metrics map[[node.AddrLen]byte]*nodeMetrics // cumulative diagnostic counters per node
 }
 
 // New creates an Engine. HubAddr should match the receive address configured on
@@ -168,6 +169,7 @@ func New(opts Options) *Engine {
 		pending:  make(map[key]pendingReq),
 		subs:     make(map[key]Callback),
 		misses:   make(map[key]int),
+		metrics:  make(map[[node.AddrLen]byte]*nodeMetrics),
 	}
 }
 
@@ -275,6 +277,7 @@ func (e *Engine) AddNode(n *node.Node) error {
 	}
 	e.mu.Lock()
 	e.nodes[n.Address] = &nodeState{n: n, codec: c}
+	e.metrics[n.Address] = &nodeMetrics{}
 	e.mu.Unlock()
 	return nil
 }
@@ -345,6 +348,7 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 		e.mu.Unlock()
 		return Update{}, ErrNoRadio
 	}
+	nm := e.metricsFor(addr)
 	k := key{addr, reg}
 	if _, busy := e.pending[k]; busy {
 		e.mu.Unlock()
@@ -371,6 +375,12 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 	ns.codec.Encode(pkt[:], e.hubAddr, typ, flags, reg, value)
 
 	for attempt := 0; attempt <= e.retries; attempt++ {
+		if nm != nil {
+			nm.txAll.Add(1)
+			if attempt > 0 {
+				nm.txRetries.Add(1)
+			}
+		}
 		if err := r.Send(addr, pkt[:]); err != nil {
 			return Update{}, fmt.Errorf("engine: send: %w", err)
 		}
@@ -385,6 +395,9 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 			timer.Stop()
 			return Update{}, ctx.Err()
 		}
+	}
+	if nm != nil {
+		nm.timeouts.Add(1)
 	}
 	return Update{}, ErrTimeout
 }
@@ -423,24 +436,45 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 
 	e.mu.Lock()
 	ns, ok := e.nodes[src]
+	nm := e.metricsFor(src)
 	e.mu.Unlock()
 	if !ok {
 		return // unknown source: silently discard (§5)
 	}
 
+	// The packet is attributed to a known node from its cleartext source address:
+	// count it and stamp the last-seen time before attempting to decode, so a
+	// corrupt packet still registers as activity from this node.
+	if nm != nil {
+		nm.rxAll.Add(1)
+		nm.lastRx.Store(time.Now().Unix())
+	}
+
 	srcDec, typ, flags, reg, value, err := ns.codec.Decode(pkt[:])
 	if err != nil || srcDec != src {
+		if nm != nil {
+			nm.rxCorrupt.Add(1)
+		}
 		return
 	}
 
 	switch typ {
 	case protocol.TypeIS:
 		// A value report: resolves a pending GET/WATCH and feeds subscribers.
+		if nm != nil {
+			nm.rxIS.Add(1)
+		}
 	case protocol.TypeACK:
 		// A SET acknowledgement: resolves the pending SET only. It carries no
 		// value, so clear value/flags and never invoke a subscription callback.
 		value, flags = 0, 0
+		if nm != nil {
+			nm.rxACK.Add(1)
+		}
 	default:
+		if nm != nil {
+			nm.rxCorrupt.Add(1)
+		}
 		return // nodes send only IS and ACK
 	}
 

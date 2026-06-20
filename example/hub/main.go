@@ -21,8 +21,8 @@ import (
 // for nodes close to the hub, uses the faster, shorter-range S2 factor. The
 // dongle serving each channel is driven at that channel's factor.
 var (
-	Far  = inventory.Channel{Number: 37, SpreadFactor: config.SpreadFactorS8}
-	Near = inventory.Channel{Number: 38, SpreadFactor: config.SpreadFactorS2}
+	Far  = inventory.Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS8}
+	Near = inventory.Channel{Name: "near", Number: 38, SpreadFactor: config.SpreadFactorS2}
 )
 
 func main() {
