@@ -71,8 +71,8 @@ func instanceStub(uid [config.UIDLen]byte, key [config.KeyLen]byte) string {
 	UID:     %s,
 	Key:     %s,
 	Channel: inventory.Channel{Number: 0}, // TODO: e.g. a shared channel var
-	Type:    TODO, // device type, e.g. thermostat.Type()
-	Config:  nil,  // TODO: device config, e.g. thermostat.Config{...}
+	Type:    TODO, // device type, e.g. spec.Type()
+	Config:  nil,  // TODO: device config, e.g. spec.Config{...}
 },
 `, byteArrayLiteral(uid[:]), byteArrayLiteral(key[:]))
 }

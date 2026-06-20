@@ -1,8 +1,0 @@
-go 1.25.2
-
-use .
-use ..
-use ../../../protocol
-use ../../../site
-use ../../../../tinygo-drivers/bb/spi
-use ../../../../tinygo-drivers/pan211x

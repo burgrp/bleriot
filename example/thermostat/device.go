@@ -1,8 +1,12 @@
 //go:build tinygo
 
-package thermostat
+package main
 
-import "protocol/node"
+import (
+	"protocol/node"
+
+	"thermostat/spec"
+)
 
 // Device is the running thermostat: the application behind the registers. It
 // holds the live register state and a reference to the runtime so it can push
@@ -13,7 +17,7 @@ import "protocol/node"
 // back the heating decision (Heating) to drive the relay. The struct is
 // allocated once at boot; the run loop never allocates.
 type Device struct {
-	cfg Config
+	cfg spec.Config
 
 	temperature int32 // measured temperature, ×100 (wire units)
 	setpoint    int32 // target temperature, ×100 (wire units)
@@ -26,7 +30,7 @@ type Device struct {
 // New builds a thermostat device for the given configuration. The thermostat
 // starts off: the setpoint is NULL until a hub sets one. Call Attach with the
 // runtime before driving the device so it can push IS updates to watchers.
-func New(cfg Config) *Device {
+func New(cfg spec.Config) *Device {
 	return &Device{cfg: cfg}
 }
 
@@ -38,12 +42,12 @@ func (d *Device) Attach(rt *node.Node) { d.rt = rt }
 // the device's read switch: one case per register.
 func (d *Device) Read(tag uint16) (int32, bool) {
 	switch tag {
-	case TagTemperature:
+	case spec.TagTemperature:
 		return d.temperature, false
-	case TagSetpoint:
+	case spec.TagSetpoint:
 		// A NULL setpoint means the thermostat is off.
 		return d.setpoint, !d.setpointSet
-	case TagHeating:
+	case spec.TagHeating:
 		return boolToWire(d.heating), false
 	default:
 		return 0, true // unknown register: no value
@@ -56,12 +60,12 @@ func (d *Device) Read(tag uint16) (int32, bool) {
 // setpoint turns the thermostat off (heating forced off).
 func (d *Device) Write(tag uint16, value int32, null bool) {
 	switch tag {
-	case TagSetpoint:
+	case spec.TagSetpoint:
 		if null {
 			// Clear the setpoint: thermostat off. Push the now-NULL setpoint to
 			// any watcher so the off state is visible without a fresh GET.
 			d.setpointSet = false
-			d.rt.Notify(TagSetpoint, 0, true)
+			d.rt.Notify(spec.TagSetpoint, 0, true)
 			d.control()
 			return
 		}
@@ -75,7 +79,7 @@ func (d *Device) Write(tag uint16, value int32, null bool) {
 		}
 		d.setpoint = value
 		d.setpointSet = true
-		d.rt.Notify(TagSetpoint, value, false)
+		d.rt.Notify(spec.TagSetpoint, value, false)
 		d.control()
 	}
 }
@@ -89,7 +93,7 @@ func (d *Device) UpdateTemperature(value int32) {
 		return
 	}
 	d.temperature = value
-	d.rt.Notify(TagTemperature, value, false)
+	d.rt.Notify(spec.TagTemperature, value, false)
 	d.control()
 }
 
@@ -104,7 +108,7 @@ func (d *Device) control() {
 	want := d.setpointSet && d.temperature < d.setpoint
 	if want != d.heating {
 		d.heating = want
-		d.rt.Notify(TagHeating, boolToWire(d.heating), false)
+		d.rt.Notify(spec.TagHeating, boolToWire(d.heating), false)
 	}
 }
 

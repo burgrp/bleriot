@@ -31,7 +31,7 @@ import (
 	"protocol"
 	"protocol/node"
 	"site/config"
-	"thermostat"
+	"thermostat/spec"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
 	"github.com/burgrp/tinygo-drivers/pan211x"
@@ -99,7 +99,7 @@ func main() {
 	println("Radio initialized")
 
 	// Build the device and the runtime around it.
-	dev := thermostat.New(cfg)
+	dev := New(cfg)
 	rt, err := node.New(radio, header.Address, header.Key, dev)
 	must(err)
 	dev.Attach(rt)
@@ -110,7 +110,7 @@ func main() {
 // run is the single cooperative loop: poll the radio for one request, then —
 // once per sampleInterval — read the sensor, update the device, and drive the
 // relay from the resulting heating decision. It never returns.
-func run(rt *node.Node, dev *thermostat.Device) {
+func run(rt *node.Node, dev *Device) {
 	next := time.Now()
 	for {
 		rt.Poll()
@@ -130,11 +130,11 @@ func run(rt *node.Node, dev *thermostat.Device) {
 // decodeConfig reads the thermostat Config from the page's config bytes. The
 // layout matches the Config struct (config.Marshal encodes fields in declaration
 // order, little-endian): MinTemp then MaxTemp, each a float32.
-func decodeConfig(b []byte) thermostat.Config {
+func decodeConfig(b []byte) spec.Config {
 	if len(b) < 8 {
-		return thermostat.Config{}
+		return spec.Config{}
 	}
-	return thermostat.Config{
+	return spec.Config{
 		MinTemp: math.Float32frombits(binary.LittleEndian.Uint32(b[0:4])),
 		MaxTemp: math.Float32frombits(binary.LittleEndian.Uint32(b[4:8])),
 	}
