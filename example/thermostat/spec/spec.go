@@ -29,13 +29,19 @@ const (
 	TagHeating     = 3 // heating element on/off (bool)
 )
 
+// Chip is the MCU this device's firmware runs on. It is the single source of
+// truth shared by both sides: the firmware reads its provisioning page at
+// Chip.PageAddr/PageBytes, and the host Type advertises it for provisioning, so
+// the two can never disagree on the chip profile.
+var Chip = inventory.PY32F030
+
 // Type returns the thermostat device type: its name and register table. Only
 // the host needs this register metadata; the firmware just reads/writes
 // registers by tag, so TinyGo strips Type from the firmware image.
 func Type() inventory.DeviceType {
 	return inventory.DeviceType{
 		Name: "thermostat",
-		Chip: inventory.PY32F030,
+		Chip: Chip,
 		Registers: []inventory.Register{
 			{
 				Tag:        TagTemperature,

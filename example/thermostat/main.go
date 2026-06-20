@@ -50,15 +50,6 @@ const (
 	pinRelay = machine.PA1 // heating relay (active-high)
 )
 
-// Provisioning page location in flash for the PY32F030 (see
-// site/inventory: page 0x0800F800). pageBytes is a fixed read window large
-// enough for the header (30) + thermostat Config (8) + CRC (4); config.Unmarshal
-// tolerates the trailing slack.
-const (
-	pageAddr  = 0x0800F800
-	pageBytes = 64
-)
-
 // sampleInterval is how often the temperature sensor is read and the control
 // loop re-evaluated.
 const sampleInterval = time.Second
@@ -73,7 +64,7 @@ func main() {
 
 	// Identity and configuration come from the provisioning page in flash. Decode
 	// (not Unmarshal) keeps the firmware small by avoiding reflection/fmt.
-	pageData := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pageAddr))), pageBytes)
+	pageData := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(spec.Chip.PageAddr))), spec.Chip.PageBytes)
 	header, cfgBytes, err := config.Decode(pageData)
 	if err != nil {
 		if config.IsUnprovisioned(err) {

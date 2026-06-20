@@ -78,14 +78,19 @@ type Chip struct {
 	UIDAddr uint32
 	// PageAddr is the flash address of the provisioning page.
 	PageAddr uint32
+	// PageBytes is the size of the read window the firmware maps at PageAddr on
+	// boot: large enough for the provisioning header, the device Config, and the
+	// trailing CRC. The decoder tolerates slack, so it need not be exact.
+	PageBytes uint32
 }
 
 // PY32F030 is the Puya PY32F030 chip profile.
 var PY32F030 = Chip{
-	Name:     "py32f030",
-	Target:   "py32f030x8",
-	UIDAddr:  0x1FFF0E00,
-	PageAddr: 0x0800F800,
+	Name:      "py32f030",
+	Target:    "py32f030x8",
+	UIDAddr:   0x1FFF0E00,
+	PageAddr:  0x0800F800,
+	PageBytes: 64,
 }
 
 // Channel is an RF channel together with the spreading factor every node on it
