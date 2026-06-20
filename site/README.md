@@ -35,7 +35,7 @@ func main() {
 			Name:    "kitchen",
 			UID:     [12]byte{ /* MCU unique ID */ },
 			Key:     [16]byte{ /* XTEA key */ },
-			Channel: inventory.Channel{Number: 37},
+			Channel: inventory.Channel{Name: "far", Number: 37},
 			Type:    thermostat.Type(),
 			Config:  thermostat.Config{MinTemp: 18, MaxTemp: 22},
 		},
@@ -78,6 +78,8 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
 | `--ttl` | `30s` | Registry provider TTL. |
 | `--dongle` | — | A radio dongle as `scheme:selector,channel`, e.g. `mcp2210:/dev/hidraw0,37` or `mcp2210:0001746423,37`. The `scheme` selects the dongle type (only `mcp2210` today — there is no default); the `selector` is a `/dev/hidraw*` path or a USB serial; the channel is split off after the last `,`. Repeatable, one per dongle. The dongle's `/dev/hidraw*` node is root-only by default; install the udev rule (see [USB access](#usb-access)) to use it without `sudo`. |
+| `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
+| `--diag-window` | `30s` | Averaging window for the diagnostic `rate.*` registers. |
 
 ### `provision` / `new` flags
 
@@ -141,9 +143,11 @@ The [`inventory`](inventory) package is the type-safe model of a deployment.
   transmits one factor at a time), so binding the two makes it impossible to give
   two nodes on one channel different factors. Declare each channel once and share
   that value across instances; the zero `SpreadFactor` is the highest-range S8.
+  Each channel also has a required, unique `Name` (e.g. `"far"`) that scopes its
+  per-dongle [diagnostic registers](#diagnostics).
 - **`Inventory`** — the full set of devices. `Validate()` enforces unique
-  non-zero tags per device type, unique instance names, and one spreading factor
-  per channel.
+  non-zero tags per device type, unique instance names, one spreading factor per
+  channel, and a non-empty, one-to-one mapping between channel numbers and names.
 
 The RF address is never stored: both the host and the firmware derive it as
 `CRC32(UID)` ([protocol §11.5](../protocol/README.md)).
@@ -154,8 +158,9 @@ A device type (e.g. [`../example/thermostat`](../example/thermostat)) is a
 dual-target Go module:
 
 - `Config` (a fixed-size struct) is shared by host and firmware.
-- `Type() inventory.DeviceType` is host-only (build tag `!tinygo`), so the
-  firmware build never pulls in the host library.
+- `Type() inventory.DeviceType` describes the register table. It is compiled into
+  both targets, but the firmware never calls it, so TinyGo's dead-code
+  elimination strips it (and the host library it references) from the image.
 - The firmware entry point lives behind `//go:build tinygo`.
 
 ### Provisioning page
@@ -198,4 +203,46 @@ erased page from a corrupt one.
 - `Watch` subscriptions are persistent intents: they are retained even if the
   initial attempt times out, and re-`WATCH`ed periodically so a node that comes
   up later (or reboots) is resubscribed automatically.
+
+---
+
+## Diagnostics
+
+With `--diagnostics <prefix>` the hub publishes a set of synthetic, **read-only**
+Registry registers describing its own RF health, in addition to the device
+registers. They are off by default; the prefix namespaces every register (e.g.
+`--diagnostics diag` yields `diag.nodes.kitchen.online`). Change requests to these
+registers are ignored.
+
+Each per-node and per-dongle traffic counter is exposed twice: a cumulative
+`count.*` integer (since hub start) and a `rate.*` float (per second, averaged
+over the trailing `--diag-window`, default `30s`). Values are sampled and
+republished every 5 s.
+
+**Per node** — `<prefix>.nodes.<node>.<reg>`:
+
+| Register | Type | Meaning |
+|----------|------|---------|
+| `online` | bool | Node is answering (watch-refresh misses below the liveness threshold). |
+| `seen` | int | Unix time (s) of the most recent packet received from the node. |
+| `misses` | int | Current consecutive unanswered watch refreshes. |
+| `count.rx.all` / `rate.rx.all` | int / float | Packets received from the node. |
+| `count.rx.is` / `rate.rx.is` | int / float | `IS` value reports received. |
+| `count.rx.acks` / `rate.rx.acks` | int / float | `ACK`s received. |
+| `count.rx.corrupt` / `rate.rx.corrupt` | int / float | Packets attributed to the node that failed to decode. |
+| `count.tx.all` / `rate.tx.all` | int / float | Packets sent (initial sends and retries). |
+| `count.tx.retries` / `rate.tx.retries` | int / float | Retransmissions only. |
+| `count.timeouts` / `rate.timeouts` | int / float | Transactions that exhausted all retries with no reply. |
+
+**Per dongle** — `<prefix>.dongle.<channel-name>.<reg>` (labelled by the
+channel's `Name`):
+
+| Register | Type | Meaning |
+|----------|------|---------|
+| `connected` | bool | A physical device is currently open. |
+| `reconnects` | int | Times the device has been reopened after the first connect. |
+| `since` | int | Unix time (s) of the most recent successful open. |
+| `count.tx.all` / `rate.tx.all` | int / float | Transmit attempts. |
+| `count.tx.err` / `rate.tx.err` | int / float | Failed transmit attempts (including while offline). |
+| `count.rx.all` / `rate.rx.all` | int / float | Packets received. |
 
