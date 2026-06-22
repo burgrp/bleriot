@@ -298,3 +298,106 @@ func TestNotifyOnlyTargetsMatchingTag(t *testing.T) {
 		t.Fatalf("Notify on unwatched tag pushed %d packets, want 0", len(r.sent)-sentAfterSub)
 	}
 }
+
+// pushCount counts transmitted spontaneous pushes (IS with the PUSH flag).
+func pushCount(t *testing.T, r *fakeRadio) int {
+	t.Helper()
+	c := 0
+	for _, s := range r.sent {
+		_, typ, flags, _, _ := decodeReply(t, s.packet)
+		if typ == protocol.TypeIS && flags&protocol.FlagPush != 0 {
+			c++
+		}
+	}
+	return c
+}
+
+// expirePending forces every active pending push's retransmit deadline into the
+// past so the next Poll resends it, without the test having to sleep.
+func expirePending(n *Node) {
+	past := nowMillis() - 1000
+	for i := range n.pending {
+		if n.pending[i].active {
+			n.pending[i].deadline = past
+		}
+	}
+}
+
+func TestNotifyMarksPushFlag(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, 1, 1))
+	n.Poll() // subscribe + immediate solicited IS
+
+	// The solicited WATCH reply must not be marked PUSH (the hub recovers it by
+	// retransmitting WATCH, and must not ACK it).
+	_, _, flags, _, _ := decodeReply(t, r.sent[0].packet)
+	if flags&protocol.FlagPush != 0 {
+		t.Fatalf("solicited WATCH reply flags = %#x, PUSH must be clear", flags)
+	}
+
+	n.Notify(1, 8, false)
+	_, typ, flags, reg, value := decodeReply(t, r.sent[1].packet)
+	if typ != protocol.TypeIS || reg != 1 || value != 8 {
+		t.Fatalf("push = type %#x reg %d value %d, want IS/1/8", typ, reg, value)
+	}
+	if flags&protocol.FlagPush == 0 {
+		t.Fatalf("push flags = %#x, want PUSH set", flags)
+	}
+}
+
+func TestPushRetransmitsUntilAck(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, 1, 1))
+	n.Poll()
+
+	n.Notify(1, 8, false)
+	if got := pushCount(t, r); got != 1 {
+		t.Fatalf("after Notify, push count = %d, want 1 immediate send", got)
+	}
+
+	// Before the retry interval elapses, Poll must not resend.
+	n.Poll()
+	if got := pushCount(t, r); got != 1 {
+		t.Fatalf("premature resend: push count = %d, want 1", got)
+	}
+
+	// Once the retry deadline passes, the next Poll retransmits the push.
+	expirePending(n)
+	n.Poll()
+	if got := pushCount(t, r); got != 2 {
+		t.Fatalf("after expiry, push count = %d, want 2", got)
+	}
+
+	// The hub ACKs the push: retransmission stops even after further expiry.
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeACK, 1, 0))
+	n.Poll() // processes ACK, clearing the pending push
+	expirePending(n)
+	n.Poll()
+	if got := pushCount(t, r); got != 2 {
+		t.Fatalf("resend after ACK: push count = %d, want 2 (no further sends)", got)
+	}
+}
+
+func TestPushStopsAfterMaxTries(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, 1, 1))
+	n.Poll()
+
+	n.Notify(1, 8, false) // tries = 1 (the immediate send)
+	// Drive far more Polls than the ceiling, expiring each time: the push is
+	// abandoned at pushMaxTries and never sent again.
+	for i := 0; i < pushMaxTries+5; i++ {
+		expirePending(n)
+		n.Poll()
+	}
+	if got := pushCount(t, r); got != pushMaxTries {
+		t.Fatalf("push count = %d, want capped at pushMaxTries=%d", got, pushMaxTries)
+	}
+}
+

@@ -167,8 +167,10 @@ func (d *Device) Write(tag uint16, value int32, null bool) {
 	switch tag {
 	case spec.RegLedRed:
 		d.redPeriod.Store(int32(value))
+		d.node.Notify(spec.RegLedRed, value, null)
 	case spec.RegLedGreen:
 		d.greenPeriod.Store(int32(value))
+		d.node.Notify(spec.RegLedGreen, value, null)
 	default:
 		// unknown tag: ignore
 	}

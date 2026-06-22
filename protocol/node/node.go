@@ -52,10 +52,40 @@ type Device interface {
 // subscription evicts the oldest entry.
 const maxSubs = 16
 
+// Spontaneous-push reliability (PROTOCOL.md §8.3, §9). A push (from Notify) has
+// no outstanding hub request behind it, so unlike a solicited reply it cannot be
+// recovered by the hub retransmitting — the node retransmits the push itself
+// until the hub ACKs it. pushRetryInterval is how long the node waits for that
+// ACK before resending, and pushMaxTries bounds the attempts so a vanished hub
+// does not draw the radio forever (after which the push is abandoned, as the
+// next WATCH refresh will re-read the register anyway).
+const (
+	pushRetryInterval = 60 * time.Millisecond
+	pushRetryMillis   = uint32(pushRetryInterval / time.Millisecond)
+	pushMaxTries      = 16
+	maxPending        = 8
+)
+
 type sub struct {
 	addr   [4]byte
 	tag    uint16
 	active bool
+}
+
+// pendingPush is one in-flight spontaneous push awaiting the hub's ACK. The
+// table is a fixed array (maxPending entries) so Notify and the retransmit pump
+// never allocate. A newer push for the same (addr, tag) supersedes the older
+// value in place. deadline is the next-retransmit time as a millisecond tick
+// (nowMillis), kept as a uint32 rather than a time.Time to shrink the table on a
+// memory-constrained node; comparisons are wrap-safe (see servicePending).
+type pendingPush struct {
+	addr     [4]byte
+	value    int32
+	deadline uint32
+	tries    int
+	tag      uint16
+	null     bool
+	active   bool
 }
 
 // Node is the firmware runtime for a single device. Create one with New, then
@@ -69,6 +99,11 @@ type Node struct {
 
 	subs    [maxSubs]sub
 	nextSub int
+
+	// pending holds spontaneous pushes awaiting the hub's ACK; nextPending is the
+	// round-robin eviction cursor when the table is full.
+	pending     [maxPending]pendingPush
+	nextPending int
 
 	// guard is the hub's turnaround guard (PROTOCOL.md §6) learned from the GUARD
 	// field of the last request. lastTx is when the last packet was handed to the
@@ -107,10 +142,12 @@ func (n *Node) Run() {
 func (n *Node) Poll() bool {
 	m, ok := n.radio.Receive(n.rxBuf[:])
 	if !ok || m != protocol.PacketLen {
+		n.servicePending()
 		return false
 	}
 	src, typ, flags, reg, value, err := n.codec.Decode(n.rxBuf[:])
 	if err != nil {
+		n.servicePending()
 		return false
 	}
 	// Remember the hub's turnaround guard (PROTOCOL.md §6) from this request's
@@ -148,9 +185,15 @@ func (n *Node) Poll() bool {
 		} else {
 			n.unsubscribe(src, reg)
 		}
+	case protocol.TypeACK:
+		// The hub acknowledges a spontaneous push (PROTOCOL.md §8.3): the matching
+		// in-flight push is delivered and stops retransmitting. (A node never
+		// receives a SET ACK; those flow node→hub.)
+		n.clearPush(src, reg)
 	default:
 		// IS is node→hub only; a node never receives one. Ignore anything else.
 	}
+	n.servicePending()
 	return true
 }
 
@@ -159,16 +202,109 @@ func (n *Node) Poll() bool {
 // reading, a relay toggled locally, …) so subscribers are kept up to date
 // (PROTOCOL.md §8, WATCH). When null is true the register has become unset and
 // the push carries the NULL flag with value 0 (the dual of a NULL IS reply).
+//
+// Unlike a solicited IS reply, a push has no hub request behind it to be
+// retransmitted on loss, so it is sent reliably: the push is marked PUSH
+// (FlagPush), transmitted immediately, and retransmitted by the runtime (in
+// Poll) until the hub ACKs it or the attempt ceiling is reached.
 func (n *Node) Notify(tag uint16, value int32, null bool) {
 	for i := range n.subs {
 		s := &n.subs[i]
 		if s.active && s.tag == tag {
-			n.replyIS(s.addr, tag, value, null)
+			n.startPush(s.addr, tag, value, null)
 		}
 	}
 }
 
-// replyIS sends an IS packet back to dst with the NULL flag set when null.
+// startPush records (or refreshes) the pending push for (addr, tag) and sends it
+// once now. The retransmit pump (servicePending) resends it until the hub ACKs.
+func (n *Node) startPush(addr [4]byte, tag uint16, value int32, null bool) {
+	p := n.pendingSlot(addr, tag)
+	p.addr = addr
+	p.tag = tag
+	p.value = value
+	p.null = null
+	p.active = true
+	p.tries = 1
+	n.sendPush(p)
+	p.deadline = nowMillis() + pushRetryMillis
+}
+
+// sendPush transmits the pending push as an IS marked PUSH (and NULL when unset).
+func (n *Node) sendPush(p *pendingPush) {
+	flags := protocol.FlagPush
+	value := p.value
+	if p.null {
+		flags |= protocol.FlagNULL
+		value = 0
+	}
+	n.send(p.addr, protocol.TypeIS, flags, p.tag, value)
+}
+
+// pendingSlot returns the pending-push entry for (addr, tag): the existing one if
+// present, else a free slot, else the oldest (round-robin eviction) so the table
+// never allocates and never overflows.
+func (n *Node) pendingSlot(addr [4]byte, tag uint16) *pendingPush {
+	var free *pendingPush
+	for i := range n.pending {
+		p := &n.pending[i]
+		if p.active && p.addr == addr && p.tag == tag {
+			return p
+		}
+		if free == nil && !p.active {
+			free = p
+		}
+	}
+	if free != nil {
+		return free
+	}
+	p := &n.pending[n.nextPending]
+	n.nextPending = (n.nextPending + 1) % maxPending
+	return p
+}
+
+// servicePending retransmits every pending push whose ACK wait has elapsed, up
+// to pushMaxTries, after which the push is abandoned. It runs on every Poll so a
+// push keeps trying through the hub's transmit windows even when no packet is
+// arriving. Deadlines are millisecond ticks (nowMillis) compared with a signed
+// difference so the comparison stays correct across the ~49-day uint32 wrap.
+func (n *Node) servicePending() {
+	now := nowMillis()
+	for i := range n.pending {
+		p := &n.pending[i]
+		if !p.active || int32(now-p.deadline) < 0 {
+			continue
+		}
+		if p.tries >= pushMaxTries {
+			p.active = false
+			continue
+		}
+		p.tries++
+		n.sendPush(p)
+		p.deadline = nowMillis() + pushRetryMillis
+	}
+}
+
+// nowMillis returns a monotonic millisecond tick used to schedule push
+// retransmits. It wraps every ~49 days; callers compare deadlines with a signed
+// difference (servicePending) so the wrap is harmless.
+func nowMillis() uint32 {
+	return uint32(time.Now().UnixNano() / int64(time.Millisecond))
+}
+
+// clearPush stops retransmitting the push for (addr, tag) once the hub ACKs it.
+func (n *Node) clearPush(addr [4]byte, tag uint16) {	for i := range n.pending {
+		p := &n.pending[i]
+		if p.active && p.addr == addr && p.tag == tag {
+			p.active = false
+			return
+		}
+	}
+}
+
+// replyIS sends a solicited IS reply to dst with the NULL flag set when null. It
+// is fire-once (no PUSH flag, no ACK expected): a lost reply is recovered by the
+// hub retransmitting its GET/WATCH request.
 func (n *Node) replyIS(dst [4]byte, reg uint16, value int32, null bool) {
 	var flags byte
 	if null {

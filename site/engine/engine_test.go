@@ -489,3 +489,51 @@ func TestEngine_OfflineNodeReportsNull(t *testing.T) {
 		}
 	}
 }
+
+// TestEngine_AcksSpontaneousPush checks the hub acknowledges a received
+// spontaneous push (IS with the PUSH flag, PROTOCOL.md §8.3) so the node stops
+// retransmitting it.
+func TestEngine_AcksSpontaneousPush(t *testing.T) {
+	_, f, c, cancel := newEngine(t)
+	defer cancel()
+
+	var pkt [PacketLen]byte
+	c.Encode(pkt[:], nodeAddr, protocol.TypeIS, protocol.FlagPush, regTemp, 99)
+	f.recv <- pkt
+
+	select {
+	case got := <-f.sent:
+		_, typ, _, reg, _, err := c.Decode(got[:])
+		if err != nil {
+			t.Fatalf("decode ACK: %v", err)
+		}
+		if typ != protocol.TypeACK {
+			t.Fatalf("reply type = %#x, want ACK", typ)
+		}
+		if reg != regTemp {
+			t.Fatalf("ACK reg = %#x, want %#x", reg, regTemp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("engine did not ACK the spontaneous push")
+	}
+}
+
+// TestEngine_DoesNotAckSolicitedIS checks the hub does not ACK a plain IS (PUSH
+// clear): solicited replies are recovered by request retransmission, and a
+// spurious ACK would waste a transmit window.
+func TestEngine_DoesNotAckSolicitedIS(t *testing.T) {
+	_, f, c, cancel := newEngine(t)
+	defer cancel()
+
+	var pkt [PacketLen]byte
+	c.Encode(pkt[:], nodeAddr, protocol.TypeIS, 0, regTemp, 7) // no PUSH flag
+	f.recv <- pkt
+
+	select {
+	case got := <-f.sent:
+		_, typ, _, _, _, _ := c.Decode(got[:])
+		t.Fatalf("engine transmitted type %#x for a solicited IS, want nothing", typ)
+	case <-time.After(150 * time.Millisecond):
+		// No transmit: correct.
+	}
+}

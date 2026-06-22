@@ -17,11 +17,20 @@ const (
 	TypeSET   byte = 0x01 // hub → node: write register
 	TypeIS    byte = 0x02 // node → hub: current register value
 	TypeWATCH byte = 0x03 // hub → node: subscribe (VALUE=1) or unsubscribe (VALUE=0)
-	TypeACK   byte = 0x04 // node → hub: acknowledges a SET (no value)
+	TypeACK   byte = 0x04 // acknowledges a SET (node→hub) or a push (hub→node); no value
 )
 
 // FLAGS bits (§6).
 const FlagNULL byte = 0x01 // VALUE is absent; register has no value
+
+// FlagPush marks a node→hub IS as a spontaneous push (from Notify) that the hub
+// must acknowledge with an ACK, distinguishing it from a solicited IS reply to a
+// GET or WATCH. It occupies FLAGS bit 1. GUARD (below) also spans bits 1–7, but
+// only on hub→node requests; on node→hub IS packets the GUARD field is unused,
+// so bit 1 is free to carry PUSH in that direction. The hub recovers a lost
+// solicited reply by retransmitting its request, but a spontaneous push has no
+// outstanding request behind it, so it carries its own acknowledgement instead.
+const FlagPush byte = 0x02
 
 // Reply turnaround guard (§6, §9). FLAGS bits 1–7 carry GUARD: the number of
 // milliseconds a node waits, after receiving a request, before it transmits its

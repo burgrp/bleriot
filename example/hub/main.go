@@ -13,7 +13,6 @@ import (
 	"site/inventory"
 
 	bob "bob/spec"
-	thermostat "thermostat/spec"
 )
 
 // Far and Near are the deployment's RF channels. Each bundles a channel number
@@ -22,8 +21,8 @@ import (
 // for nodes close to the hub, uses the faster, shorter-range S2 factor. The
 // dongle serving each channel is driven at that channel's factor.
 var (
-	Far  = inventory.Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS8}
-	Near = inventory.Channel{Name: "near", Number: 38, SpreadFactor: config.SpreadFactorS2}
+	Far = inventory.Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS8}
+	//Near = inventory.Channel{Name: "near", Number: 38, SpreadFactor: config.SpreadFactorS2}
 )
 
 func main() {
@@ -61,18 +60,18 @@ func main() {
 				DefaultGreenPeriod: 100,
 			},
 		},
-		{
-			// A second bench board, close to the hub, so it sits on the Near
-			// channel and uses its faster short-range S2 spreading factor.
-			Name:    "bench",
-			UID:     [12]byte{0x5A, 0x33, 0x50, 0x41, 0x12, 0x32, 0x35, 0x32, 0x29, 0x93, 0x4E, 0x00},
-			Key:     [16]byte{0x72, 0x28, 0x7D, 0xBA, 0x69, 0x31, 0x5A, 0x3E, 0xA0, 0xC3, 0x26, 0x77, 0x43, 0xB0, 0x3E, 0xAC},
-			Channel: Near,
-			Type:    thermostat.Type(),
-			Config: thermostat.Config{
-				MinTemp: 10.0,
-				MaxTemp: 30.0,
-			},
-		},
+		// {
+		// 	// A second bench board, close to the hub, so it sits on the Near
+		// 	// channel and uses its faster short-range S2 spreading factor.
+		// 	Name:    "bench",
+		// 	UID:     [12]byte{0x5A, 0x33, 0x50, 0x41, 0x12, 0x32, 0x35, 0x32, 0x29, 0x93, 0x4E, 0x00},
+		// 	Key:     [16]byte{0x72, 0x28, 0x7D, 0xBA, 0x69, 0x31, 0x5A, 0x3E, 0xA0, 0xC3, 0x26, 0x77, 0x43, 0xB0, 0x3E, 0xAC},
+		// 	Channel: Near,
+		// 	Type:    thermostat.Type(),
+		// 	Config: thermostat.Config{
+		// 		MinTemp: 10.0,
+		// 		MaxTemp: 30.0,
+		// 	},
+		// },
 	})
 }

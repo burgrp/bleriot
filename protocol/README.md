@@ -79,12 +79,27 @@ The hub decrypts each received packet using the shared key associated with the S
 
 ## 6. FLAGS Byte
 
+The FLAGS byte is direction-dependent. Bits 7–1 are GUARD on hub → node
+requests; on node → hub replies that range is unused except for bit 1, which
+carries PUSH.
+
 ```
-Bit 7–1  — GUARD: reply turnaround guard, 0–127 ms (hub → node requests only)
-Bit 0    — NULL: VALUE field is absent; register has no value
+hub → node:
+  Bit 7–1  — GUARD: reply turnaround guard, 0–127 ms
+  Bit 0    — NULL: VALUE field is absent; register has no value
+
+node → hub:
+  Bit 1    — PUSH: this IS is an unsolicited push and must be ACKed (§8.3)
+  Bit 0    — NULL: VALUE field is absent; register has no value
 ```
 
 When NULL=1 the VALUE field is undefined and must be ignored by the receiver.
+
+PUSH=1 marks an IS that a node sent on its own initiative (a WATCH change
+notification, §8.3) rather than as the reply to a request. Because nothing on the
+hub is waiting for it, a lost push would otherwise go unnoticed; PUSH tells the
+hub to acknowledge it so the node can retransmit until it lands (§9). PUSH is
+meaningful only on node → hub IS packets and is clear on every solicited reply.
 
 GUARD is the number of milliseconds a node waits, after receiving a request, before it transmits its reply (§9). A half-duplex hub radio needs time to switch from transmit back to receive after sending a request; a fast node that replied immediately would answer into a window when the hub is not yet listening, and the reply would be lost. The hub sets GUARD on every request from the turnaround time of the radio that carries it (a slower radio asks for a larger guard), and a node honours it before any IS or ACK reply. Replies (node → hub) carry GUARD = 0, and a GUARD of 0 means reply immediately. GUARD must be smaller than the hub's response timeout `T_timeout` (§9).
 
@@ -96,15 +111,21 @@ GUARD is the number of milliseconds a node waits, after receiving a request, bef
 |-------|-------|--------|----------------------------------------------------|
 | 0x00  | GET   | hub    | Read current register value (one-shot)             |
 | 0x01  | SET   | hub    | Write register value                               |
-| 0x02  | IS    | node   | Current register value (reply to GET/WATCH)        |
+| 0x02  | IS    | node   | Current register value (reply to GET/WATCH, or push)|
 | 0x03  | WATCH | hub    | Subscribe (VALUE=1) or unsubscribe (VALUE=0)       |
-| 0x04  | ACK   | node   | Acknowledges a SET; carries no value               |
+| 0x04  | ACK   | both   | Acknowledges a SET (node) or a push (hub); no value |
 
 Receivers must ignore packets with unknown TYPE values.
 
 A node sends IS with FLAGS.NULL=1 when a register has no value (e.g. sensor not yet ready, hardware fault, or explicitly unset).
 
-An ACK confirms only that a SET was received. It carries no value (VALUE=0, FLAGS=0): a write may be applied asynchronously, so the node does not report a result inline. The hub observes the resulting value through a WATCH subscription or a subsequent GET.
+ACK is used in two directions and always carries no value (VALUE=0):
+
+- **node → hub** confirms a SET was received. A write may be applied
+  asynchronously, so the node does not report a result inline; the hub observes
+  the resulting value through a WATCH subscription or a subsequent GET.
+- **hub → node** confirms a spontaneous push (an IS with FLAGS.PUSH=1, §8.3) was
+  received, so the node can stop retransmitting it (§9).
 
 ---
 
@@ -132,9 +153,17 @@ A SET with FLAGS.NULL=1 clears the register: VALUE is undefined and the hub is a
 
 ```
 Hub  →  Node    TYPE=WATCH  REG=R  VALUE=1
-Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>   (immediate reply)
-Node →  Hub     TYPE=IS     REG=R  VALUE=<new value>       (on each change)
+Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>            (immediate reply)
+Node →  Hub     TYPE=IS     REG=R  VALUE=<new value>  FLAGS.PUSH=1  (on each change)
+Hub  →  Node    TYPE=ACK    REG=R  VALUE=0                          (acknowledges the push)
 ```
+
+The immediate reply is solicited — it answers the WATCH — so it is a plain IS
+with PUSH clear, recovered by the hub's request retransmission like any other
+reply (§9). Every subsequent change notification is unsolicited: the node sets
+FLAGS.PUSH=1 and the hub returns an ACK for it. Until that ACK arrives the node
+retransmits the push, so a change is not lost when a push collides with hub
+traffic (§9).
 
 ### 8.4 Unsubscribe
 
@@ -152,6 +181,22 @@ The protocol is **best-effort at the RF layer**. Reliability is the hub's respon
 - After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `REG == sent REG`, and the expected reply TYPE: ACK for a SET, IS for a GET/WATCH).
 - The hub asks the node to defer its reply by `GUARD` milliseconds (§6), chosen from the hub radio's transmit-to-receive turnaround time, so the radio is listening again before the reply arrives. `GUARD` is always smaller than `T_timeout` — a hub that cannot honour this (its radio's guard would not leave room for a reply under the timeout) must refuse to start rather than lose every reply.
 - If no response arrives within `T_timeout`, the hub may retransmit the same request up to `N_retry` times (recommended: 3).
+
+Solicited replies are made reliable by the hub retransmitting the request, but an
+unsolicited push (§8.3) has no outstanding request to retransmit, and the node is
+half-duplex and blind to the hub's transmit windows — a push can collide with hub
+traffic and be lost with nothing to recover it. Pushes therefore carry their own
+acknowledgement:
+
+- A node marks every spontaneous change notification with FLAGS.PUSH=1 (§6) and
+  keeps retransmitting it until the hub acknowledges it.
+- The hub replies to a received push with an `ACK` for the same `REG` (VALUE=0).
+  The ACK is itself best-effort; a duplicate push (because its ACK was lost)
+  carries the same value and is simply re-acknowledged, so loss of an ACK is
+  harmless.
+- The node retransmits a pending push every `T_push` (the reference firmware
+  uses 60 ms) up to `N_push` times (reference: 16) before giving up. A newer
+  value for the same register supersedes any still-pending push for it.
 
 ---
 

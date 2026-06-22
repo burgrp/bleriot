@@ -481,6 +481,14 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	u := Update{Value: value, Null: flags&protocol.FlagNULL != 0}
 	k := key{src, reg}
 
+	// A spontaneous push (PROTOCOL.md §8.3) is marked PUSH and has no outstanding
+	// request behind it, so the node retransmits it until acknowledged: ACK it
+	// back so the node stops. Solicited IS replies (PUSH clear) are recovered by
+	// request retransmission and must not be ACKed.
+	if typ == protocol.TypeIS && flags&protocol.FlagPush != 0 {
+		e.ackPush(ns, src, reg)
+	}
+
 	e.mu.Lock()
 	cb := e.subs[k]
 	pr := e.pending[k]
@@ -504,5 +512,28 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 		case pr.ch <- u:
 		default:
 		}
+	}
+}
+
+// ackPush acknowledges a received spontaneous push (PROTOCOL.md §8.3) back to the
+// node so it stops retransmitting. Like a request it carries the radio's reply
+// guard (§6) so the node keeps its transmit pacing current. It is best effort: a
+// lost ACK simply draws another push, which is acknowledged again.
+func (e *Engine) ackPush(ns *nodeState, dst [node.AddrLen]byte, reg uint16) {
+	e.mu.Lock()
+	r, ok := e.radios[ns.n.Channel]
+	nm := e.metricsFor(dst)
+	e.mu.Unlock()
+	if !ok {
+		return
+	}
+	var pkt [PacketLen]byte
+	flags := protocol.FlagsWithGuard(0, guardMillis(r.ReplyGuard()))
+	ns.codec.Encode(pkt[:], e.hubAddr, protocol.TypeACK, flags, reg, 0)
+	if err := r.Send(dst, pkt[:]); err != nil {
+		return
+	}
+	if nm != nil {
+		nm.txAll.Add(1)
 	}
 }
