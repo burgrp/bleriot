@@ -1,4 +1,4 @@
-// Package engine implements the BleRiot hub protocol logic (PROTOCOL.md §8–§10):
+// Package engine implements the BleRiot hub protocol logic (protocol/README.md §8–§10):
 // GET/SET/WATCH transactions with best-effort retries and timeouts, response
 // correlation, and push-subscription bookkeeping.
 //
@@ -22,7 +22,7 @@ import (
 // PacketLen is the fixed BleRiot on-wire packet size (§4).
 const PacketLen = protocol.PacketLen
 
-// Defaults from PROTOCOL.md §9.
+// Defaults from protocol/README.md §9.
 const (
 	DefaultTimeout = 50 * time.Millisecond
 	DefaultRetries = 3
@@ -30,7 +30,7 @@ const (
 
 // DefaultRefreshInterval is how often Run re-sends WATCH for active
 // subscriptions. A node drops a subscription after T_idle of silence from the
-// hub (PROTOCOL.md §10, recommended 60 s), so the default leaves comfortable
+// hub (protocol/README.md §10, recommended 60 s), so the default leaves comfortable
 // margin below that.
 const DefaultRefreshInterval = 15 * time.Second
 
@@ -43,7 +43,7 @@ const DefaultRefreshInterval = 15 * time.Second
 const DefaultLivenessMisses = 2
 
 // minReplyHeadroom is the slack the per-attempt timeout must keep above a
-// radio's reply guard (PROTOCOL.md §6 requires GUARD < T_timeout). A node does
+// radio's reply guard (protocol/README.md §6 requires GUARD < T_timeout). A node does
 // not even begin transmitting until GUARD has elapsed, so the reply then needs a
 // little longer to travel on air and be polled in: the timeout must exceed the
 // guard by at least this much or every attempt would expire before the answer
@@ -56,7 +56,7 @@ const minReplyHeadroom = 10 * time.Millisecond
 type Radio interface {
 	Send(dst [node.AddrLen]byte, payload []byte) error
 	Received() <-chan [PacketLen]byte
-	// ReplyGuard reports the reply turnaround guard (PROTOCOL.md §6) this radio
+	// ReplyGuard reports the reply turnaround guard (protocol/README.md §6) this radio
 	// needs nodes to honour before answering: the engine carries it in every
 	// request's GUARD field.
 	ReplyGuard() time.Duration
@@ -83,7 +83,7 @@ var (
 	// ErrNoRadio is returned when no radio is registered for a node's channel.
 	ErrNoRadio = errors.New("engine: no radio for node channel")
 	// ErrGuardTooLarge is returned by AddRadio when a radio's reply guard leaves
-	// no room under the per-attempt timeout (PROTOCOL.md §6: GUARD < T_timeout).
+	// no room under the per-attempt timeout (protocol/README.md §6: GUARD < T_timeout).
 	// A node defers its reply by the guard, so a timeout at or below it would fire
 	// before any answer could arrive and every attempt would fail.
 	ErrGuardTooLarge = errors.New("engine: radio reply guard too large for timeout")
@@ -252,7 +252,7 @@ func (e *Engine) noteLiveness(k key, err error) {
 // AddRadio registers a radio for a channel and starts servicing its received
 // packets until ctx is cancelled or the radio's channel closes.
 //
-// It rejects a radio whose reply guard (PROTOCOL.md §6) leaves less than
+// It rejects a radio whose reply guard (protocol/README.md §6) leaves less than
 // minReplyHeadroom under the engine's per-attempt timeout: the node defers its
 // reply by the guard, so a timeout that does not clear it (plus headroom for the
 // reply to arrive) would expire on every attempt. This turns the §6 invariant
@@ -369,7 +369,7 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 	}()
 
 	var pkt [PacketLen]byte
-	// Carry the radio's turnaround guard (PROTOCOL.md §6) so the node defers its
+	// Carry the radio's turnaround guard (protocol/README.md §6) so the node defers its
 	// reply until this hub's radio is listening again.
 	flags = protocol.FlagsWithGuard(flags, guardMillis(r.ReplyGuard()))
 	ns.codec.Encode(pkt[:], e.hubAddr, typ, flags, reg, value)
@@ -403,7 +403,7 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 }
 
 // guardMillis converts a radio's reply turnaround guard to the millisecond GUARD
-// field carried in a request (PROTOCOL.md §6), clamped to the field width.
+// field carried in a request (protocol/README.md §6), clamped to the field width.
 func guardMillis(d time.Duration) byte {
 	ms := d.Milliseconds()
 	if ms <= 0 {
@@ -481,7 +481,7 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	u := Update{Value: value, Null: flags&protocol.FlagNULL != 0}
 	k := key{src, reg}
 
-	// A spontaneous push (PROTOCOL.md §8.3) is marked PUSH and has no outstanding
+	// A spontaneous push (protocol/README.md §8.3) is marked PUSH and has no outstanding
 	// request behind it, so the node retransmits it until acknowledged: ACK it
 	// back so the node stops. Solicited IS replies (PUSH clear) are recovered by
 	// request retransmission and must not be ACKed.
@@ -515,7 +515,7 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	}
 }
 
-// ackPush acknowledges a received spontaneous push (PROTOCOL.md §8.3) back to the
+// ackPush acknowledges a received spontaneous push (protocol/README.md §8.3) back to the
 // node so it stops retransmitting. Like a request it carries the radio's reply
 // guard (§6) so the node keeps its transmit pacing current. It is best effort: a
 // lost ACK simply draws another push, which is acknowledged again.

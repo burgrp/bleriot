@@ -25,7 +25,7 @@ const DefaultReconnectBackoff = 2 * time.Second
 // with a stable identity, so the engine holds one radio per channel regardless
 // of the physical device being unplugged and replugged.
 //
-// The reply guard (PROTOCOL.md §6) is fixed at construction: it depends only on
+// The reply guard (protocol/README.md §6) is fixed at construction: it depends only on
 // the channel's spreading factor, not the hardware, so the engine can validate
 // and use it before any device is present. This lets the hub start with every
 // dongle disconnected.
@@ -98,7 +98,7 @@ func (r *Reconnecting) Stats() DongleStats {
 // NewReconnecting creates a Reconnecting dongle and starts its supervisor, which
 // keeps a device connected until ctx is cancelled or Close is called. open is
 // called to (re)open the physical device; guard is the device's reply turnaround
-// (PROTOCOL.md §6); backoff is the wait between reconnection attempts (defaults
+// (protocol/README.md §6); backoff is the wait between reconnection attempts (defaults
 // to DefaultReconnectBackoff). A nil logger falls back to slog.Default.
 func NewReconnecting(ctx context.Context, open func() (Dongle, error), guard, backoff time.Duration, log *slog.Logger) *Reconnecting {
 	if backoff <= 0 {
@@ -118,7 +118,7 @@ func NewReconnecting(ctx context.Context, open func() (Dongle, error), guard, ba
 	return r
 }
 
-// ReplyGuard reports the reply turnaround guard (PROTOCOL.md §6), known up front
+// ReplyGuard reports the reply turnaround guard (protocol/README.md §6), known up front
 // from the channel's spreading factor and independent of the live device.
 func (r *Reconnecting) ReplyGuard() time.Duration { return r.guard }
 

@@ -129,7 +129,7 @@ func TestEngine_Get(t *testing.T) {
 }
 
 // TestEngine_RequestCarriesGuard checks the engine packs the radio's reply
-// turnaround guard (PROTOCOL.md §6) into the GUARD field of every request.
+// turnaround guard (protocol/README.md §6) into the GUARD field of every request.
 func TestEngine_RequestCarriesGuard(t *testing.T) {
 	c, err := protocol.NewCodec(testKey)
 	if err != nil {
@@ -171,7 +171,7 @@ func TestEngine_RequestCarriesGuard(t *testing.T) {
 }
 
 // TestEngine_AddRadioRejectsLargeGuard checks AddRadio refuses a radio whose
-// reply guard leaves no headroom under the timeout (PROTOCOL.md §6:
+// reply guard leaves no headroom under the timeout (protocol/README.md §6:
 // GUARD < T_timeout), so the misconfiguration surfaces at startup instead of as
 // silent, total packet loss.
 func TestEngine_AddRadioRejectsLargeGuard(t *testing.T) {
@@ -491,7 +491,7 @@ func TestEngine_OfflineNodeReportsNull(t *testing.T) {
 }
 
 // TestEngine_AcksSpontaneousPush checks the hub acknowledges a received
-// spontaneous push (IS with the PUSH flag, PROTOCOL.md §8.3) so the node stops
+// spontaneous push (IS with the PUSH flag, protocol/README.md §8.3) so the node stops
 // retransmitting it.
 func TestEngine_AcksSpontaneousPush(t *testing.T) {
 	_, f, c, cancel := newEngine(t)

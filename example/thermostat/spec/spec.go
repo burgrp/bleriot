@@ -16,7 +16,7 @@ type Config struct {
 	MaxTemp float32
 }
 
-// Register tags are the thermostat's permanent wire identities (PROTOCOL.md §11):
+// Register tags are the thermostat's permanent wire identities (protocol/README.md §11):
 // unique and non-zero within the device type, and never reused once retired.
 //
 // This block is the single source of truth for those tags. The host register

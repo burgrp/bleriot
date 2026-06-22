@@ -400,3 +400,90 @@ func TestPushStopsAfterMaxTries(t *testing.T) {
 		t.Fatalf("push count = %d, want capped at pushMaxTries=%d", got, pushMaxTries)
 	}
 }
+
+// TestPushNotifyNullCarriesNullFlag checks a push of an unset register (Notify
+// with null=true) is transmitted with both PUSH and NULL set and value 0.
+func TestPushNotifyNullCarriesNullFlag(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, 1, 1))
+	n.Poll()
+
+	n.Notify(1, 0, true)
+	_, typ, flags, reg, value := decodeReply(t, r.sent[1].packet)
+	if typ != protocol.TypeIS || reg != 1 {
+		t.Fatalf("push = type %#x reg %d, want IS/1", typ, reg)
+	}
+	if flags&protocol.FlagPush == 0 || flags&protocol.FlagNULL == 0 {
+		t.Fatalf("push flags = %#x, want PUSH|NULL set", flags)
+	}
+	if value != 0 {
+		t.Fatalf("NULL push value = %d, want 0", value)
+	}
+}
+
+// TestPushDueWrapSafe checks the retransmit deadline comparison stays correct
+// across the ~49-day uint32 millisecond-tick wrap, so a push neither stalls nor
+// fires early when nowMillis rolls over.
+func TestPushDueWrapSafe(t *testing.T) {
+	cases := []struct {
+		name          string
+		now, deadline uint32
+		want          bool
+	}{
+		{"exactly due", 1000, 1000, true},
+		{"past due", 1060, 1000, true},
+		{"not yet due", 940, 1000, false},
+		{"now before wrap, deadline after wrap", 0xFFFFFFF0, 0x00000010, false},
+		{"now after wrap, deadline before wrap", 0x00000010, 0xFFFFFFF0, true},
+	}
+	for _, c := range cases {
+		if got := pushDue(c.now, c.deadline); got != c.want {
+			t.Errorf("%s: pushDue(%#x, %#x) = %v, want %v", c.name, c.now, c.deadline, got, c.want)
+		}
+	}
+}
+
+// TestPushTableEvictsWhenFull checks that, once maxPending distinct pushes are
+// in flight, a further push evicts the oldest entry (round-robin) so the table
+// stays bounded and never allocates.
+func TestPushTableEvictsWhenFull(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	// Subscribe to maxPending+1 distinct registers, then push each once.
+	for tag := uint16(1); tag <= maxPending+1; tag++ {
+		r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, tag, 1))
+		n.Poll()
+	}
+	for tag := uint16(1); tag <= maxPending+1; tag++ {
+		n.Notify(tag, int32(tag), false)
+	}
+
+	active := 0
+	for i := range n.pending {
+		if n.pending[i].active {
+			active++
+		}
+	}
+	if active != maxPending {
+		t.Fatalf("active pending = %d, want %d (oldest evicted)", active, maxPending)
+	}
+	if findPending(n, uint16(maxPending+1)) == nil {
+		t.Fatalf("newest push (tag %d) missing after eviction", maxPending+1)
+	}
+	if findPending(n, 1) != nil {
+		t.Fatal("oldest push (tag 1) should have been evicted")
+	}
+}
+
+// findPending returns the active pending push for tag, or nil.
+func findPending(n *Node, tag uint16) *pendingPush {
+	for i := range n.pending {
+		if n.pending[i].active && n.pending[i].tag == tag {
+			return &n.pending[i]
+		}
+	}
+	return nil
+}

@@ -10,7 +10,7 @@
 // devices that share one per-type descriptor.
 //
 // The bridge is generic — it has no per-class or per-register knowledge beyond
-// the node descriptor (PROTOCOL.md §11.7). It depends on small interfaces so it
+// the node descriptor (protocol/README.md §11.7). It depends on small interfaces so it
 // can be tested without real hardware or a running registry; *engine.Engine and
 // the reg client satisfy them.
 package bridge

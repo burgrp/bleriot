@@ -1,6 +1,6 @@
 // Package node models a BleRiot node on the host side: its register descriptor
 // (built from a device type's register table) plus its separately provisioned
-// identity (address and XTEA key, PROTOCOL.md §11.5).
+// identity (address and XTEA key, protocol/README.md §11.5).
 //
 // The descriptor maps wire register IDs to names, hub-side types, and scaling.
 // The host bridges these to the external Registry using ToValue/FromValue.

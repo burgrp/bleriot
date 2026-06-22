@@ -169,7 +169,7 @@ type dongleSpec struct {
 type dongleOpener func(selector string, channel uint8, spreadFactor config.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
 
 // dongleType describes one supported dongle scheme: how to open a device and how
-// to learn its reply guard (PROTOCOL.md §6) without opening one, so the hub can
+// to learn its reply guard (protocol/README.md §6) without opening one, so the hub can
 // supervise a dongle that is not yet connected.
 type dongleType struct {
 	open  dongleOpener

@@ -10,7 +10,7 @@ import (
 
 // Device is the running thermostat: the application behind the registers. It
 // holds the live register state and a reference to the runtime so it can push
-// updates when a value changes on its own (PROTOCOL.md §8, WATCH).
+// updates when a value changes on its own (protocol/README.md §8, WATCH).
 //
 // It implements node.Device (Read/Write) and is otherwise driven by the firmware
 // main loop, which feeds it temperature samples (UpdateTemperature) and reads
@@ -38,7 +38,7 @@ func New(cfg spec.Config) *Device {
 // pushed to watching hubs via Notify.
 func (d *Device) Attach(rt *node.Node) { d.rt = rt }
 
-// Read returns the current value of a register by tag (PROTOCOL.md GET). It is
+// Read returns the current value of a register by tag (protocol/README.md GET). It is
 // the device's read switch: one case per register.
 func (d *Device) Read(tag uint16) (int32, bool) {
 	switch tag {
@@ -54,7 +54,7 @@ func (d *Device) Read(tag uint16) (int32, bool) {
 	}
 }
 
-// Write applies a value to a register by tag (PROTOCOL.md SET). It is the
+// Write applies a value to a register by tag (protocol/README.md SET). It is the
 // device's write switch. It has no return value; the runtime acknowledges the
 // SET with an ACK. Writes to read-only or unknown registers are ignored. A NULL
 // setpoint turns the thermostat off (heating forced off).

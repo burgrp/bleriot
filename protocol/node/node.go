@@ -1,5 +1,5 @@
 // Package node is the firmware-side BleRiot runtime: it owns the radio receive
-// loop, the XTEA codec, and the GET/SET/WATCH dispatch defined in PROTOCOL.md
+// loop, the XTEA codec, and the GET/SET/WATCH dispatch defined in protocol/README.md
 // (§7–§8), so a device firmware only has to implement two switches — one to read
 // a register by tag and one to write a register by tag.
 //
@@ -27,7 +27,7 @@ type Radio interface {
 
 // Device is the application behind the registers. The runtime calls Read for a
 // GET and Write for a SET, both identified by the register's permanent tag
-// (PROTOCOL.md §11). A typical implementation is a switch over the device's tag
+// (protocol/README.md §11). A typical implementation is a switch over the device's tag
 // constants.
 //
 // Both Read and Notify carry the register's value together with a null flag:
@@ -41,7 +41,7 @@ type Device interface {
 	// hub's NULL flag: when true the hub is clearing the register (value is
 	// undefined and must be ignored). Write has no return value: the write may be
 	// processed asynchronously and take time. The runtime acknowledges a SET with
-	// an ACK packet (PROTOCOL.md §8.2) carrying no value, so Write need not
+	// an ACK packet (protocol/README.md §8.2) carrying no value, so Write need not
 	// produce one; the settled value reaches a watching hub later via Notify.
 	// Writes to unknown or read-only registers are ignored.
 	Write(tag uint16, value int32, null bool)
@@ -52,13 +52,15 @@ type Device interface {
 // subscription evicts the oldest entry.
 const maxSubs = 16
 
-// Spontaneous-push reliability (PROTOCOL.md §8.3, §9). A push (from Notify) has
+// Spontaneous-push reliability (protocol/README.md §8.3, §9). A push (from Notify) has
 // no outstanding hub request behind it, so unlike a solicited reply it cannot be
 // recovered by the hub retransmitting — the node retransmits the push itself
 // until the hub ACKs it. pushRetryInterval is how long the node waits for that
-// ACK before resending, and pushMaxTries bounds the attempts so a vanished hub
-// does not draw the radio forever (after which the push is abandoned, as the
-// next WATCH refresh will re-read the register anyway).
+// ACK before resending (pushRetryMillis is the same value as a nowMillis tick),
+// and pushMaxTries bounds the attempts so a vanished hub does not draw the radio
+// forever (after which the push is abandoned, as the next WATCH refresh will
+// re-read the register anyway). maxPending bounds the in-flight push table; a
+// further push beyond it evicts the oldest (see pendingSlot).
 const (
 	pushRetryInterval = 60 * time.Millisecond
 	pushRetryMillis   = uint32(pushRetryInterval / time.Millisecond)
@@ -105,7 +107,7 @@ type Node struct {
 	pending     [maxPending]pendingPush
 	nextPending int
 
-	// guard is the hub's turnaround guard (PROTOCOL.md §6) learned from the GUARD
+	// guard is the hub's turnaround guard (protocol/README.md §6) learned from the GUARD
 	// field of the last request. lastTx is when the last packet was handed to the
 	// radio. Together they pace consecutive transmits so the hub's half-duplex
 	// dongle has time to read one packet out and re-arm before the next arrives.
@@ -150,13 +152,13 @@ func (n *Node) Poll() bool {
 		n.servicePending()
 		return false
 	}
-	// Remember the hub's turnaround guard (PROTOCOL.md §6) from this request's
+	// Remember the hub's turnaround guard (protocol/README.md §6) from this request's
 	// GUARD field. It is used both for the reply below and, in send, to pace any
 	// later spontaneous pushes the dispatch produces.
 	if g := protocol.GuardMillis(flags); g != 0 {
 		n.guard = time.Duration(g) * time.Millisecond
 	}
-	// Reply turnaround guard (PROTOCOL.md §6): the hub tells us, in the request's
+	// Reply turnaround guard (protocol/README.md §6): the hub tells us, in the request's
 	// GUARD field, how long to wait before answering so its half-duplex radio has
 	// finished switching from transmit back to receive. A fast MCU would otherwise
 	// reply into a window when the hub is not yet listening and the reply would be
@@ -170,7 +172,7 @@ func (n *Node) Poll() bool {
 		v, null := n.dev.Read(reg)
 		n.replyIS(src, reg, v, null)
 	case protocol.TypeSET:
-		// Acknowledge receipt first (PROTOCOL.md §8.2); the ACK carries no value.
+		// Acknowledge receipt first (protocol/README.md §8.2); the ACK carries no value.
 		// It must go out before dev.Write because Write may push one or more IS
 		// Notify packets to watchers (and itself settle asynchronously); sending
 		// those first would delay the ACK past the hub's response timeout. The
@@ -186,7 +188,7 @@ func (n *Node) Poll() bool {
 			n.unsubscribe(src, reg)
 		}
 	case protocol.TypeACK:
-		// The hub acknowledges a spontaneous push (PROTOCOL.md §8.3): the matching
+		// The hub acknowledges a spontaneous push (protocol/README.md §8.3): the matching
 		// in-flight push is delivered and stops retransmitting. (A node never
 		// receives a SET ACK; those flow node→hub.)
 		n.clearPush(src, reg)
@@ -200,7 +202,7 @@ func (n *Node) Poll() bool {
 // Notify pushes the new value of a register to every hub currently watching it.
 // Firmware calls this whenever a register's value changes on its own (a sensor
 // reading, a relay toggled locally, …) so subscribers are kept up to date
-// (PROTOCOL.md §8, WATCH). When null is true the register has become unset and
+// (protocol/README.md §8, WATCH). When null is true the register has become unset and
 // the push carries the NULL flag with value 0 (the dual of a NULL IS reply).
 //
 // Unlike a solicited IS reply, a push has no hub request behind it to be
@@ -266,13 +268,13 @@ func (n *Node) pendingSlot(addr [4]byte, tag uint16) *pendingPush {
 // servicePending retransmits every pending push whose ACK wait has elapsed, up
 // to pushMaxTries, after which the push is abandoned. It runs on every Poll so a
 // push keeps trying through the hub's transmit windows even when no packet is
-// arriving. Deadlines are millisecond ticks (nowMillis) compared with a signed
-// difference so the comparison stays correct across the ~49-day uint32 wrap.
+// arriving. Deadlines are millisecond ticks (nowMillis); pushDue compares them
+// wrap-safely.
 func (n *Node) servicePending() {
 	now := nowMillis()
 	for i := range n.pending {
 		p := &n.pending[i]
-		if !p.active || int32(now-p.deadline) < 0 {
+		if !p.active || !pushDue(now, p.deadline) {
 			continue
 		}
 		if p.tries >= pushMaxTries {
@@ -283,6 +285,14 @@ func (n *Node) servicePending() {
 		n.sendPush(p)
 		p.deadline = nowMillis() + pushRetryMillis
 	}
+}
+
+// pushDue reports whether a retransmit scheduled for deadline is due at now.
+// Both are nowMillis ticks; the signed difference keeps the comparison correct
+// across the ~49-day uint32 wrap (a deadline just past the wrap is still seen as
+// later than a now just before it).
+func pushDue(now, deadline uint32) bool {
+	return int32(now-deadline) >= 0
 }
 
 // nowMillis returns a monotonic millisecond tick used to schedule push
@@ -316,7 +326,7 @@ func (n *Node) replyIS(dst [4]byte, reg uint16, value int32, null bool) {
 }
 
 // send encodes one packet into txBuf and hands it to the radio, pacing it behind
-// the previous transmit by the hub's turnaround guard (PROTOCOL.md §6). The hub's
+// the previous transmit by the hub's turnaround guard (protocol/README.md §6). The hub's
 // half-duplex dongle needs that long to read one packet out and re-arm its
 // receiver, so two packets sent back-to-back — a SET's ACK and the IS push the
 // write produces, or two pushes from one change — would see the second arrive
