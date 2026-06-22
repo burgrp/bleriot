@@ -400,4 +400,3 @@ func TestPushStopsAfterMaxTries(t *testing.T) {
 		t.Fatalf("push count = %d, want capped at pushMaxTries=%d", got, pushMaxTries)
 	}
 }
-

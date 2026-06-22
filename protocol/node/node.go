@@ -293,7 +293,8 @@ func nowMillis() uint32 {
 }
 
 // clearPush stops retransmitting the push for (addr, tag) once the hub ACKs it.
-func (n *Node) clearPush(addr [4]byte, tag uint16) {	for i := range n.pending {
+func (n *Node) clearPush(addr [4]byte, tag uint16) {
+	for i := range n.pending {
 		p := &n.pending[i]
 		if p.active && p.addr == addr && p.tag == tag {
 			p.active = false
