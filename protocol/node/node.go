@@ -9,10 +9,22 @@
 package node
 
 import (
+	_ "unsafe" // for go:linkname of runtime.nanotime
+
 	"time"
 
 	"github.com/burgrp/bleriot/protocol"
 )
+
+// nanotime returns a monotonic clock reading in nanoseconds. It is linked to
+// runtime.nanotime, which exists on both the host Go runtime and TinyGo, so the
+// firmware gets a cheap timer read without dragging in time.Time and its
+// calendar/timezone formatting machinery (which costs several KiB of flash). The
+// epoch is unspecified; only differences are meaningful, which is all the guard
+// pacing and push-retransmit scheduling need.
+//
+//go:linkname nanotime runtime.nanotime
+func nanotime() int64
 
 // Radio is the minimal transport the runtime needs. It matches the way a PAN211x
 // is driven directly: the caller configures the channel and receive address
@@ -108,11 +120,12 @@ type Node struct {
 	nextPending int
 
 	// guard is the hub's turnaround guard (protocol/README.md §6) learned from the GUARD
-	// field of the last request. lastTx is when the last packet was handed to the
-	// radio. Together they pace consecutive transmits so the hub's half-duplex
-	// dongle has time to read one packet out and re-arm before the next arrives.
-	guard  time.Duration
-	lastTx time.Time
+	// field of the last request. lastTxNanos is when the last packet was handed to
+	// the radio, as a monotonic nanotime reading. Together they pace consecutive
+	// transmits so the hub's half-duplex dongle has time to read one packet out and
+	// re-arm before the next arrives.
+	guard       time.Duration
+	lastTxNanos int64
 
 	rxBuf [protocol.PacketLen]byte
 	txBuf [protocol.PacketLen]byte
@@ -334,7 +347,7 @@ func pushDue(now, deadline uint32) bool {
 // retransmits. It wraps every ~49 days; callers compare deadlines with a signed
 // difference (servicePending) so the wrap is harmless.
 func nowMillis() uint32 {
-	return uint32(time.Now().UnixNano() / int64(time.Millisecond))
+	return uint32(nanotime() / int64(time.Millisecond))
 }
 
 // clearPush stops retransmitting the push for (addr, tag) once the hub ACKs it.
@@ -370,13 +383,13 @@ func (n *Node) replyIS(dst [4]byte, reg uint16, value int32, null bool) {
 // (the hub's transmit→receive switch).
 func (n *Node) send(dst [4]byte, typ, flags byte, reg uint16, value int32) {
 	if n.guard != 0 {
-		if wait := n.guard - time.Since(n.lastTx); wait > 0 {
+		if wait := n.guard - time.Duration(nanotime()-n.lastTxNanos); wait > 0 {
 			time.Sleep(wait)
 		}
 	}
 	n.codec.Encode(n.txBuf[:], n.self, typ, flags, reg, value)
 	_ = n.radio.Send(dst, n.txBuf[:])
-	n.lastTx = time.Now()
+	n.lastTxNanos = nanotime()
 }
 
 // subscribe records a (hub, tag) watch, refreshing it if it already exists.

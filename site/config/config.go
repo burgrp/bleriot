@@ -83,13 +83,27 @@ type Header struct {
 	Key          [KeyLen]byte
 }
 
+// unprovisionedError marks a page that was never written (magic mismatch). It is
+// a distinct, comparable type so IsUnprovisioned can detect it with a type
+// assertion. errors.Is would instead compile to a reflective interface
+// comparison (runtime.reflectValueEqual), which drags internal/reflectlite
+// (~5 KiB of code) into the firmware image; the type assertion is just a
+// type-word compare and pulls none of it. Decode/Unmarshal return this error
+// directly (never wrapped), so a type assertion is sufficient.
+type unprovisionedError struct{}
+
+func (unprovisionedError) Error() string { return "config: unprovisioned (magic mismatch)" }
+
 // errUnprovisioned reports that a page was never written (magic mismatch).
-var errUnprovisioned = errors.New("config: unprovisioned (magic mismatch)")
+var errUnprovisioned error = unprovisionedError{}
 
 // IsUnprovisioned reports whether err indicates an unwritten/erased page, as
 // opposed to a corrupt or incompatible one. Firmware uses this to distinguish
 // "fresh device, wait for provisioning" from "bad page".
-func IsUnprovisioned(err error) bool { return errors.Is(err, errUnprovisioned) }
+func IsUnprovisioned(err error) bool {
+	_, ok := err.(unprovisionedError)
+	return ok
+}
 
 // Marshal encodes the identity and config into a page image:
 // header || config || crc32. config may be nil (no config bytes); otherwise it
