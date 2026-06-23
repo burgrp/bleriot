@@ -10,8 +10,6 @@ module github.com/burgrp/bleriot/lib
 go 1.25.2
 
 require (
-	github.com/burgrp/bleriot/shared v0.0.0-20260623210436-c202bb178398
-	github.com/burgrp/bleriot/site v0.0.0
 	github.com/burgrp/reg v1.0.12
 	github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486
 	github.com/lmittmann/tint v1.1.3
@@ -19,7 +17,6 @@ require (
 )
 
 require (
-	github.com/burgrp/bleriot/protocol v0.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 )
