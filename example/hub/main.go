@@ -8,9 +8,9 @@
 package main
 
 import (
-	"github.com/burgrp/bleriot/shared/config"
-	"github.com/burgrp/bleriot/shared/inventory"
-	"github.com/burgrp/bleriot/site/cli"
+	"github.com/burgrp/bleriot/lib/shared/config"
+	"github.com/burgrp/bleriot/lib/shared/inventory"
+	"github.com/burgrp/bleriot/lib/site/cli"
 
 	bob "github.com/burgrp/bleriot/example/bob/spec"
 )

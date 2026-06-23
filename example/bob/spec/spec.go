@@ -1,6 +1,6 @@
 package spec
 
-import "github.com/burgrp/bleriot/shared/inventory"
+import "github.com/burgrp/bleriot/lib/shared/inventory"
 
 type Config struct {
 	DefaultRedPeriod   uint32

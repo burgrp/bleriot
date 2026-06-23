@@ -1,3 +1,9 @@
+github.com/burgrp/bleriot/protocol v0.0.0 h1:m+vi+HAjfHpmRzJ/jhpQMTnmZZ5B6yNmsvtoBQMBfu4=
+github.com/burgrp/bleriot/protocol v0.0.0/go.mod h1:bEc8iazMxEntLyd5GXoaEIgZ2i4Hgw3MNhJ4RMVdZgU=
+github.com/burgrp/bleriot/shared v0.0.0-20260623210436-c202bb178398 h1:fJoMZjsBOry20OHVPoo8KeS6ByHqUck56C7ul3BKeqE=
+github.com/burgrp/bleriot/shared v0.0.0-20260623210436-c202bb178398/go.mod h1:tfmyvQMbGwh7KATZKei+UiMUcvuxyj8D3q/XwNWlX/Y=
+github.com/burgrp/bleriot/site v0.0.0 h1:rIaBXNlGBrec2VHJvYzqMI+5ELkQDJ8O5RwZmoqvbMo=
+github.com/burgrp/bleriot/site v0.0.0/go.mod h1:Sw5hByWBox5CX+OwgyR+sIzyjRfeOSm14AQnRY+6uPg=
 github.com/burgrp/reg v1.0.12 h1:HwIoFrv06NBaJxZuyOIGHtwQ/MX7K4EJnEZm+fGAnz4=
 github.com/burgrp/reg v1.0.12/go.mod h1:hvDI6sL/cvfcOCCA+reXCe8T6eMgqAJxj7OClXq99zw=
 github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486 h1:EgQ65/4X1zL5HULVynyRPAczE5AVQH4R3BwkMa2fnb4=

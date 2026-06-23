@@ -29,9 +29,9 @@ import (
 	"unsafe"
 
 	"github.com/burgrp/bleriot/example/bob/spec"
-	"github.com/burgrp/bleriot/node"
-	"github.com/burgrp/bleriot/shared/config"
-	"github.com/burgrp/bleriot/shared/protocol"
+	"github.com/burgrp/bleriot/lib/node"
+	"github.com/burgrp/bleriot/lib/shared/config"
+	"github.com/burgrp/bleriot/lib/shared/protocol"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
 	"github.com/burgrp/tinygo-drivers/pan211x"
