@@ -3,7 +3,7 @@ package inventory
 import (
 	"testing"
 
-	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/shared/config"
 )
 
 func bobType() DeviceType {

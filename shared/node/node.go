@@ -13,7 +13,7 @@ import (
 
 	"time"
 
-	"github.com/burgrp/bleriot/protocol"
+	"github.com/burgrp/bleriot/shared/protocol"
 )
 
 // nanotime returns a monotonic clock reading in nanoseconds. It is linked to

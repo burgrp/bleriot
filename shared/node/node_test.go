@@ -3,7 +3,7 @@ package node
 import (
 	"testing"
 
-	"github.com/burgrp/bleriot/protocol"
+	"github.com/burgrp/bleriot/shared/protocol"
 )
 
 // fakeRadio records sent packets and feeds queued packets to Receive. It lets a

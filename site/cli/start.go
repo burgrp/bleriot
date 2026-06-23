@@ -28,7 +28,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/spf13/cobra"
 
-	"github.com/burgrp/bleriot/site/inventory"
+	"github.com/burgrp/bleriot/shared/inventory"
 	"github.com/burgrp/bleriot/site/node"
 )
 

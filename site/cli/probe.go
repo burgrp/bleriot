@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/shared/config"
 )
 
 // Probe is the SWD debug-probe surface the provisioning commands need: read a

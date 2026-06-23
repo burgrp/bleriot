@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/burgrp/bleriot/protocol"
+	"github.com/burgrp/bleriot/shared/protocol"
 	"github.com/burgrp/bleriot/site/node"
 )
 

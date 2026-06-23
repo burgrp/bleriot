@@ -17,8 +17,5 @@ require (
 )
 
 replace github.com/burgrp/bleriot/site => ../../site
-
-replace github.com/burgrp/bleriot/protocol => ../../protocol
-
-replace github.com/burgrp/reg => ../../../reg
+replace github.com/burgrp/bleriot/shared => ../../shared
 

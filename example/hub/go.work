@@ -1,8 +1,0 @@
-go 1.25.2
-
-use .
-use ../bob
-use ../../site
-use ../../protocol
-use ../../../reg
-use ../../../tinygo-drivers/pan211x

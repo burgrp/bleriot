@@ -24,7 +24,7 @@ package main
 
 import (
 	"github.com/burgrp/bleriot/site/cli"
-	"github.com/burgrp/bleriot/site/inventory"
+	"github.com/burgrp/bleriot/shared/inventory"
 
 	bob "github.com/burgrp/bleriot/example/bob/spec"
 )

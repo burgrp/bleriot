@@ -12,7 +12,7 @@ import (
 
 	"github.com/burgrp/tinygo-drivers/pan211x"
 
-	"github.com/burgrp/bleriot/protocol"
+	"github.com/burgrp/bleriot/shared/protocol"
 
 	"github.com/burgrp/bleriot/site/mcp2210"
 )

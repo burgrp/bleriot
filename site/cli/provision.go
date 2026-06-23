@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/burgrp/bleriot/site/config"
-	"github.com/burgrp/bleriot/site/inventory"
+	"github.com/burgrp/bleriot/shared/config"
+	"github.com/burgrp/bleriot/shared/inventory"
 	"github.com/burgrp/bleriot/site/node"
 )
 

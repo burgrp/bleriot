@@ -17,7 +17,7 @@ package inventory
 import (
 	"fmt"
 
-	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/shared/config"
 )
 
 // RegType is the hub-side interpretation of a register's int32 wire value.
