@@ -365,3 +365,28 @@ func TestBridge_ReseedsAfterReconnect(t *testing.T) {
 		t.Errorf("reseeded update after reconnect = %v, want 43.0", got)
 	}
 }
+
+// TestBridge_BacksOffUnansweredSeed verifies the seeding GET backs off when a
+// register is never answered (e.g. declared in the inventory but not implemented
+// on the node), so it cannot saturate the shared radio. With a 5 ms base and
+// exponential backoff, the GET count over a fixed window stays far below the
+// ~linear rate an un-throttled retry would produce, while still making progress.
+func TestBridge_BacksOffUnansweredSeed(t *testing.T) {
+	tx := &fakeTx{getErr: engine.ErrTimeout} // node never answers this register
+	reg := newFakeReg()
+	cancel := serve(t, tx, reg, floatReg())
+	defer cancel()
+	waitReady(t, tx)
+
+	time.Sleep(300 * time.Millisecond) // many base intervals
+	got := tx.gets()
+	// Un-throttled at the 5 ms base this window would yield ~60 GETs; backoff
+	// (5,10,20,40,80,160,… ms) keeps it to a handful. Bound generously to absorb
+	// jitter and scheduling slack while still proving the rate is throttled.
+	if got > 15 {
+		t.Errorf("seeding GETs not backed off: %d in 300ms (want <= 15)", got)
+	}
+	if got < 3 {
+		t.Errorf("seeding made no progress: only %d GETs (expected retries)", got)
+	}
+}
