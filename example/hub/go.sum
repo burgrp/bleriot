@@ -1,3 +1,7 @@
+github.com/burgrp/bleriot/example/bob v0.0.0-20260623210436-c202bb178398 h1:Xdt17sMLoye8yq0qi/kUbeAOu17FOKE/qVfQfjWqa9Y=
+github.com/burgrp/bleriot/example/bob v0.0.0-20260623210436-c202bb178398/go.mod h1:eModB17CEB7G0Ue/HjE74PiT+5ASyDqzfgUicAQ30M8=
+github.com/burgrp/reg v1.0.12 h1:HwIoFrv06NBaJxZuyOIGHtwQ/MX7K4EJnEZm+fGAnz4=
+github.com/burgrp/reg v1.0.12/go.mod h1:hvDI6sL/cvfcOCCA+reXCe8T6eMgqAJxj7OClXq99zw=
 github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486 h1:EgQ65/4X1zL5HULVynyRPAczE5AVQH4R3BwkMa2fnb4=
 github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486/go.mod h1:TEGCo2HQXxFmH7uD019FVPzgT/EA/XplevJrSjKRiQ8=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
