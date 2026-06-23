@@ -165,6 +165,40 @@ FLAGS.PUSH=1 and the hub returns an ACK for it. Until that ACK arrives the node
 retransmits the push, so a change is not lost when a push collides with hub
 traffic (§9).
 
+#### Watch-all (REG=0)
+
+A WATCH for the reserved register `REG=0` subscribes to (or unsubscribes from)
+**every** register of the node at once. Tags are non-zero by construction (§11),
+so `REG=0` is free as this all-registers sentinel.
+
+```
+Hub  →  Node    TYPE=WATCH  REG=0  VALUE=1                          (watch-all)
+Node →  Hub     TYPE=ACK    REG=0  VALUE=0                          (single reply)
+Node →  Hub     TYPE=IS     REG=R  VALUE=<new value>  FLAGS.PUSH=1  (on each change)
+Hub  →  Node    TYPE=ACK    REG=R  VALUE=0                          (acknowledges the push)
+Hub  →  Node    TYPE=WATCH  REG=0  VALUE=0                          (unwatch-all)
+```
+
+Unlike a single-register WATCH, the node does **not** dump current values: it
+answers a watch-all with one ACK (`REG=0`) and nothing else. The hub seeds the
+initial values it needs with GETs (§8.1), retrying a register's GET until the
+node answers (a watch-all refresh, unlike a single-register one, draws no value
+to seed from). The hub re-seeds the same way whenever a register loses its value
+— in particular after the node is reported `NULL` and later answers again (e.g.
+a radio link that dropped and recovered): a recovered watch-all refresh restores
+only liveness, so the hub re-GETs each register to repopulate it rather than
+waiting for its next change. Thereafter the node pushes each
+changed register exactly as for an individual subscription — a real `REG`, with
+FLAGS.PUSH=1, acknowledged per push. A node sends one push per change even when a
+hub holds both a watch-all and an individual watch for that register.
+
+Watch-all collapses what would otherwise be one WATCH refresh per register into a
+single refresh per node (§10), which both saves airtime and avoids overflowing a
+node's bounded subscription table when a hub watches more registers than the
+table holds. Because the whole node is one subscription, liveness (§10) is
+per-node: when a watch-all node stops answering refreshes, the hub reports all of
+its registers as `NULL` together.
+
 ### 8.4 Unsubscribe
 
 ```

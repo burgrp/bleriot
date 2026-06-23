@@ -20,6 +20,13 @@ const (
 	TypeACK   byte = 0x04 // acknowledges a SET (node→hub) or a push (hub→node); no value
 )
 
+// RegAll is the reserved register ID 0 used by a WATCH to subscribe to (or
+// unsubscribe from) every register of a node at once (§8.3). Real register tags
+// are non-zero by construction (§11), so 0 is free as this all-registers
+// sentinel. A node answers a watch-all WATCH with a single ACK (no value dump)
+// and thereafter pushes every register it would push for an individual watch.
+const RegAll uint16 = 0
+
 // FLAGS bits (§6).
 const FlagNULL byte = 0x01 // VALUE is absent; register has no value
 

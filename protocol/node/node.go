@@ -180,7 +180,18 @@ func (n *Node) Poll() bool {
 		n.send(src, protocol.TypeACK, 0, reg, 0)
 		n.dev.Write(reg, value, flags&protocol.FlagNULL != 0)
 	case protocol.TypeWATCH:
-		if value != 0 {
+		if reg == protocol.RegAll {
+			// Watch-all (protocol/README.md §8.3): subscribe to (or unsubscribe
+			// from) every register with a single table entry tagged RegAll, and
+			// answer with one ACK — no value dump. The hub seeds values with GETs
+			// and learns changes from the per-register pushes Notify produces.
+			if value != 0 {
+				n.subscribe(src, protocol.RegAll)
+			} else {
+				n.unsubscribe(src, protocol.RegAll)
+			}
+			n.send(src, protocol.TypeACK, 0, protocol.RegAll, 0)
+		} else if value != 0 {
 			n.subscribe(src, reg)
 			v, null := n.dev.Read(reg)
 			n.replyIS(src, reg, v, null)
@@ -205,6 +216,11 @@ func (n *Node) Poll() bool {
 // (protocol/README.md §8, WATCH). When null is true the register has become unset and
 // the push carries the NULL flag with value 0 (the dual of a NULL IS reply).
 //
+// A hub watching everything (watch-all, §8.3) appears as a RegAll entry and
+// receives a push for every tag. A hub holding both a watch-all and an
+// individual watch for the same tag still gets only one push: the per-tag entry
+// is skipped because the RegAll entry already covers it.
+//
 // Unlike a solicited IS reply, a push has no hub request behind it to be
 // retransmitted on loss, so it is sent reliably: the push is marked PUSH
 // (FlagPush), transmitted immediately, and retransmitted by the runtime (in
@@ -212,10 +228,29 @@ func (n *Node) Poll() bool {
 func (n *Node) Notify(tag uint16, value int32, null bool) {
 	for i := range n.subs {
 		s := &n.subs[i]
-		if s.active && s.tag == tag {
+		if !s.active {
+			continue
+		}
+		switch {
+		case s.tag == protocol.RegAll:
+			n.startPush(s.addr, tag, value, null)
+		case s.tag == tag && !n.watchesAll(s.addr):
 			n.startPush(s.addr, tag, value, null)
 		}
 	}
+}
+
+// watchesAll reports whether addr holds a watch-all (RegAll) subscription, so
+// Notify can avoid pushing the same change twice to a hub that also has an
+// individual watch for the changed tag.
+func (n *Node) watchesAll(addr [4]byte) bool {
+	for i := range n.subs {
+		s := &n.subs[i]
+		if s.active && s.tag == protocol.RegAll && s.addr == addr {
+			return true
+		}
+	}
+	return false
 }
 
 // startPush records (or refreshes) the pending push for (addr, tag) and sends it

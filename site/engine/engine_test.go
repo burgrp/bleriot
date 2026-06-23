@@ -77,6 +77,12 @@ func simulateNode(t *testing.T, f *fakeRadio, c protocol.Codec, reply func(typ b
 				f.recv <- resp
 				continue
 			}
+			if typ == protocol.TypeWATCH && reg == protocol.RegAll {
+				// Watch-all is answered with a single ACK, not a value dump (§8.3).
+				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
+				f.recv <- resp
+				continue
+			}
 			flags := byte(0)
 			if null {
 				flags = protocol.FlagNULL
@@ -535,5 +541,154 @@ func TestEngine_DoesNotAckSolicitedIS(t *testing.T) {
 		t.Fatalf("engine transmitted type %#x for a solicited IS, want nothing", typ)
 	case <-time.After(150 * time.Millisecond):
 		// No transmit: correct.
+	}
+}
+
+// TestEngine_WatchAllResolvesOnAck checks a watch-all subscription (§8.3)
+// completes on the node's single ACK, not on an IS value dump.
+func TestEngine_WatchAllResolvesOnAck(t *testing.T) {
+	e, f, c, cancel := newEngine(t)
+	defer cancel()
+	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
+		return 0, false
+	})
+
+	if err := e.WatchAll(context.Background(), nodeAddr, func(uint16, Update) {}); err != nil {
+		t.Fatalf("WatchAll: %v", err)
+	}
+}
+
+// TestEngine_WatchAllFansOutPushes checks a watch-all subscriber receives every
+// register's push tagged by its register ID, and that the push is acknowledged.
+func TestEngine_WatchAllFansOutPushes(t *testing.T) {
+	e, f, c, cancel := newEngine(t)
+	defer cancel()
+
+	// Answer the watch-all WATCH with a single ACK and drain any push ACKs the
+	// engine sends so f.sent never blocks.
+	go func() {
+		for req := range f.sent {
+			_, typ, _, reg, _, err := c.Decode(req[:])
+			if err != nil {
+				t.Errorf("node decode: %v", err)
+				continue
+			}
+			if typ == protocol.TypeWATCH {
+				var resp [PacketLen]byte
+				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
+				f.recv <- resp
+			}
+		}
+	}()
+
+	type push struct {
+		reg uint16
+		u   Update
+	}
+	got := make(chan push, 4)
+	if err := e.WatchAll(context.Background(), nodeAddr, func(reg uint16, u Update) {
+		got <- push{reg, u}
+	}); err != nil {
+		t.Fatalf("WatchAll: %v", err)
+	}
+
+	// A spontaneous push for an arbitrary register reaches the watch-all callback.
+	var pkt [PacketLen]byte
+	c.Encode(pkt[:], nodeAddr, protocol.TypeIS, protocol.FlagPush, regTemp, 77)
+	f.recv <- pkt
+
+	select {
+	case g := <-got:
+		if g.reg != regTemp || g.u.Value != 77 || g.u.Null {
+			t.Fatalf("watch-all push = reg %#x %+v, want %#x {77 false}", g.reg, g.u, regTemp)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watch-all callback was not invoked for the push")
+	}
+}
+
+// TestEngine_WatchAllOfflineReportsNull checks that when a watch-all node stops
+// answering refreshes, the engine signals the callback once with reg == RegAll
+// and a NULL Update, telling the caller every register is now unknown.
+func TestEngine_WatchAllOfflineReportsNull(t *testing.T) {
+	c, err := protocol.NewCodec(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(Options{
+		HubAddr:         hubAddr,
+		Timeout:         20 * time.Millisecond,
+		Retries:         1,
+		RefreshInterval: 15 * time.Millisecond,
+		LivenessMisses:  2,
+	})
+	f := newFakeRadio()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := e.AddRadio(ctx, testChannel, f); err != nil {
+		t.Fatal(err)
+	}
+	n := node.NewNode("t", testChannel, &node.Descriptor{},
+		node.Identity{Address: nodeAddr, Key: testKey})
+	if err := e.AddNode(n); err != nil {
+		t.Fatal(err)
+	}
+
+	// The node ACKs watch-all refreshes while alive, then goes silent.
+	var smu sync.Mutex
+	alive := true
+	go func() {
+		for req := range f.sent {
+			smu.Lock()
+			up := alive
+			smu.Unlock()
+			if !up {
+				continue
+			}
+			_, typ, _, reg, _, derr := c.Decode(req[:])
+			if derr != nil {
+				t.Errorf("node decode: %v", derr)
+				continue
+			}
+			if typ == protocol.TypeWATCH {
+				var resp [PacketLen]byte
+				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
+				f.recv <- resp
+			}
+		}
+	}()
+
+	var cmu sync.Mutex
+	var offline bool
+	if err := e.WatchAll(context.Background(), nodeAddr, func(reg uint16, u Update) {
+		if reg == RegAll && u.Null {
+			cmu.Lock()
+			offline = true
+			cmu.Unlock()
+		}
+	}); err != nil {
+		t.Fatalf("WatchAll: %v", err)
+	}
+
+	go e.Run(ctx)
+
+	time.Sleep(45 * time.Millisecond)
+	smu.Lock()
+	alive = false
+	smu.Unlock()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		cmu.Lock()
+		off := offline
+		cmu.Unlock()
+		if off {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("expected an all-registers NULL signal after node went offline")
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }

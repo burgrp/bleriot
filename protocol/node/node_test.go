@@ -299,6 +299,92 @@ func TestNotifyOnlyTargetsMatchingTag(t *testing.T) {
 	}
 }
 
+func TestWatchAllRepliesWithSingleAck(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	// Watch-all (WATCH reg=0 value=1): expect exactly one ACK and no value dump.
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, protocol.RegAll, 1))
+	n.Poll()
+	if len(r.sent) != 1 {
+		t.Fatalf("watch-all sent %d packets, want a single ACK", len(r.sent))
+	}
+	src, typ, flags, reg, value := decodeReply(t, r.sent[0].packet)
+	if typ != protocol.TypeACK {
+		t.Fatalf("watch-all reply type = %#x, want ACK", typ)
+	}
+	if src != nodeSelf {
+		t.Fatalf("ack SRC = %X, want node self", src)
+	}
+	if r.sent[0].dst != hubAddr {
+		t.Fatalf("ack dst = %X, want hub", r.sent[0].dst)
+	}
+	if reg != protocol.RegAll || value != 0 {
+		t.Fatalf("ack reg/value = %d/%d, want 0/0", reg, value)
+	}
+	if flags&protocol.FlagPush != 0 {
+		t.Fatalf("ack flags = %#x, PUSH must be clear", flags)
+	}
+}
+
+func TestWatchAllPushesEveryTag(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, protocol.RegAll, 1))
+	n.Poll()
+	before := len(r.sent)
+
+	// A change on any tag is pushed to the watch-all hub.
+	n.Notify(1, 8, false)
+	n.Notify(3, 42, false)
+	if got := len(r.sent) - before; got != 2 {
+		t.Fatalf("watch-all received %d pushes, want 2 (one per changed tag)", got)
+	}
+	_, typ, flags, reg, value := decodeReply(t, r.sent[before].packet)
+	if typ != protocol.TypeIS || flags&protocol.FlagPush == 0 || reg != 1 || value != 8 {
+		t.Fatalf("first push = type %#x flags %#x reg %d value %d, want pushed IS/1/8", typ, flags, reg, value)
+	}
+	_, typ, flags, reg, value = decodeReply(t, r.sent[before+1].packet)
+	if typ != protocol.TypeIS || flags&protocol.FlagPush == 0 || reg != 3 || value != 42 {
+		t.Fatalf("second push = type %#x flags %#x reg %d value %d, want pushed IS/3/42", typ, flags, reg, value)
+	}
+}
+
+func TestUnwatchAllStopsPushes(t *testing.T) {
+	dev := &fakeDevice{value: 1}
+	n, r := newTestNode(t, dev)
+
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, protocol.RegAll, 1)) // watch-all
+	n.Poll()
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, protocol.RegAll, 0)) // unwatch-all
+	n.Poll()
+
+	before := len(r.sent)
+	n.Notify(2, 77, false)
+	if len(r.sent) != before {
+		t.Fatalf("Notify after unwatch-all sent %d extra packets, want 0", len(r.sent)-before)
+	}
+}
+
+func TestWatchAllDedupesWithIndividualWatch(t *testing.T) {
+	dev := &fakeDevice{value: 5}
+	n, r := newTestNode(t, dev)
+
+	// The same hub holds both a watch-all and an individual watch for tag 1.
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, protocol.RegAll, 1))
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, 1, 1))
+	n.Poll()
+	n.Poll()
+	before := len(r.sent)
+
+	// A change on tag 1 must be pushed exactly once, not once per subscription.
+	n.Notify(1, 8, false)
+	if got := len(r.sent) - before; got != 1 {
+		t.Fatalf("change pushed %d times, want exactly 1 despite overlapping watches", got)
+	}
+}
+
 // pushCount counts transmitted spontaneous pushes (IS with the PUSH flag).
 func pushCount(t *testing.T, r *fakeRadio) int {
 	t.Helper()

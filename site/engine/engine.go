@@ -71,6 +71,18 @@ type Update struct {
 // Callback receives subscription updates for a watched register.
 type Callback func(Update)
 
+// AllCallback receives subscription updates for a watch-all subscription (§8.3):
+// every register's push is delivered with its register ID. When the node goes
+// offline (liveness, §10) the callback is invoked once with reg == RegAll and a
+// NULL Update to signal that all of the node's registers are now unknown.
+type AllCallback func(reg uint16, u Update)
+
+// RegAll is the reserved register ID 0 used by WatchAll/UnwatchAll to subscribe
+// to every register of a node at once (protocol §8.3). It is re-exported here so
+// callers (e.g. the bridge) need not import the protocol package for the
+// all-registers sentinel.
+const RegAll = protocol.RegAll
+
 var (
 	// ErrTimeout is returned when no matching response arrives within the
 	// configured timeout across all retries.
@@ -135,8 +147,12 @@ type Engine struct {
 	nodes   map[[node.AddrLen]byte]*nodeState
 	pending map[key]pendingReq
 	subs    map[key]Callback
-	misses  map[key]int                         // consecutive unanswered WATCH refreshes per subscription
-	metrics map[[node.AddrLen]byte]*nodeMetrics // cumulative diagnostic counters per node
+	misses  map[key]int // consecutive unanswered WATCH refreshes per subscription
+	// watchAll holds node-level watch-all subscriptions (§8.3): a single WATCH
+	// reg=0 covers every register, and pushes fan out by ID through the callback.
+	watchAll  map[[node.AddrLen]byte]AllCallback
+	allMisses map[[node.AddrLen]byte]int          // consecutive unanswered watch-all refreshes per node
+	metrics   map[[node.AddrLen]byte]*nodeMetrics // cumulative diagnostic counters per node
 }
 
 // New creates an Engine. HubAddr should match the receive address configured on
@@ -159,17 +175,19 @@ func New(opts Options) *Engine {
 		lm = DefaultLivenessMisses
 	}
 	return &Engine{
-		hubAddr:  opts.HubAddr,
-		timeout:  to,
-		retries:  rt,
-		refresh:  rf,
-		liveness: lm,
-		radios:   make(map[uint8]Radio),
-		nodes:    make(map[[node.AddrLen]byte]*nodeState),
-		pending:  make(map[key]pendingReq),
-		subs:     make(map[key]Callback),
-		misses:   make(map[key]int),
-		metrics:  make(map[[node.AddrLen]byte]*nodeMetrics),
+		hubAddr:   opts.HubAddr,
+		timeout:   to,
+		retries:   rt,
+		refresh:   rf,
+		liveness:  lm,
+		radios:    make(map[uint8]Radio),
+		nodes:     make(map[[node.AddrLen]byte]*nodeState),
+		pending:   make(map[key]pendingReq),
+		subs:      make(map[key]Callback),
+		misses:    make(map[key]int),
+		watchAll:  make(map[[node.AddrLen]byte]AllCallback),
+		allMisses: make(map[[node.AddrLen]byte]int),
+		metrics:   make(map[[node.AddrLen]byte]*nodeMetrics),
 	}
 }
 
@@ -201,6 +219,10 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 	for k := range e.subs {
 		keys = append(keys, k)
 	}
+	allAddrs := make([][node.AddrLen]byte, 0, len(e.watchAll))
+	for a := range e.watchAll {
+		allAddrs = append(allAddrs, a)
+	}
 	e.mu.Unlock()
 
 	for _, k := range keys {
@@ -216,6 +238,23 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 		}
 		_, err := e.transact(ctx, k.addr, protocol.TypeWATCH, 0, k.reg, 1)
 		e.noteLiveness(k, err)
+	}
+
+	// A watch-all node is refreshed with a single WATCH reg=0 (§8.3), regardless
+	// of how many registers it exposes — one refresh per node instead of per
+	// register.
+	for _, addr := range allAddrs {
+		if ctx.Err() != nil {
+			return
+		}
+		e.mu.Lock()
+		_, live := e.watchAll[addr]
+		e.mu.Unlock()
+		if !live {
+			continue
+		}
+		_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
+		e.noteLivenessAll(addr, err)
 	}
 }
 
@@ -246,6 +285,35 @@ func (e *Engine) noteLiveness(k key, err error) {
 	e.mu.Unlock()
 	if cross {
 		cb(Update{Null: true})
+	}
+}
+
+// noteLivenessAll is noteLiveness for a watch-all node (§8.3). Liveness is
+// per-node: a successful refresh (or any received IS, see handle) clears the
+// miss counter; consecutive timeouts accumulate, and exactly when they reach the
+// threshold the callback is signalled once with reg == RegAll and a NULL Update,
+// telling the caller every register of the vanished node is now unknown.
+func (e *Engine) noteLivenessAll(addr [node.AddrLen]byte, err error) {
+	if errors.Is(err, ErrBusy) {
+		return
+	}
+	e.mu.Lock()
+	cb, live := e.watchAll[addr]
+	if !live {
+		delete(e.allMisses, addr)
+		e.mu.Unlock()
+		return
+	}
+	if err == nil {
+		e.allMisses[addr] = 0
+		e.mu.Unlock()
+		return
+	}
+	e.allMisses[addr]++
+	cross := e.allMisses[addr] == e.liveness
+	e.mu.Unlock()
+	if cross {
+		cb(RegAll, Update{Null: true})
 	}
 }
 
@@ -336,6 +404,39 @@ func (e *Engine) Unwatch(ctx context.Context, addr [node.AddrLen]byte, reg uint1
 	return err
 }
 
+// WatchAll subscribes to every register of a node with a single watch-all
+// (§8.3). cb is invoked for each register's push, identified by its register ID,
+// and once with reg == RegAll and a NULL Update if the node is later detected
+// offline (§10). Unlike Watch, the node answers with a single ACK and does not
+// dump current values, so callers seed the values they need with Get.
+//
+// Like Watch, the subscription is a persistent intent: it is registered
+// immediately and retained even if the initial watch-all attempt times out. Run
+// keeps re-sending it, so a node that comes up later is subscribed
+// automatically. WatchAll returns the error from the first attempt for the
+// caller's information, but the subscription stays active regardless.
+func (e *Engine) WatchAll(ctx context.Context, addr [node.AddrLen]byte, cb AllCallback) error {
+	if cb == nil {
+		return errors.New("engine: nil callback")
+	}
+	e.mu.Lock()
+	e.watchAll[addr] = cb
+	e.mu.Unlock()
+
+	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
+	return err
+}
+
+// UnwatchAll cancels a watch-all subscription (§8.4).
+func (e *Engine) UnwatchAll(ctx context.Context, addr [node.AddrLen]byte) error {
+	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 0)
+	e.mu.Lock()
+	delete(e.watchAll, addr)
+	delete(e.allMisses, addr)
+	e.mu.Unlock()
+	return err
+}
+
 func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, flags byte, reg uint16, value int32) (Update, error) {
 	e.mu.Lock()
 	ns, ok := e.nodes[addr]
@@ -357,6 +458,11 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 	ch := make(chan Update, 1)
 	want := protocol.TypeIS
 	if typ == protocol.TypeSET {
+		want = protocol.TypeACK
+	}
+	// A watch-all (WATCH reg=0, §8.3) is answered with a single ACK, not an IS
+	// value dump, so it resolves on ACK like a SET.
+	if typ == protocol.TypeWATCH && reg == protocol.RegAll {
 		want = protocol.TypeACK
 	}
 	e.pending[k] = pendingReq{ch: ch, want: want}
@@ -491,6 +597,7 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 
 	e.mu.Lock()
 	cb := e.subs[k]
+	allCb := e.watchAll[src]
 	pr := e.pending[k]
 	// A received IS proves the node is alive: clear any accumulated refresh
 	// misses so an active node is never marked offline.
@@ -498,12 +605,23 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 		if _, live := e.subs[k]; live {
 			e.misses[k] = 0
 		}
+		if _, live := e.watchAll[src]; live {
+			e.allMisses[src] = 0
+		}
 	}
 	e.mu.Unlock()
 
 	// ACKs are not value reports; they must not be delivered to a watcher.
-	if cb != nil && typ == protocol.TypeIS {
-		cb(u)
+	if typ == protocol.TypeIS {
+		if cb != nil {
+			cb(u)
+		}
+		// A watch-all subscriber receives every register's push, tagged by its
+		// register ID. The watch-all ACK reply (reg=0) is a TypeACK, not an IS,
+		// so it is never delivered here.
+		if allCb != nil {
+			allCb(reg, u)
+		}
 	}
 	// Resolve a pending transaction only with the reply type it is waiting for,
 	// so a WATCH push (IS) cannot complete a pending SET (ACK) and vice versa.
