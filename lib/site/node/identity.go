@@ -16,7 +16,7 @@ const AddrLen = 4
 const KeyLen = 16
 
 // AddressFromUID derives a node's 4-byte RF address from its 12-byte MCU unique
-// ID (protocol/README.md §11.5): address = CRC32(UID), big-endian. Both the host
+// ID (lib/README.md §11.5): address = CRC32(UID), big-endian. Both the host
 // (provisioning, hub) and the firmware compute it the same way, so the address
 // is never stored in the inventory.
 func AddressFromUID(uid [config.UIDLen]byte) [AddrLen]byte {
@@ -26,7 +26,7 @@ func AddressFromUID(uid [config.UIDLen]byte) [AddrLen]byte {
 }
 
 // Identity is a node's per-chip secret material, provisioned out of band
-// (protocol/README.md §11.5) and never present in the generated descriptor.
+// (lib/README.md §11.5) and never present in the generated descriptor.
 type Identity struct {
 	Address [AddrLen]byte
 	Key     [KeyLen]byte

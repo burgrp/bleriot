@@ -3,7 +3,7 @@
 // the register's value (seeded by a GET, then kept current by watch-all push
 // subscription) and turns consumer change requests into BleRiot SET operations.
 //
-// A node is watched with a single watch-all subscription (protocol/README.md
+// A node is watched with a single watch-all subscription (lib/README.md
 // §8.3) rather than one WATCH per register: this collapses the subscription
 // refresh traffic to one packet per node and avoids overflowing a node's bounded
 // subscription table when it exposes more registers than the table holds. The
@@ -17,7 +17,7 @@
 // devices that share one per-type descriptor.
 //
 // The bridge is generic — it has no per-class or per-register knowledge beyond
-// the node descriptor (protocol/README.md §11.7). It depends on small interfaces so it
+// the node descriptor (lib/README.md §11.7). It depends on small interfaces so it
 // can be tested without real hardware or a running registry; *engine.Engine and
 // the reg client satisfy them.
 package bridge

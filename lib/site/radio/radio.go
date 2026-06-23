@@ -30,7 +30,7 @@ type Dongle interface {
 	// Receive copies at most one received packet into buf and reports how many
 	// bytes were written and whether a packet was available. It never blocks.
 	Receive(buf []byte) (n int, ok bool)
-	// ReplyGuard reports the reply turnaround guard (protocol/README.md §6) the hub must
+	// ReplyGuard reports the reply turnaround guard (lib/README.md §6) the hub must
 	// ask nodes to wait before answering a request sent through this dongle, so a
 	// slow half-duplex dongle has switched back to receive in time. It is a
 	// per-dongle constant.
@@ -66,7 +66,7 @@ func (r *Radio) Send(dst [4]byte, payload []byte) error {
 	return r.d.Send(dst, payload)
 }
 
-// ReplyGuard reports the dongle's reply turnaround guard (protocol/README.md §6),
+// ReplyGuard reports the dongle's reply turnaround guard (lib/README.md §6),
 // forwarded to the engine so it can ask nodes to defer their replies accordingly.
 func (r *Radio) ReplyGuard() time.Duration { return r.d.ReplyGuard() }
 

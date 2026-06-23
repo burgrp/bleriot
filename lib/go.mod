@@ -1,10 +1,15 @@
-// Module shared is the neutral, dependency-free implementation of the BleRiot
-// RF wire format (shared/README.md §4–§8): packet encode/decode and XTEA.
+// Module lib is the BleRiot library: the single Go module holding the shared RF
+// wire format, the firmware-side runtime, and the host hub.
 //
-// It is shared by both the node firmware and the host hub
-// (site), so the on-wire format is single-sourced. It has no external
-// dependencies and no build tags, so it compiles for the host and under TinyGo
-// alike.
+//   - lib/shared — neutral, dependency-free, build-tag-free packages shared by
+//     firmware and host (protocol codec + XTEA, provisioning-page config, the
+//     inventory-as-code model). The on-wire formats are single-sourced here and
+//     compile for the host and under TinyGo alike (see lib/README.md, the
+//     protocol specification).
+//   - lib/node — the firmware-side BleRiot runtime (receive/dispatch loop, XTEA
+//     codec, GET/SET/WATCH), imported by node firmware.
+//   - lib/site — the host (Linux-SBC) hub library: engine, radio dongle drivers,
+//     provisioning and the Registry bridge (see lib/site/README.md).
 module github.com/burgrp/bleriot/lib
 
 go 1.25.2

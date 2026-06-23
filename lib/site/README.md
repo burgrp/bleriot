@@ -1,22 +1,23 @@
 # site — BleRiot host library
 
-`site` is the host (Linux-SBC) half of the BleRiot hub, packaged as a **library**
-that a site repository drives with **inventory-as-code**. It owns all protocol
-intelligence — per-node XTEA keys, register tables, retries/timeouts, push
-subscription bookkeeping, and the Registry client — and drives the radio directly
-over one or more USB dongles (an [MCP2210](../usb) USB-to-SPI bridge driving a
-PAN211x; the dongle has no microcontroller and no firmware).
+`lib/site` is the host (Linux-SBC) half of the BleRiot hub, packaged as a
+**library** that a site repository drives with **inventory-as-code**. It owns all
+protocol intelligence — per-node XTEA keys, register tables, retries/timeouts,
+push subscription bookkeeping, and the Registry client — and drives the radio
+directly over one or more USB dongles (an [MCP2210](../../usb) USB-to-SPI bridge
+driving a PAN211x; the dongle has no microcontroller and no firmware).
 
 For every BleRiot register the hub acts as a
 [Registry](https://github.com/burgrp/reg) provider: it publishes the register's
 value and turns consumer change requests into BleRiot `SET` operations.
 
-> Module path: `site`. See the [protocol spec](../protocol/README.md) for the wire
-> format and transaction semantics this implements.
+> Import path: `github.com/burgrp/bleriot/lib/site` (part of the single `lib`
+> module). See the [protocol spec](../README.md) for the wire format and
+> transaction semantics this implements.
 
 There is **no JSON configuration and no code generation**. A deployment is a Go
-program: it declares an [`inventory.Inventory`](inventory) and hands it to
-[`cli.Start`](cli), which builds the `bleriot` command tree (cobra) around
+program: it declares an [`inventory.Inventory`](../shared/inventory) and hands it
+to [`cli.Start`](cli), which builds the `bleriot` command tree (cobra) around
 it.
 
 ```go
@@ -43,7 +44,7 @@ func main() {
 }
 ```
 
-A complete, runnable site binary lives in [`../example/hub`](../example/hub).
+A complete, runnable site binary lives in [`../../example/hub`](../../example/hub).
 
 ---
 
@@ -58,7 +59,7 @@ new        read an attached device's UID and print an Instance stub
 ```
 
 ```sh
-cd ../example/hub
+cd ../../example/hub
 go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
 go run . --debug hub --dongle mcp2210:/dev/hidraw0,37   # verbose: shows radio traffic
 go run . provision                            # provision the attached device
@@ -75,8 +76,7 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--hub-address` | `FFFFFF01` | 4-byte hub source address (hex), used as SRC in outgoing packets. |
 | `--timeout` | `50ms` | Per-attempt response wait (protocol §9). |
 | `--retries` | `3` | Retransmissions after the first attempt (§9). |
-| `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
-| `--ttl` | `30s` | Registry provider TTL. |
+| `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). || `--ttl` | `30s` | Registry provider TTL. |
 | `--dongle` | — | A radio dongle as `scheme:selector,channel`, e.g. `mcp2210:/dev/hidraw0,37` or `mcp2210:0001746423,37`. The `scheme` selects the dongle type (only `mcp2210` today — there is no default); the `selector` is a `/dev/hidraw*` path or a USB serial; the channel is split off after the last `,`. Repeatable, one per dongle. The dongle's `/dev/hidraw*` node is root-only by default; install the udev rule (see [USB access](#usb-access)) to use it without `sudo`. |
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
 | `--diag-window` | `30s` | Averaging window for the diagnostic `rate.*` registers. |
@@ -109,11 +109,11 @@ reads the UID of a device not yet in the inventory and prints a paste-ready
 
 The MCP2210 dongle appears as a `/dev/hidraw*` node that is root-only by
 default, so the `hub` would otherwise need `sudo`. Install the udev rule shipped
-with the dongle hardware design — [`../usb/99-bleriot-mcp2210.rules`](../usb/99-bleriot-mcp2210.rules) —
+with the dongle hardware design — [`../../usb/99-bleriot-mcp2210.rules`](../../usb/99-bleriot-mcp2210.rules) —
 to grant access to the local desktop user and the `plugdev` group instead:
 
 ```sh
-sudo cp ../usb/99-bleriot-mcp2210.rules /etc/udev/rules.d/
+sudo cp ../../usb/99-bleriot-mcp2210.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=hidraw --action=change
 ```
@@ -129,7 +129,10 @@ $USER` and re-login). The rule matches the MCP2210 by its USB ID `04d8:00de`.
 
 ## Inventory model
 
-The [`inventory`](inventory) package is the type-safe model of a deployment.
+The [`inventory`](../shared/inventory) package is the type-safe model of a
+deployment. It is part of [`lib/shared`](../shared) — shared with the firmware so
+both sides agree on register tags and the provisioning format — not host-only
+code.
 
 - **`Register`** — one register of a device type. Its `Tag` (a `uint8`, like a
   protobuf field number) is its permanent wire identity: unique and non-zero
@@ -150,23 +153,26 @@ The [`inventory`](inventory) package is the type-safe model of a deployment.
   channel, and a non-empty, one-to-one mapping between channel numbers and names.
 
 The RF address is never stored: both the host and the firmware derive it as
-`CRC32(UID)` ([protocol §11.5](../protocol/README.md)).
+`CRC32(UID)` ([protocol §11.5](../README.md)).
 
 ### Device-type modules
 
-A device type (e.g. [`../example/bob`](../example/bob)) is a
+A device type (e.g. [`../../example/bob`](../../example/bob)) is its own,
 dual-target Go module:
 
 - `Config` (a fixed-size struct) is shared by host and firmware.
 - `Type() inventory.DeviceType` describes the register table. It is compiled into
   both targets, but the firmware never calls it, so TinyGo's dead-code
-  elimination strips it (and the host library it references) from the image.
-- The firmware entry point lives behind `//go:build tinygo`.
+  elimination strips it (and the `inventory` package it references) from the
+  image.
+- The firmware entry point lives behind `//go:build tinygo` and drives the
+  shared [`lib/node`](../node) runtime over the radio.
 
 ### Provisioning page
 
 The host and firmware agree on one flash page per device, encoded by the shared
-[`config`](config) package (`encoding/binary`, fixed-width, CRC-checked):
+[`config`](../shared/config) package (`encoding/binary`, fixed-width,
+CRC-checked):
 
 ```
 header  magic | layout | configLen | channel | spreadFactor | address | key
@@ -184,8 +190,8 @@ erased page from a corrupt one.
 | Path | Responsibility |
 |------|----------------|
 | [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `provision` and `new` subcommands, and the `Probe` interface (SWD read-UID / write-page) with its `pyocd` implementation. |
-| [`inventory`](inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. |
-| [`config`](config) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
+| [`../shared/inventory`](../shared/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. Shared with the firmware. |
+| [`../shared/config`](../shared/config) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
 | [`engine`](engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
 | [`radio`](radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |
 | [`radio/mcpdongle`](radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |

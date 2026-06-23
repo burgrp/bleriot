@@ -102,14 +102,14 @@ func (d *Dongle) Receive(buf []byte) (int, bool) {
 }
 
 // ReplyGuard reports the reply turnaround delay this dongle asks nodes to wait
-// before answering a request (protocol/README.md §6, GUARD). The MCP2210 is a
+// before answering a request (lib/README.md §6, GUARD). The MCP2210 is a
 // host-resident "dumb" dongle: after transmitting a request it needs several
 // USB-HID round trips to switch the PAN211x back to receive, during which a node
 // that replied immediately would be missed. The hub puts this delay in every
 // request and the node honours it before replying.
 func (d *Dongle) ReplyGuard() time.Duration { return d.guard }
 
-// ReplyGuard returns the reply turnaround guard (protocol/README.md §6) an MCP2210
+// ReplyGuard returns the reply turnaround guard (lib/README.md §6) an MCP2210
 // dongle running at the given spreading factor asks nodes to honour. It is a
 // device-independent constant, so a caller can learn the guard without an open
 // device — e.g. to supervise a not-yet-connected dongle whose guard the engine

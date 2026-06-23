@@ -2,6 +2,17 @@
 
 Hardware-independent specification for the BleRiot IoT register protocol.
 
+> This is also the README of the [`lib`](.) module
+> (`github.com/burgrp/bleriot/lib`), the single library that implements this
+> specification. The module is split into:
+>
+> - [`shared`](shared) — neutral, dependency-free, build-tag-free packages used by
+>   both firmware and host: `protocol` (packet codec + XTEA, §4–§8), `config`
+>   (the provisioning page, §11.5) and `inventory` (the inventory-as-code model,
+>   §11).
+> - [`node`](node) — the firmware-side runtime (receive/dispatch loop, §7–§8).
+> - [`site`](site) — the host hub library; see [site/README.md](site/README.md).
+
 ---
 
 ## 1. Overview

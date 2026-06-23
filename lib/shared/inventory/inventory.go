@@ -6,7 +6,7 @@
 //   - its identity: the MCU unique ID (from which the RF address is derived),
 //     the XTEA key, and the RF channel;
 //   - its device type (a shared DeviceType describing the register table);
-//   - its device-type-specific Config (a fixed-size struct, see pkg/config).
+//   - its device-type-specific Config (a fixed-size struct, see the config package).
 //
 // Register identity on the wire is a stable, hand-assigned Tag (like a protobuf
 // field number), not the slice position, so the register table can be reordered
@@ -128,7 +128,7 @@ type Instance struct {
 	// Type is the device's type (register table).
 	Type DeviceType
 	// Config is the device-type-specific configuration written to the device's
-	// provisioning page. It must be a fixed-size value (see pkg/config); nil means
+	// provisioning page. It must be a fixed-size value (see the config package); nil means
 	// no config.
 	Config any
 }

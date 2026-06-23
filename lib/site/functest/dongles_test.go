@@ -5,7 +5,7 @@
 // real node runtime (protocol/node) on a second USB dongle, exchanging packets
 // over the air with no microcontroller and no mocks — exercising the XTEA codec,
 // packet framing, GET/SET/WATCH transactions, retries, push subscriptions, the
-// reply turnaround guard (protocol/README.md §6), and liveness detection end to end.
+// reply turnaround guard (lib/README.md §6), and liveness detection end to end.
 //
 // Every test runs twice, once per BLE Coded PHY spreading factor: S8 (long
 // range, ~125 kbps) on channel 37 and S2 (shorter range, ~500 kbps) on channel
