@@ -115,7 +115,7 @@ func main() {
 	go device.ledLoop(pinLedRed, &device.redPeriod)
 	go device.ledLoop(pinLedGreen, &device.greenPeriod)
 
-	go memstat()
+	// go memstat()
 
 	pins := device.readPins()
 	device.pins.Store(pins)
@@ -132,14 +132,14 @@ func main() {
 
 }
 
-func memstat() {
-	for {
-		mem := runtime.MemStats{}
-		runtime.ReadMemStats(&mem)
-		println("mem: alloc", mem.Alloc, "sys", mem.Sys, "alloc", mem.HeapAlloc)
-		time.Sleep(1 * time.Second)
-	}
-}
+// func memstat() {
+// 	for {
+// 		mem := runtime.MemStats{}
+// 		runtime.ReadMemStats(&mem)
+// 		println("mem: alloc", mem.Alloc, "sys", mem.Sys, "alloc", mem.HeapAlloc)
+// 		time.Sleep(1 * time.Second)
+// 	}
+// }
 
 type Device struct {
 	redPeriod   atomic.Int32
