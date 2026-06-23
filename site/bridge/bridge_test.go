@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"site/engine"
-	"site/node"
+	"github.com/burgrp/bleriot/site/engine"
+	"github.com/burgrp/bleriot/site/node"
 )
 
 var nodeAddr = [4]byte{0xCC, 0xA0, 0x00, 0x02}

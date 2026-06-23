@@ -70,7 +70,7 @@ so multiplexing lives in the host, above the wire.
 | [`site/`](site) | `site` | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, inventory model, provisioning, Registry bridge. | [site/README.md](site/README.md) |
 | [`usb/`](usb) | — | KiCad design for the USB radio dongle (MCP2210 USB-to-SPI bridge + PAN211x). | — |
 | [`example/hub/`](example/hub) | `hub` | Example site binary: declares an inventory-as-code deployment and runs the host runtime. | — |
-| [`example/thermostat/`](example/thermostat) | `thermostat` | Example device-type module: flat TinyGo firmware (`package main`) plus an importable `spec` subpackage (`Config` + `Type()` + register tags) shared with the host. | — |
+| [`example/bob/`](example/bob) | `bob` | Example device-type module: flat TinyGo firmware (`package main`) plus an importable `spec` subpackage (`Config` + `Type()` + register tags) shared with the host. | — |
 | [`bob/`](bob) | — | KiCad PCB design (breakout board v1.3, the reference node hardware). | — |
 | [`sub/hw-kicad/`](sub/hw-kicad) | — | Shared KiCad symbol/footprint library (git submodule). | — |
 
@@ -132,7 +132,7 @@ See [site/README.md](site/README.md#provision--new-flags) for the SWD flags.
 
 ```
 protocol  ──────────────┬─► site      (also: github.com/burgrp/reg)
- (codec + XTEA)          └─► thermostat firmware (also: pan211x driver, TinyGo)
+ (codec + XTEA)          └─► bob firmware (also: pan211x driver, TinyGo)
 ```
 
 `protocol` is intentionally dependency-free and build-tag-free so the exact same

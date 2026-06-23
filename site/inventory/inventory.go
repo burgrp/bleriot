@@ -17,7 +17,7 @@ package inventory
 import (
 	"fmt"
 
-	"site/config"
+	"github.com/burgrp/bleriot/site/config"
 )
 
 // RegType is the hub-side interpretation of a register's int32 wire value.
@@ -48,7 +48,7 @@ type Register struct {
 	Metadata map[string]string
 }
 
-// DeviceType describes a class of device (e.g. "thermostat"). It is a shared,
+// DeviceType describes a class of device (e.g. "bob"). It is a shared,
 // per-type artifact authored once in the device-type module and referenced by
 // every Instance of that type.
 type DeviceType struct {

@@ -291,7 +291,7 @@ tags are unique within the type.
 
 | Field      | Type                 | Description                                                  |
 |------------|----------------------|-------------------------------------------------------------|
-| name       | string               | Device-type name (e.g. `thermostat`)                        |
+| name       | string               | Device-type name (e.g. `bob`)                               |
 | registers  | list<Register>       | Register table (see §11.3)                                  |
 
 ### 11.3 Register
@@ -364,17 +364,15 @@ detected by a magic mismatch (an erased page), distinct from a corrupt page
 
 ### 11.6 Worked Example
 
-A `thermostat` device type, authored in Go (tags hand-assigned, permanent):
+A `bob` device type, authored in Go (tags hand-assigned, permanent):
 
 ```go
 inventory.DeviceType{
-    Name: "thermostat",
+    Name: "bob",
     Registers: []inventory.Register{
-        {Tag: 1, Name: "temperature", Type: inventory.TypeFloat, Multiplier: 1, Divider: 100,
-            Metadata: map[string]string{"unit": "celsius"}},
-        {Tag: 2, Name: "setpoint", Type: inventory.TypeFloat, Multiplier: 1, Divider: 100,
-            Metadata: map[string]string{"unit": "celsius"}},
-        {Tag: 3, Name: "heating", Type: inventory.TypeBool},
+        {Tag: 1, Name: "green", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
+        {Tag: 2, Name: "red", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
+        {Tag: 3, Name: "gpio", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
     },
 }
 ```
@@ -384,20 +382,20 @@ A site inventory instantiates it per physical device:
 ```go
 inventory.Inventory{
     {
-        Name:    "kitchen",
+        Name:    "bob",
         UID:     [12]byte{ /* MCU unique ID, read over SWD */ },
         Key:     [16]byte{ /* XTEA key */ },
         Channel: 37,
-        Type:    thermostat.Type(),
-        Config:  thermostat.Config{MinTemp: 18, MaxTemp: 22},
+        Type:    bob.Type(),
+        Config:  bob.Config{DefaultRedPeriod: 500, DefaultGreenPeriod: 100},
     },
 }
 ```
 
-The host derives `kitchen`'s address as `CRC32(UID)`, maps each register's tag to
-its wire REG, and publishes `kitchen.temperature`, `kitchen.setpoint` and
-`kitchen.heating` to the Registry. Two instances of the same type coexist because
-their *names* differ; the wire never sees the instance concept.
+The host derives `bob`'s address as `CRC32(UID)`, maps each register's tag to
+its wire REG, and publishes `bob.green`, `bob.red` and `bob.gpio` to the
+Registry. Two instances of the same type coexist because their *names* differ;
+the wire never sees the instance concept.
 
 ### 11.7 Onboarding and Provisioning Workflow
 

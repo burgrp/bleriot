@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"site/config"
-	"site/inventory"
-	"site/node"
+	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/site/inventory"
+	"github.com/burgrp/bleriot/site/node"
 )
 
 // newProvisionCmd builds the "provision" subcommand: read the attached device's

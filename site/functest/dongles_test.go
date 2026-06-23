@@ -36,15 +36,15 @@ import (
 	"testing"
 	"time"
 
-	pnode "protocol/node"
+	pnode "github.com/burgrp/bleriot/protocol/node"
 
 	"github.com/burgrp/tinygo-drivers/pan211x"
 
-	"site/engine"
-	"site/mcp2210"
-	"site/node"
-	"site/radio"
-	"site/radio/mcpdongle"
+	"github.com/burgrp/bleriot/site/engine"
+	"github.com/burgrp/bleriot/site/mcp2210"
+	"github.com/burgrp/bleriot/site/node"
+	"github.com/burgrp/bleriot/site/radio"
+	"github.com/burgrp/bleriot/site/radio/mcpdongle"
 )
 
 // Fixed test identities. The hub and node listen on distinct RF addresses on the

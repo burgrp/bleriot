@@ -29,8 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"site/engine"
-	"site/node"
+	"github.com/burgrp/bleriot/site/engine"
+	"github.com/burgrp/bleriot/site/node"
 )
 
 // defaultSeedRetryInterval is the base cadence at which serveRegister attempts

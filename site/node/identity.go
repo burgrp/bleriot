@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"hash/crc32"
 
-	"site/config"
+	"github.com/burgrp/bleriot/site/config"
 )
 
 // AddrLen is the BleRiot device address length in bytes (§3).

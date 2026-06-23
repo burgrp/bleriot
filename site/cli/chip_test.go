@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"site/config"
-	"site/inventory"
+	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/site/inventory"
 )
 
 var altChip = inventory.Chip{Name: "stm32g0", Target: "stm32g030x6", UIDAddr: 0x1FFF7590, PageAddr: 0x0800F800}

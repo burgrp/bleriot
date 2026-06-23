@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"site/inventory"
+	"github.com/burgrp/bleriot/site/inventory"
 )
 
 // builtinChips are chip profiles the provisioning commands know without the

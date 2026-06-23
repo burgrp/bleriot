@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"time"
 
-	"site/engine"
-	"site/node"
-	"site/radio"
+	"github.com/burgrp/bleriot/site/engine"
+	"github.com/burgrp/bleriot/site/node"
+	"github.com/burgrp/bleriot/site/radio"
 )
 
 // diagFlush is how often diagnostic registers are sampled and republished. It is

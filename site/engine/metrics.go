@@ -3,7 +3,7 @@ package engine
 import (
 	"sync/atomic"
 
-	"site/node"
+	"github.com/burgrp/bleriot/site/node"
 )
 
 // nodeMetrics holds the cumulative diagnostic counters for one node. All fields

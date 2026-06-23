@@ -10,7 +10,7 @@ import (
 	"context"
 	"time"
 
-	"protocol"
+	"github.com/burgrp/bleriot/protocol"
 )
 
 // pollInterval is how often the hub receive loop checks the dongle for an

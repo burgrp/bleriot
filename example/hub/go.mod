@@ -1,10 +1,9 @@
-module hub
+module github.com/burgrp/bleriot/example/hub
 
 go 1.25.2
 
 require (
-	site v0.0.0
-	thermostat v0.0.0
+	github.com/burgrp/bleriot/site v0.0.0
 )
 
 require (
@@ -14,13 +13,12 @@ require (
 	github.com/lmittmann/tint v1.1.2 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
-	protocol v0.0.0 // indirect
+	github.com/burgrp/bleriot/protocol v0.0.0 // indirect
 )
 
-replace site => ../../site
+replace github.com/burgrp/bleriot/site => ../../site
 
-replace thermostat => ../thermostat
-
-replace protocol => ../../protocol
+replace github.com/burgrp/bleriot/protocol => ../../protocol
 
 replace github.com/burgrp/reg => ../../../reg
+

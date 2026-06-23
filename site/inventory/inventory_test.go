@@ -3,22 +3,22 @@ package inventory
 import (
 	"testing"
 
-	"site/config"
+	"github.com/burgrp/bleriot/site/config"
 )
 
-func thermostatType() DeviceType {
+func bobType() DeviceType {
 	return DeviceType{
-		Name: "thermostat",
+		Name: "bob",
 		Registers: []Register{
-			{Tag: 1, Name: "temperature", Type: TypeFloat, Multiplier: 1, Divider: 100},
-			{Tag: 2, Name: "humidity", Type: TypeInt, Multiplier: 1, Divider: 1},
-			{Tag: 3, Name: "heating", Type: TypeBool},
+			{Tag: 1, Name: "green", Type: TypeInt, Multiplier: 1, Divider: 1},
+			{Tag: 2, Name: "red", Type: TypeInt, Multiplier: 1, Divider: 1},
+			{Tag: 3, Name: "gpio", Type: TypeInt, Multiplier: 1, Divider: 1},
 		},
 	}
 }
 
 func TestDeviceTypeValidate_OK(t *testing.T) {
-	if err := thermostatType().Validate(); err != nil {
+	if err := bobType().Validate(); err != nil {
 		t.Fatalf("expected valid, got %v", err)
 	}
 }
@@ -54,8 +54,8 @@ func TestDeviceTypeValidate_Errors(t *testing.T) {
 
 func TestInventoryValidate_OK(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: thermostatType()},
-		{Name: "living", Channel: Channel{Name: "near", Number: 11}, Type: thermostatType()},
+		{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+		{Name: "living", Channel: Channel{Name: "near", Number: 11}, Type: bobType()},
 	}
 	if err := inv.Validate(); err != nil {
 		t.Fatalf("expected valid, got %v", err)
@@ -64,15 +64,15 @@ func TestInventoryValidate_OK(t *testing.T) {
 
 func TestInventoryValidate_Errors(t *testing.T) {
 	t.Run("empty name", func(t *testing.T) {
-		inv := Inventory{{Name: "", Channel: Channel{Name: "far", Number: 37}, Type: thermostatType()}}
+		inv := Inventory{{Name: "", Channel: Channel{Name: "far", Number: 37}, Type: bobType()}}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for empty instance name")
 		}
 	})
 	t.Run("duplicate name", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: thermostatType()},
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: thermostatType()},
+			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for duplicate instance name")
@@ -88,7 +88,7 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("missing channel name", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Number: 37}, Type: thermostatType()},
+			{Name: "kitchen", Channel: Channel{Number: 37}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for unnamed channel")
@@ -96,8 +96,8 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("one number two names", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: thermostatType()},
-			{Name: "living", Channel: Channel{Name: "near", Number: 37}, Type: thermostatType()},
+			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "living", Channel: Channel{Name: "near", Number: 37}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for one channel number with two names")
@@ -105,8 +105,8 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("one name two numbers", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: thermostatType()},
-			{Name: "living", Channel: Channel{Name: "far", Number: 11}, Type: thermostatType()},
+			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "living", Channel: Channel{Name: "far", Number: 11}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for one channel name with two numbers")
@@ -114,8 +114,8 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("mixed spread factor on one channel", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: thermostatType()},
-			{Name: "living", Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
+			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: bobType()},
+			{Name: "living", Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for mixed spread factor on one channel")
@@ -125,10 +125,10 @@ func TestInventoryValidate_Errors(t *testing.T) {
 
 func TestSpreadFactorByChannel(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
-		{Name: "hallway", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
-		{Name: "lab", Channel: Channel{Number: 11, SpreadFactor: config.SpreadFactorS8}, Type: thermostatType()},
-		{Name: "shed", Channel: Channel{Number: 5}, Type: thermostatType()}, // omitted SF: defaults to S8
+		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: bobType()},
+		{Name: "hallway", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: bobType()},
+		{Name: "lab", Channel: Channel{Number: 11, SpreadFactor: config.SpreadFactorS8}, Type: bobType()},
+		{Name: "shed", Channel: Channel{Number: 5}, Type: bobType()}, // omitted SF: defaults to S8
 	}
 	byChannel, err := inv.SpreadFactorByChannel()
 	if err != nil {
@@ -147,8 +147,8 @@ func TestSpreadFactorByChannel(t *testing.T) {
 
 func TestSpreadFactorByChannel_Conflict(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: thermostatType()},
-		{Name: "living", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: thermostatType()},
+		{Name: "kitchen", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: bobType()},
+		{Name: "living", Channel: Channel{Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: bobType()},
 	}
 	if _, err := inv.SpreadFactorByChannel(); err == nil {
 		t.Fatal("expected conflict error for mixed spread factor on one channel")

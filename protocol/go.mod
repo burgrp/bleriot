@@ -5,6 +5,6 @@
 // (site), so the on-wire format is single-sourced. It has no external
 // dependencies and no build tags, so it compiles for the host and under TinyGo
 // alike.
-module protocol
+module github.com/burgrp/bleriot/protocol
 
 go 1.25.2

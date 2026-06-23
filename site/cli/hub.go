@@ -16,14 +16,14 @@ import (
 	clientfactory "github.com/burgrp/reg/pkg/client/factory"
 	"github.com/spf13/cobra"
 
-	"site/bridge"
-	"site/config"
-	"site/engine"
-	"site/inventory"
-	"site/mcp2210"
-	"site/node"
-	"site/radio"
-	"site/radio/mcpdongle"
+	"github.com/burgrp/bleriot/site/bridge"
+	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/site/engine"
+	"github.com/burgrp/bleriot/site/inventory"
+	"github.com/burgrp/bleriot/site/mcp2210"
+	"github.com/burgrp/bleriot/site/node"
+	"github.com/burgrp/bleriot/site/radio"
+	"github.com/burgrp/bleriot/site/radio/mcpdongle"
 
 	"github.com/burgrp/tinygo-drivers/pan211x"
 )

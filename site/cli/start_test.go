@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"site/config"
-	"site/inventory"
-	"site/node"
+	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/site/inventory"
+	"github.com/burgrp/bleriot/site/node"
 )
 
 // fakeProbe is an in-memory Probe for tests.
@@ -33,18 +33,18 @@ func (f *fakeProbe) WritePage(_ context.Context, image []byte) error {
 	return nil
 }
 
-type thermostatConfig struct {
-	MinTemp int16
-	MaxTemp int16
+type bobConfig struct {
+	DefaultRedPeriod   uint32
+	DefaultGreenPeriod uint32
 }
 
 func sampleType() inventory.DeviceType {
 	return inventory.DeviceType{
-		Name: "thermostat",
+		Name: "bob",
 		Chip: inventory.PY32F030,
 		Registers: []inventory.Register{
-			{Tag: 1, Name: "temperature", Type: inventory.TypeFloat, Multiplier: 1, Divider: 100},
-			{Tag: 2, Name: "heating", Type: inventory.TypeBool},
+			{Tag: 1, Name: "green", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
+			{Tag: 2, Name: "red", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
 		},
 	}
 }
@@ -56,7 +56,7 @@ func sampleInstance() inventory.Instance {
 		Key:     [config.KeyLen]byte{0xAA, 0xBB, 0xCC, 0xDD},
 		Channel: inventory.Channel{Name: "near", Number: 37, SpreadFactor: config.SpreadFactorS2},
 		Type:    sampleType(),
-		Config:  thermostatConfig{MinTemp: 1800, MaxTemp: 2400},
+		Config:  bobConfig{DefaultRedPeriod: 500, DefaultGreenPeriod: 100},
 	}
 }
 
@@ -80,7 +80,7 @@ func TestBuildNode(t *testing.T) {
 	if n.Key != inst.Key {
 		t.Fatalf("node key mismatch")
 	}
-	if r, ok := n.ByID(1); !ok || r.Name != "temperature" {
+	if r, ok := n.ByID(1); !ok || r.Name != "green" {
 		t.Fatalf("register tag 1 not mapped: %v %v", r, ok)
 	}
 	if _, ok := n.ByID(2); !ok {
@@ -100,7 +100,7 @@ func TestRunProvisionWritesPage(t *testing.T) {
 		t.Fatal("no page written")
 	}
 
-	var got thermostatConfig
+	var got bobConfig
 	h, err := config.Unmarshal(fp.written, &got)
 	if err != nil {
 		t.Fatalf("Unmarshal written page: %v", err)

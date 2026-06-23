@@ -11,7 +11,7 @@ package node
 import (
 	"time"
 
-	"protocol"
+	"github.com/burgrp/bleriot/protocol"
 )
 
 // Radio is the minimal transport the runtime needs. It matches the way a PAN211x

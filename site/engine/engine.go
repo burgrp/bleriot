@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"protocol"
-	"site/node"
+	"github.com/burgrp/bleriot/protocol"
+	"github.com/burgrp/bleriot/site/node"
 )
 
 // PacketLen is the fixed BleRiot on-wire packet size (§4).

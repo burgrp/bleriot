@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"site/engine"
-	"site/radio"
+	"github.com/burgrp/bleriot/site/engine"
+	"github.com/burgrp/bleriot/site/radio"
 )
 
 // TestRing_Rate checks the per-second rate is the counter delta over the elapsed

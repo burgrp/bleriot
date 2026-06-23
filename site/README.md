@@ -23,21 +23,21 @@ it.
 package main
 
 import (
-	"site/cli"
-	"site/inventory"
+	"github.com/burgrp/bleriot/site/cli"
+	"github.com/burgrp/bleriot/site/inventory"
 
-	"thermostat"
+	bob "github.com/burgrp/bleriot/example/bob/spec"
 )
 
 func main() {
 	cli.Start(inventory.Inventory{
 		{
-			Name:    "kitchen",
+			Name:    "bob",
 			UID:     [12]byte{ /* MCU unique ID */ },
 			Key:     [16]byte{ /* XTEA key */ },
 			Channel: inventory.Channel{Name: "far", Number: 37},
-			Type:    thermostat.Type(),
-			Config:  thermostat.Config{MinTemp: 18, MaxTemp: 22},
+			Type:    bob.Type(),
+			Config:  bob.Config{DefaultRedPeriod: 500, DefaultGreenPeriod: 100},
 		},
 	})
 }
@@ -154,7 +154,7 @@ The RF address is never stored: both the host and the firmware derive it as
 
 ### Device-type modules
 
-A device type (e.g. [`../example/thermostat`](../example/thermostat)) is a
+A device type (e.g. [`../example/bob`](../example/bob)) is a
 dual-target Go module:
 
 - `Config` (a fixed-size struct) is shared by host and firmware.

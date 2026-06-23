@@ -1,7 +1,6 @@
 go 1.25.2
 
 use .
-use ../thermostat
 use ../bob
 use ../../site
 use ../../protocol

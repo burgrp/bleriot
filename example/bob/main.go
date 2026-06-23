@@ -1,9 +1,9 @@
 //go:build tinygo
 
-// Command (firmware) main is the BleRiot thermostat node for the BOB breakout
+// Command (firmware) main is the BleRiot node for the BOB breakout
 // board (PY32F030 + PAN211x). It is a full protocol node: it owns the radio,
 // reads its identity and config from the provisioning page in flash, and runs
-// the BleRiot runtime (protocol/node) over a thermostat device (the example
+// the BleRiot runtime (protocol/node) over the bob device (the example
 // package).
 //
 // On boot it:
@@ -11,10 +11,10 @@
 //     flash and halts with a blink pattern if the device is unprovisioned;
 //   - initialises the PAN211x radio in BLE LongRange mode and applies the
 //     channel and receive address from the page;
-//   - builds the thermostat device and the node runtime, then loops forever:
-//     it polls the radio for GET/SET/WATCH requests, samples the temperature
-//     sensor periodically, and drives the heating relay from the device's
-//     decision.
+//   - builds the bob device and the node runtime, then loops forever:
+//     it polls the radio for GET/SET/WATCH requests, reads the GPIO input pins
+//     and pushes a register update when they change, and drives the red and
+//     green LEDs from their period registers.
 //
 // All XTEA crypto and register dispatch live in protocol/node; this file is only
 // hardware wiring. Debug logging uses println() over SEGGER RTT.
@@ -28,10 +28,10 @@ import (
 	"time"
 	"unsafe"
 
-	"bob/spec"
-	"protocol"
-	"protocol/node"
-	"site/config"
+	"github.com/burgrp/bleriot/example/bob/spec"
+	"github.com/burgrp/bleriot/protocol"
+	"github.com/burgrp/bleriot/protocol/node"
+	"github.com/burgrp/bleriot/site/config"
 
 	"github.com/burgrp/tinygo-drivers/bb/spi"
 	"github.com/burgrp/tinygo-drivers/pan211x"
@@ -62,7 +62,7 @@ var gpioPins = [7]machine.Pin{
 }
 
 func main() {
-	println("BleRiot thermostat starting...")
+	println("BleRiot bob starting...")
 
 	pinLedGreen.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	pinLedRed.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -115,6 +115,8 @@ func main() {
 	go device.ledLoop(pinLedRed, &device.redPeriod)
 	go device.ledLoop(pinLedGreen, &device.greenPeriod)
 
+	go memstat()
+
 	pins := device.readPins()
 	device.pins.Store(pins)
 	for {
@@ -126,6 +128,16 @@ func main() {
 			node.Notify(spec.RegGpio, pins, false)
 			device.pins.Store(pins)
 		}
+	}
+
+}
+
+func memstat() {
+	for {
+		mem := runtime.MemStats{}
+		runtime.ReadMemStats(&mem)
+		println("mem: alloc", mem.Alloc, "sys", mem.Sys, "alloc", mem.HeapAlloc)
+		time.Sleep(1 * time.Second)
 	}
 }
 

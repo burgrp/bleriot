@@ -4,20 +4,20 @@ import "testing"
 
 func TestNewDescriptor(t *testing.T) {
 	regs := []Register{
-		{ID: 1, Name: "temperature", Type: TypeFloat, Multiplier: 1, Divider: 100},
-		{ID: 2, Name: "heating", Type: TypeBool},
+		{ID: 1, Name: "green", Type: TypeInt, Multiplier: 1, Divider: 1},
+		{ID: 2, Name: "red", Type: TypeInt, Multiplier: 1, Divider: 1},
 	}
 
-	d, err := NewDescriptor(map[string]string{"device": "thermostat"}, regs)
+	d, err := NewDescriptor(map[string]string{"device": "bob"}, regs)
 	if err != nil {
 		t.Fatalf("NewDescriptor: %v", err)
 	}
 
-	if r, ok := d.ByID(1); !ok || r.Name != "temperature" {
+	if r, ok := d.ByID(1); !ok || r.Name != "green" {
 		t.Fatalf("ByID(1) = %v, %v", r, ok)
 	}
-	if r, ok := d.ByName("heating"); !ok || r.ID != 2 {
-		t.Fatalf("ByName(heating) = %v, %v", r, ok)
+	if r, ok := d.ByName("red"); !ok || r.ID != 2 {
+		t.Fatalf("ByName(red) = %v, %v", r, ok)
 	}
 }
 

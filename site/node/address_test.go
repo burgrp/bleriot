@@ -4,7 +4,7 @@ import (
 	"hash/crc32"
 	"testing"
 
-	"site/config"
+	"github.com/burgrp/bleriot/site/config"
 )
 
 func TestAddressFromUID(t *testing.T) {

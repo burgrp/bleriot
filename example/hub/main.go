@@ -8,11 +8,11 @@
 package main
 
 import (
-	"site/cli"
-	"site/config"
-	"site/inventory"
+	"github.com/burgrp/bleriot/site/cli"
+	"github.com/burgrp/bleriot/site/config"
+	"github.com/burgrp/bleriot/site/inventory"
 
-	bob "bob/spec"
+	bob "github.com/burgrp/bleriot/example/bob/spec"
 )
 
 // Far and Near are the deployment's RF channels. Each bundles a channel number
@@ -32,10 +32,10 @@ func main() {
 		// 	UID:     [12]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B},
 		// 	Key:     [16]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F},
 		// 	Channel: Far,
-		// 	Type:    spec.Type(),
-		// 	Config: spec.Config{
-		// 		MinTemp: 18.0,
-		// 		MaxTemp: 22.0,
+		// 	Type:    bob.Type(),
+		// 	Config: bob.Config{
+		// 		DefaultRedPeriod:   500,
+		// 		DefaultGreenPeriod: 100,
 		// 	},
 		// },
 		// {
@@ -43,10 +43,10 @@ func main() {
 		// 	UID:     [12]byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B},
 		// 	Key:     [16]byte{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F},
 		// 	Channel: Far,
-		// 	Type:    spec.Type(),
-		// 	Config: spec.Config{
-		// 		MinTemp: 20.0,
-		// 		MaxTemp: 23.0,
+		// 	Type:    bob.Type(),
+		// 	Config: bob.Config{
+		// 		DefaultRedPeriod:   800,
+		// 		DefaultGreenPeriod: 200,
 		// 	},
 		// },
 		{
@@ -67,10 +67,10 @@ func main() {
 		// 	UID:     [12]byte{0x5A, 0x33, 0x50, 0x41, 0x12, 0x32, 0x35, 0x32, 0x29, 0x93, 0x4E, 0x00},
 		// 	Key:     [16]byte{0x72, 0x28, 0x7D, 0xBA, 0x69, 0x31, 0x5A, 0x3E, 0xA0, 0xC3, 0x26, 0x77, 0x43, 0xB0, 0x3E, 0xAC},
 		// 	Channel: Near,
-		// 	Type:    thermostat.Type(),
-		// 	Config: thermostat.Config{
-		// 		MinTemp: 10.0,
-		// 		MaxTemp: 30.0,
+		// 	Type:    bob.Type(),
+		// 	Config: bob.Config{
+		// 		DefaultRedPeriod:   500,
+		// 		DefaultGreenPeriod: 100,
 		// 	},
 		// },
 	})

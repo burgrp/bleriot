@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"site/node"
+	"github.com/burgrp/bleriot/site/node"
 )
 
 // TestSnapshotNode_CountsGet checks a successful GET increments the node's TX and
