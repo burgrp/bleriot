@@ -84,12 +84,27 @@ type Chip struct {
 	PageBytes uint32
 }
 
-// PY32F030 is the Puya PY32F030 chip profile.
-var PY32F030 = Chip{
-	Name:      "py32f030",
+var py32UIDAddr = uint32(0x1FFF0E00) // 12-byte unique ID on PY32
+
+func py32lastPageAddr(flashKB uint32) uint32 {
+	return 0x08000000 + (flashKB-1)*1024
+}
+
+// PY32F003x6 is the Puya PY32F003x6 chip profile.
+var PY32F003x6 = Chip{
+	Name:      "py32f003x6",
+	Target:    "py32f003x6",
+	UIDAddr:   py32UIDAddr,
+	PageAddr:  py32lastPageAddr(32),
+	PageBytes: 64,
+}
+
+// PY32F030x8 is the Puya PY32F030x8 chip profile.
+var PY32F030x8 = Chip{
+	Name:      "py32f030x8",
 	Target:    "py32f030x8",
-	UIDAddr:   0x1FFF0E00,
-	PageAddr:  0x0800F800,
+	UIDAddr:   py32UIDAddr,
+	PageAddr:  py32lastPageAddr(64),
 	PageBytes: 64,
 }
 

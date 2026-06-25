@@ -13,7 +13,8 @@ import (
 // inventory declaring them, so a brand-new deployment can onboard its first
 // device with --chip before any instance exists.
 var builtinChips = []inventory.Chip{
-	inventory.PY32F030,
+	inventory.PY32F003x6,
+	inventory.PY32F030x8,
 }
 
 // chipCatalog collects every selectable chip, keyed by name: the built-ins plus

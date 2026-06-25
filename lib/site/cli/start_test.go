@@ -41,7 +41,7 @@ type bobConfig struct {
 func sampleType() inventory.DeviceType {
 	return inventory.DeviceType{
 		Name: "bob",
-		Chip: inventory.PY32F030,
+		Chip: inventory.PY32F030x8,
 		Registers: []inventory.Register{
 			{Tag: 1, Name: "green", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
 			{Tag: 2, Name: "red", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
@@ -93,7 +93,7 @@ func TestRunProvisionWritesPage(t *testing.T) {
 	inv := inventory.Inventory{inst}
 	fp := &fakeProbe{uid: inst.UID}
 
-	if err := runProvision(context.Background(), inv, inventory.PY32F030, fp, discardLogger()); err != nil {
+	if err := runProvision(context.Background(), inv, inventory.PY32F030x8, fp, discardLogger()); err != nil {
 		t.Fatalf("runProvision: %v", err)
 	}
 	if fp.written == nil {
@@ -126,7 +126,7 @@ func TestRunProvisionUnknownUID(t *testing.T) {
 	inv := inventory.Inventory{sampleInstance()}
 	fp := &fakeProbe{uid: [config.UIDLen]byte{0xFF}} // not in inventory
 
-	err := runProvision(context.Background(), inv, inventory.PY32F030, fp, discardLogger())
+	err := runProvision(context.Background(), inv, inventory.PY32F030x8, fp, discardLogger())
 	if err == nil {
 		t.Fatal("expected error for unknown UID")
 	}

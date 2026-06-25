@@ -17,7 +17,7 @@ func TestResolveChip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveChip: %v", err)
 		}
-		if c != inventory.PY32F030 {
+		if c != inventory.PY32F030x8 {
 			t.Fatalf("got %+v, want PY32F030", c)
 		}
 	})
@@ -33,7 +33,7 @@ func TestResolveChip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveChip: %v", err)
 		}
-		if c != inventory.PY32F030 {
+		if c != inventory.PY32F030x8 {
 			t.Fatalf("got %+v, want PY32F030", c)
 		}
 	})
