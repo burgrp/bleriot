@@ -98,7 +98,7 @@ func main() {
 		SerialInterface: pan211x.SerialInterfaceSPI3W,
 		SpreadFactor:    pan211x.SpreadFactor(header.SpreadFactor),
 	}))
-	must(radio.SetChannel(header.Channel))
+	must(radio.SetChannelRF(header.Channel, header.Channel))
 	must(radio.EnableRxAddress(0, header.Address))
 	println("Radio initialized")
 

@@ -54,7 +54,7 @@ func Open(dev *mcp2210.Device, channel uint8, spreadFactor pan211x.SpreadFactor,
 		dev.Close()
 		return nil, err
 	}
-	if err := driver.SetChannel(channel); err != nil {
+	if err := driver.SetChannelRF(channel, channel); err != nil {
 		dev.Close()
 		return nil, err
 	}
