@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"sort"
-	"strconv"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,8 +37,7 @@ type hubOptions struct {
 	retries     int
 	refresh     time.Duration
 	ttl         time.Duration
-	dongles     []string // each "scheme:selector,channel", e.g. "mcp2210:/dev/hidraw0,37"
-	diagnostics string   // registry namespace prefix for diagnostic registers; empty disables them
+	diagnostics string // registry namespace prefix for diagnostic registers; empty disables them
 	diagWindow  time.Duration
 }
 
@@ -49,9 +48,10 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hub",
 		Short: "Bridge the inventory's RF nodes to the Registry",
-		Long: "Run the BleRiot host hub: open one or more USB radio dongles " +
-			"(each an MCP2210 USB-to-SPI bridge driving a single PAN211x radio) and " +
-			"bridge every node in the inventory to the external Registry service.",
+		Long: "Run the BleRiot host hub: discover the connected USB radio dongles " +
+			"(each an MCP2210 USB-to-SPI bridge driving a single PAN211x radio), assign " +
+			"them automatically to the RF channels the inventory uses, and bridge every " +
+			"node in the inventory to the external Registry service.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHub(cmd.Context(), inv, o, slog.Default())
@@ -64,9 +64,6 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	f.IntVar(&o.retries, "retries", 3, "retransmissions after the first attempt")
 	f.DurationVar(&o.refresh, "refresh", 15*time.Second, "how often to re-WATCH active subscriptions")
 	f.DurationVar(&o.ttl, "ttl", 30*time.Second, "Registry provider TTL for each register")
-	f.StringArrayVar(&o.dongles, "dongle", nil, "USB radio dongle as scheme:selector,channel (repeatable); "+
-		"scheme selects the dongle type (e.g. \"mcp2210\"), selector is a /dev/hidraw* path or a USB serial, "+
-		"e.g. mcp2210:/dev/hidraw0,37 or mcp2210:0001746423,37")
 	f.StringVar(&o.diagnostics, "diagnostics", "", "publish hub-synthesised diagnostic registers under this "+
 		"registry namespace prefix (e.g. \"diag\"); empty disables them")
 	f.DurationVar(&o.diagWindow, "diag-window", 30*time.Second, "averaging window for diagnostic rate.* registers")
@@ -101,7 +98,7 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 		return fmt.Errorf("inventory: %w", err)
 	}
 
-	dongles, err := startDongles(ctx, eng, o.dongles, hubAddr, sfByChannel, inv.ChannelNames(), logger)
+	dongles, err := startDongles(ctx, eng, hubAddr, sfByChannel, inv.ChannelNames(), logger)
 	if err != nil {
 		return err
 	}
@@ -155,31 +152,31 @@ func buildNodes(inv inventory.Inventory, eng *engine.Engine) ([]*node.Node, erro
 	return nodes, nil
 }
 
-// dongleSpec is a parsed USB radio dongle: a typed device selector on an RF
-// channel. scheme selects which dongle implementation opens the selector.
-type dongleSpec struct {
-	scheme   string
-	selector string
-	channel  uint8
-}
-
-// dongleOpener opens one dongle of a particular type and returns it as a
-// radio.Dongle. New dongle types (e.g. a smart MCU-based dongle) are added by
-// registering another opener in dongleTypes.
+// dongleOpener opens one dongle of a particular type, by selector, and brings up
+// its radio on the given channel and spreading factor.
 type dongleOpener func(selector string, channel uint8, spreadFactor config.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error)
 
-// dongleType describes one supported dongle scheme: how to open a device and how
-// to learn its reply guard (lib/README.md §6) without opening one, so the hub can
-// supervise a dongle that is not yet connected.
+// dongleType describes one supported dongle scheme: how to discover every
+// connected device of that type, how to open one by selector, and how to learn
+// its reply guard (lib/README.md §6) without opening it (the guard depends only
+// on the channel's spreading factor, so the engine can validate it up front).
 type dongleType struct {
-	open  dongleOpener
-	guard func(spreadFactor config.SpreadFactor) time.Duration
+	// scheme names the dongle type in logs and diagnostics, e.g. "mcp2210".
+	scheme string
+	// discover returns a stable selector for every connected device of this type.
+	// Each selector round-trips through open and is stable enough (a USB serial
+	// where possible) that a reconnecting supervisor re-finds the same physical
+	// device after a replug.
+	discover func() ([]string, error)
+	open     dongleOpener
+	guard    func(spreadFactor config.SpreadFactor) time.Duration
 }
 
-// dongleTypes maps a scheme to its dongle type. To support a new dongle, add an
-// entry here; the flag parsing and startup wiring need no other changes.
-var dongleTypes = map[string]dongleType{
-	"mcp2210": {open: openMCP2210, guard: mcp2210Guard},
+// dongleTypes lists every supported dongle type. The hub discovers all connected
+// devices across all of them and assigns them to channels. To support a new
+// dongle, add an entry here; nothing else changes.
+var dongleTypes = []dongleType{
+	{scheme: "mcp2210", discover: mcp2210.Discover, open: openMCP2210, guard: mcp2210Guard},
 }
 
 // openMCP2210 opens an MCP2210 USB-to-SPI bridge by selector and brings up its
@@ -198,117 +195,154 @@ func mcp2210Guard(spreadFactor config.SpreadFactor) time.Duration {
 	return mcpdongle.ReplyGuard(pan211x.SpreadFactor(spreadFactor))
 }
 
-// startDongles parses each --dongle flag and brings up a self-healing radio for
-// it: a supervised dongle that opens its device, reopens it after a disconnect,
-// and tolerates the device being absent at startup. The radio is registered with
-// the engine immediately (its reply guard is known from the channel's spreading
-// factor, not the hardware), so the hub starts even with every dongle unplugged.
-// At least one dongle is required. It returns one bridge.DiagDongle per dongle
-// (labelled by channel name) so the caller can publish per-dongle diagnostics.
-func startDongles(ctx context.Context, eng *engine.Engine, flags []string, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]config.SpreadFactor, chNames map[uint8]string, logger *slog.Logger) ([]bridge.DiagDongle, error) {
-	specs, err := parseDongles(flags)
-	if err != nil {
-		return nil, err
-	}
-	if len(specs) == 0 {
-		return nil, fmt.Errorf("no radio dongle: set at least one --dongle scheme:selector,channel")
-	}
-	if err := checkChannelsCovered(specs, chNames); err != nil {
-		return nil, err
-	}
-	diag := make([]bridge.DiagDongle, 0, len(specs))
-	for _, s := range specs {
-		sf, ok := sfByChannel[s.channel]
+// dongleAssigner hands connected radio dongles to channels on demand. Every
+// channel's supervised radio asks it to claim a dongle each time it (re)opens;
+// the assigner discovers the connected devices across all dongle types and lends
+// out one that no other channel already holds. Dongles are interchangeable, so
+// any free device serves any orphan channel, and a device that disconnects is
+// released back to the pool to be reassigned — possibly to a different channel —
+// when it returns.
+type dongleAssigner struct {
+	types []dongleType
+
+	mu      sync.Mutex
+	claimed map[string]bool // scheme-qualified selector -> in use by some channel
+}
+
+func newDongleAssigner(types []dongleType) *dongleAssigner {
+	return &dongleAssigner{types: types, claimed: make(map[string]bool)}
+}
+
+// errNoFreeDongle reports that no connected dongle is currently free to serve a
+// channel. The channel's supervisor treats it like any other open failure: it
+// stays offline and retries, so a dongle plugged in later is picked up.
+var errNoFreeDongle = errors.New("no unassigned radio dongle connected")
+
+// claim opens a connected dongle that no other channel is using and brings it up
+// on the given channel and spreading factor. The returned dongle releases its
+// claim when closed, so a drop frees it for reassignment. It returns
+// errNoFreeDongle when every connected dongle is already claimed (or none is
+// connected).
+func (a *dongleAssigner) claim(channel uint8, sf config.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error) {
+	for {
+		dt, sel, key, ok, err := a.reserve()
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
-			// No inventory node uses this channel; fall back to the default factor
-			// and warn, since such a dongle has nothing to talk to.
-			logger.Warn("dongle channel has no inventory nodes; using default spreading factor",
-				"channel", s.channel, "spreadFactor", sf)
+			return nil, errNoFreeDongle
 		}
-		dt := dongleTypes[s.scheme]
-		s := s // capture per iteration for the opener closure
-		open := func() (radio.Dongle, error) {
-			return dt.open(s.selector, s.channel, sf, hubAddr)
+		d, err := dt.open(sel, channel, sf, hubAddr)
+		if err != nil {
+			// Reserved but could not open (vanished, busy, no permission): release
+			// the reservation and try the next free device.
+			a.unclaim(key)
+			continue
 		}
-		log := logger.With("type", s.scheme, "selector", s.selector, "channel", s.channel)
-		d := radio.NewReconnecting(ctx, open, dt.guard(sf), radio.DefaultReconnectBackoff, log)
-		if err := eng.AddRadio(ctx, s.channel, radio.New(ctx, d)); err != nil {
-			d.Close()
-			return nil, fmt.Errorf("dongle %q: %w", s.selector, err)
-		}
-		// Label per-dongle diagnostics by channel name; fall back to the channel
-		// number for a dongle on a channel with no inventory nodes.
-		name := chNames[s.channel]
-		if name == "" {
-			name = fmt.Sprintf("ch%d", s.channel)
-		}
-		diag = append(diag, bridge.DiagDongle{Name: name, Stats: d.Stats})
-		log.Info("radio dongle supervised", "spreadFactor", sf)
+		return &claimedDongle{Dongle: d, release: func() { a.unclaim(key) }}, nil
 	}
+}
+
+// reserve discovers the connected dongles across all types and atomically marks
+// the first unclaimed one as claimed, returning how to open it. ok is false when
+// every connected dongle is already claimed (or none is connected). Selectors
+// within a type are sorted so assignment is deterministic.
+func (a *dongleAssigner) reserve() (dt *dongleType, selector, key string, ok bool, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i := range a.types {
+		t := &a.types[i]
+		sels, e := t.discover()
+		if e != nil {
+			return nil, "", "", false, fmt.Errorf("discover %s dongles: %w", t.scheme, e)
+		}
+		sort.Strings(sels)
+		for _, s := range sels {
+			k := t.scheme + ":" + s
+			if a.claimed[k] {
+				continue
+			}
+			a.claimed[k] = true
+			return t, s, k, true, nil
+		}
+	}
+	return nil, "", "", false, nil
+}
+
+// unclaim releases a previously reserved dongle back to the pool.
+func (a *dongleAssigner) unclaim(key string) {
+	a.mu.Lock()
+	delete(a.claimed, key)
+	a.mu.Unlock()
+}
+
+// claimedDongle wraps an assigned dongle so closing it (after a drop or at
+// shutdown) releases its claim, letting the same physical device be reassigned.
+type claimedDongle struct {
+	radio.Dongle
+	once    sync.Once
+	release func()
+}
+
+func (c *claimedDongle) Close() error {
+	c.once.Do(c.release)
+	return c.Dongle.Close()
+}
+
+// startDongles registers one supervised radio per RF channel the inventory uses
+// and assigns connected dongles to those channels. The hub always starts — even
+// with no dongle connected: each channel's radio is registered with the engine
+// immediately (its reply guard is known from the channel's spreading factor, not
+// the hardware) and stays offline until a dongle becomes available. Dongles are
+// assigned dynamically as they appear and released for reassignment when they
+// drop, so plugging a dongle in brings up an orphan channel and unplugging it
+// frees the device for another. It returns one bridge.DiagDongle per channel
+// (labelled by channel name) for per-channel dongle diagnostics.
+func startDongles(ctx context.Context, eng *engine.Engine, hubAddr [node.AddrLen]byte, sfByChannel map[uint8]config.SpreadFactor, chNames map[uint8]string, logger *slog.Logger) ([]bridge.DiagDongle, error) {
+	assigner := newDongleAssigner(dongleTypes)
+	diag := make([]bridge.DiagDongle, 0, len(chNames))
+	for _, ch := range sortedChannels(chNames) {
+		ch := ch // capture per iteration for the opener closure
+		sf := sfByChannel[ch]
+		open := func() (radio.Dongle, error) {
+			return assigner.claim(ch, sf, hubAddr)
+		}
+		log := logger.With("channel", ch, "channelName", chNames[ch])
+		rec := radio.NewReconnecting(ctx, open, maxGuard(sf), radio.DefaultReconnectBackoff, log)
+		if err := eng.AddRadio(ctx, ch, radio.New(ctx, rec)); err != nil {
+			rec.Close()
+			return nil, fmt.Errorf("channel %d: %w", ch, err)
+		}
+		diag = append(diag, bridge.DiagDongle{Name: chNames[ch], Stats: rec.Stats})
+	}
+	logger.Info("radio channels ready; dongles are assigned as they connect", "channels", len(chNames))
 	return diag, nil
 }
 
-// checkChannelsCovered ensures every channel the inventory uses (chNames, keyed
-// by channel number) has at least one --dongle on it. A node on an uncovered
-// channel could never be reached — the engine would fail every transaction with
-// ErrNoRadio — so this turns a silent run-time dead end into a startup error
-// listing the missing channels by name.
-func checkChannelsCovered(specs []dongleSpec, chNames map[uint8]string) error {
-	covered := make(map[uint8]bool, len(specs))
-	for _, s := range specs {
-		covered[s.channel] = true
-	}
-	var missing []string
-	for ch, name := range chNames {
-		if !covered[ch] {
-			missing = append(missing, fmt.Sprintf("%s (channel %d)", name, ch))
+// maxGuard is the largest reply guard (lib/README.md §6) any supported dongle
+// type needs for a spreading factor. Because a channel's dongle is assigned
+// dynamically, the node must defer its reply long enough for whichever dongle
+// type ends up serving the channel; the maximum satisfies them all. The engine
+// validates this guard against its timeout up front, before any device connects.
+func maxGuard(sf config.SpreadFactor) time.Duration {
+	var g time.Duration
+	for i := range dongleTypes {
+		if d := dongleTypes[i].guard(sf); d > g {
+			g = d
 		}
 	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		return fmt.Errorf("no --dongle for inventory channel(s): %s", strings.Join(missing, ", "))
-	}
-	return nil
+	return g
 }
 
-// parseDongles parses "scheme:selector,channel" entries. The channel is split
-// off after the last comma so device paths or serials containing commas are
-// preserved; the "scheme:" prefix (before the first colon) selects the dongle
-// type and is required — there is no default.
-func parseDongles(flags []string) ([]dongleSpec, error) {
-	specs := make([]dongleSpec, 0, len(flags))
-	seen := make(map[uint8]string, len(flags))
-	for _, f := range flags {
-		i := strings.LastIndex(f, ",")
-		if i < 0 {
-			return nil, fmt.Errorf("dongle %q: expected scheme:selector,channel", f)
-		}
-		target := f[:i]
-		ch, err := strconv.ParseUint(f[i+1:], 10, 8)
-		if err != nil {
-			return nil, fmt.Errorf("dongle %q: invalid channel: %w", f, err)
-		}
-		j := strings.Index(target, ":")
-		if j < 0 {
-			return nil, fmt.Errorf("dongle %q: missing scheme: prefix (e.g. mcp2210:)", f)
-		}
-		scheme, selector := target[:j], target[j+1:]
-		if selector == "" {
-			return nil, fmt.Errorf("dongle %q: empty selector", f)
-		}
-		if _, ok := dongleTypes[scheme]; !ok {
-			return nil, fmt.Errorf("dongle %q: unknown dongle type %q", f, scheme)
-		}
-		// Each channel is served by exactly one dongle: the engine keys its radios
-		// by channel, so a second dongle on the same channel would silently
-		// displace the first. Reject it instead.
-		if prev, dup := seen[uint8(ch)]; dup {
-			return nil, fmt.Errorf("dongle %q: channel %d already served by dongle %q", f, ch, prev)
-		}
-		seen[uint8(ch)] = selector
-		specs = append(specs, dongleSpec{scheme: scheme, selector: selector, channel: uint8(ch)})
+// sortedChannels returns the inventory's channel numbers in ascending order, for
+// a deterministic dongle assignment.
+func sortedChannels(chNames map[uint8]string) []uint8 {
+	chs := make([]uint8, 0, len(chNames))
+	for ch := range chNames {
+		chs = append(chs, ch)
 	}
-	return specs, nil
+	sort.Slice(chs, func(i, j int) bool { return chs[i] < chs[j] })
+	return chs
 }
 
 // newRegistry creates the registry client and returns it along with the resolved

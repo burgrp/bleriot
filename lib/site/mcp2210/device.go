@@ -127,6 +127,31 @@ func resolve(selector string) (string, error) {
 	return "", fmt.Errorf("mcp2210: no device with serial %q: %w", selector, ErrNotFound)
 }
 
+// Discover returns a stable selector for every MCP2210 currently connected, for
+// the hub's automatic dongle assignment. Each selector is the device's USB
+// serial when it has one — so a reconnecting supervisor re-finds it even if it
+// returns on a different hidraw node — and otherwise its /dev/hidraw* path. Each
+// selector round-trips through Open. A host with no HID subsystem at all yields
+// no devices and no error.
+func Discover() ([]string, error) {
+	devs, err := enumerate()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]string, 0, len(devs))
+	for _, dev := range devs {
+		if dev.serial != "" {
+			out = append(out, dev.serial)
+		} else {
+			out = append(out, dev.devnode)
+		}
+	}
+	return out, nil
+}
+
 // hidDevice is one discovered MCP2210 hidraw node and its USB serial (if any).
 type hidDevice struct {
 	devnode string

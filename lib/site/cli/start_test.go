@@ -7,10 +7,13 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
+	"github.com/burgrp/bleriot/lib/site/engine"
 	"github.com/burgrp/bleriot/lib/site/node"
+	"github.com/burgrp/bleriot/lib/site/radio"
 )
 
 // fakeProbe is an in-memory Probe for tests.
@@ -164,61 +167,118 @@ func TestRunNewPrintsStub(t *testing.T) {
 	}
 }
 
-func TestParseDongles(t *testing.T) {
-	specs, err := parseDongles([]string{"mcp2210:/dev/hidraw0,37", "mcp2210:ABC123,11", "mcp2210:/dev/hidraw1,5"})
+// stubDongle is a radio.Dongle that does nothing, for exercising the dongle
+// assignment path without hardware.
+type stubDongle struct{}
+
+func (stubDongle) Send([4]byte, []byte) error { return nil }
+func (stubDongle) Receive([]byte) (int, bool) { return 0, false }
+func (stubDongle) ReplyGuard() time.Duration  { return time.Millisecond }
+func (stubDongle) Close() error               { return nil }
+
+// withFakeDongleType swaps dongleTypes for a single fake type whose discover
+// returns the given selectors, restoring the original afterwards.
+func withFakeDongleType(t *testing.T, selectors []string) {
+	t.Helper()
+	saved := dongleTypes
+	t.Cleanup(func() { dongleTypes = saved })
+	dongleTypes = []dongleType{{
+		scheme:   "fake",
+		discover: func() ([]string, error) { return append([]string(nil), selectors...), nil },
+		open: func(string, uint8, config.SpreadFactor, [node.AddrLen]byte) (radio.Dongle, error) {
+			return stubDongle{}, nil
+		},
+		guard: func(config.SpreadFactor) time.Duration { return time.Millisecond },
+	}}
+}
+
+func mustAddr(t *testing.T, s string) [node.AddrLen]byte {
+	t.Helper()
+	a, err := node.ParseAddress(s)
 	if err != nil {
-		t.Fatalf("parseDongles: %v", err)
+		t.Fatalf("ParseAddress(%q): %v", s, err)
 	}
-	if len(specs) != 3 {
-		t.Fatalf("got %d specs, want 3", len(specs))
-	}
-	if specs[0].scheme != "mcp2210" || specs[0].selector != "/dev/hidraw0" || specs[0].channel != 37 {
-		t.Fatalf("spec[0] = %+v, want mcp2210 /dev/hidraw0 ch 37", specs[0])
-	}
-	if specs[1].scheme != "mcp2210" || specs[1].selector != "ABC123" || specs[1].channel != 11 {
-		t.Fatalf("spec[1] = %+v, want mcp2210 ABC123 ch 11", specs[1])
-	}
-	if specs[2].scheme != "mcp2210" || specs[2].selector != "/dev/hidraw1" || specs[2].channel != 5 {
-		t.Fatalf("spec[2] = %+v, want mcp2210 /dev/hidraw1 ch 5", specs[2])
-	}
+	return a
 }
 
-func TestParseDonglesErrors(t *testing.T) {
-	cases := []string{
-		"mcp2210:/dev/hidraw0",     // missing channel
-		"mcp2210:,37",              // empty selector
-		"mcp2210:/dev/hidraw0,x",   // non-numeric channel
-		"mcp2210:/dev/hidraw0,300", // channel out of uint8 range
-		"bogus:ABC123,37",          // unknown dongle type
-		"ABC123,37",                // missing scheme prefix
-	}
-	for _, c := range cases {
-		if _, err := parseDongles([]string{c}); err == nil {
-			t.Fatalf("parseDongles(%q): expected error", c)
-		}
-	}
+// TestStartDonglesAlwaysStarts verifies the hub comes up even with no dongle
+// connected: startDongles registers one radio per channel and never errors on an
+// empty pool.
+func TestStartDonglesAlwaysStarts(t *testing.T) {
+	withFakeDongleType(t, nil) // no dongles connected
 
-	// Two dongles on the same channel is rejected (each channel needs its own).
-	if _, err := parseDongles([]string{"mcp2210:ABC,38", "mcp2210:DEF,38"}); err == nil {
-		t.Fatal("parseDongles(duplicate channel): expected error")
-	}
-}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	eng := engine.New(engine.Options{
+		HubAddr: mustAddr(t, "FFFFFF01"), Timeout: time.Second, Retries: 1, RefreshInterval: time.Second,
+	})
 
-func TestCheckChannelsCovered(t *testing.T) {
 	chNames := map[uint8]string{37: "far", 38: "near"}
+	sfByChannel := map[uint8]config.SpreadFactor{37: config.SpreadFactorS8, 38: config.SpreadFactorS2}
 
-	// All inventory channels have a dongle (extra dongles are allowed).
-	ok := []dongleSpec{{channel: 37}, {channel: 38}, {channel: 5}}
-	if err := checkChannelsCovered(ok, chNames); err != nil {
-		t.Fatalf("checkChannelsCovered(all covered): %v", err)
+	diag, err := startDongles(ctx, eng, mustAddr(t, "FFFFFF01"), sfByChannel, chNames, slog.Default())
+	if err != nil {
+		t.Fatalf("startDongles with no dongles: %v", err)
 	}
+	if len(diag) != 2 {
+		t.Fatalf("got %d diag entries, want 2 (one per channel)", len(diag))
+	}
+	// In ascending channel order, each labelled by its channel name.
+	if diag[0].Name != "far" || diag[1].Name != "near" {
+		t.Fatalf("diag names = %q, %q; want far, near", diag[0].Name, diag[1].Name)
+	}
+}
 
-	// A required channel has no dongle: error names the missing channel.
-	err := checkChannelsCovered([]dongleSpec{{channel: 37}}, chNames)
-	if err == nil {
-		t.Fatal("checkChannelsCovered(missing near): expected error")
+// TestDongleAssignerClaims verifies the assigner lends each connected dongle to
+// at most one channel and releases it for reassignment on close.
+func TestDongleAssignerClaims(t *testing.T) {
+	withFakeDongleType(t, []string{"B", "A"}) // two interchangeable dongles
+	a := newDongleAssigner(dongleTypes)
+	hub := mustAddr(t, "FFFFFF01")
+
+	// First claim takes the lowest-sorted free selector.
+	d1, err := a.claim(37, config.SpreadFactorS8, hub)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
 	}
-	if !strings.Contains(err.Error(), "near") || !strings.Contains(err.Error(), "38") {
-		t.Fatalf("error %q does not name the missing channel", err)
+	// Second claim takes the other one; the first is still held.
+	d2, err := a.claim(38, config.SpreadFactorS2, hub)
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	// No dongle left: a third channel gets errNoFreeDongle, not a double-assign.
+	if _, err := a.claim(39, config.SpreadFactorS8, hub); err != errNoFreeDongle {
+		t.Fatalf("third claim: got %v, want errNoFreeDongle", err)
+	}
+	// Closing one releases it back to the pool for reassignment.
+	d1.Close()
+	d3, err := a.claim(39, config.SpreadFactorS8, hub)
+	if err != nil {
+		t.Fatalf("claim after release: %v", err)
+	}
+	d2.Close()
+	d3.Close()
+}
+
+// TestDongleAssignerEmpty verifies an empty pool yields errNoFreeDongle (the
+// signal the supervisor retries on), not a hard failure.
+func TestDongleAssignerEmpty(t *testing.T) {
+	withFakeDongleType(t, nil)
+	a := newDongleAssigner(dongleTypes)
+	if _, err := a.claim(37, config.SpreadFactorS8, mustAddr(t, "FFFFFF01")); err != errNoFreeDongle {
+		t.Fatalf("claim on empty pool: got %v, want errNoFreeDongle", err)
+	}
+}
+
+func TestSortedChannels(t *testing.T) {
+	chs := sortedChannels(map[uint8]string{38: "near", 5: "lo", 37: "far"})
+	want := []uint8{5, 37, 38}
+	if len(chs) != len(want) {
+		t.Fatalf("got %v, want %v", chs, want)
+	}
+	for i := range want {
+		if chs[i] != want[i] {
+			t.Fatalf("got %v, want %v", chs, want)
+		}
 	}
 }

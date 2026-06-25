@@ -86,7 +86,7 @@ func resolveChip(inv inventory.Inventory, name string) (inventory.Chip, error) {
 		}
 	case 0:
 		return inventory.Chip{}, fmt.Errorf(
-			"no chip declared by any device type; set DeviceType.Chip (e.g. inventory.PY32F030) or pass --chip (known: %s)",
+			"no chip declared by any device type; set DeviceType.Chip (e.g. inventory.PY32F030x8) or pass --chip (known: %s)",
 			chipNames(catalog))
 	}
 	return inventory.Chip{}, fmt.Errorf("inventory declares multiple chips (%s); select one with --chip", chipNames(declared))

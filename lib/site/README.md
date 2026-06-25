@@ -60,11 +60,20 @@ new        read an attached device's UID and print an Instance stub
 
 ```sh
 cd ../../example/hub
-go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
-go run . --debug hub --dongle mcp2210:/dev/hidraw0,37   # verbose: shows radio traffic
+go run . hub --registry http://localhost:8080
+go run . --debug hub                           # verbose: shows radio traffic
 go run . provision                            # provision the attached device
 go run . new                                  # onboard a brand-new device
 ```
+
+The hub discovers the connected USB radio dongles automatically and assigns them
+to the channels the inventory uses, so there is no dongle flag. It always starts,
+even with no dongle connected: each RF channel stays offline until a dongle
+becomes available. Dongles are assigned dynamically — plugging one in brings up
+an orphan channel, and unplugging it frees the device to be reassigned, possibly
+to a different channel, when it returns. A discovered dongle is pinned by its USB
+serial where it has one, so a self-healing radio re-finds the same device after a
+replug.
 
 ### `hub` flags
 
@@ -76,8 +85,8 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--hub-address` | `FFFFFF01` | 4-byte hub source address (hex), used as SRC in outgoing packets. |
 | `--timeout` | `50ms` | Per-attempt response wait (protocol §9). |
 | `--retries` | `3` | Retransmissions after the first attempt (§9). |
-| `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). || `--ttl` | `30s` | Registry provider TTL. |
-| `--dongle` | — | A radio dongle as `scheme:selector,channel`, e.g. `mcp2210:/dev/hidraw0,37` or `mcp2210:0001746423,37`. The `scheme` selects the dongle type (only `mcp2210` today — there is no default); the `selector` is a `/dev/hidraw*` path or a USB serial; the channel is split off after the last `,`. Repeatable, one per dongle. The dongle's `/dev/hidraw*` node is root-only by default; install the udev rule (see [USB access](#usb-access)) to use it without `sudo`. |
+| `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
+| `--ttl` | `30s` | Registry provider TTL. |
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
 | `--diag-window` | `30s` | Averaging window for the diagnostic `rate.*` registers. |
 
@@ -94,7 +103,7 @@ field, so the commands take a single flag:
 
 A `Chip` bundles `Target` (pyocd target name), `UIDAddr` (memory address of the
 12-byte MCU unique ID) and `PageAddr` (flash address of the provisioning page).
-`inventory.PY32F030` (`py32f030x8`, UID `0x1FFF0E00`, page `0x0800F800`) is
+`inventory.PY32F030x8` (`py32f030x8`, UID `0x1FFF0E00`, page `0x0800F800`) is
 built in; declare a `Chip{...}` on a device type to support other MCUs. `--chip`
 accepts a built-in chip name even on an empty inventory, so the very first
 device can be onboarded with `new`.

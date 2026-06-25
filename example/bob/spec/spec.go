@@ -13,7 +13,7 @@ const (
 	RegGpio     = 3 // GPIO PA0..6 pins state (int)
 )
 
-var Chip = inventory.PY32F030
+var Chip = inventory.PY32F030x8
 
 func Type() inventory.DeviceType {
 	return inventory.DeviceType{

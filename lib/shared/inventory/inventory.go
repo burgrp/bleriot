@@ -66,7 +66,7 @@ type DeviceType struct {
 // Chip describes an MCU type from the provisioning tooling's point of view: how
 // to address it over SWD. It is a firmware/hardware fact of a device type, not a
 // per-device deployment fact, so it lives on the DeviceType. Predefined chips
-// are provided as package-level values (e.g. PY32F030); a site can also declare
+// are provided as package-level values (e.g. PY32F030x8); a site can also declare
 // its own.
 type Chip struct {
 	// Name selects the chip on the command line (--chip) and identifies it in

@@ -20,9 +20,9 @@
 //	    go test -tags dongles -v ./functest/...
 //
 // Each dongle env var is "scheme:selector": the scheme is required (only
-// "mcp2210" is supported here, mirroring the hub --dongle flag, which has no
-// default) and the selector is a /dev/hidraw* path or a USB serial string (see
-// mcp2210.Open). The two env vars only say *which* physical dongles to use; the
+// "mcp2210" is supported here) and the selector is a /dev/hidraw* path or a USB
+// serial string (see mcp2210.Open). The two env vars only say *which* physical
+// dongles to use; the
 // channel and spreading factor are fixed by the test matrix (see spreadConfigs).
 // When the dongle env vars are unset the tests skip, so a normal `go test ./...`
 // and CI are unaffected.
@@ -110,8 +110,8 @@ func mustAddr(s string) [node.AddrLen]byte {
 
 // mcpSelector requires a dongle env value to carry the "mcp2210:" scheme (the
 // only dongle type these hardware tests support) and returns the bare device
-// selector to pass to mcp2210.Open. Keeping the scheme explicit mirrors the hub
-// --dongle flag, which has no default scheme.
+// selector to pass to mcp2210.Open. The scheme is kept explicit so the env var
+// names which dongle type to use, with no implicit default.
 func mcpSelector(tb testing.TB, env, val string) string {
 	tb.Helper()
 	i := strings.Index(val, ":")

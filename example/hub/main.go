@@ -4,7 +4,7 @@
 //
 //	go run . new
 //	go run . provision
-//	go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
+//	go run . hub --registry http://localhost:8080
 package main
 
 import (

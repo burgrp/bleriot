@@ -113,12 +113,14 @@ hardware designs.
 
 ```sh
 cd example/hub
-go run . hub --registry http://localhost:8080 --dongle mcp2210:/dev/hidraw0,37
+go run . hub --registry http://localhost:8080
 ```
 
-The `--dongle` value is `scheme:selector,channel`: the scheme selects the dongle
-type (`mcp2210`), the selector is a `/dev/hidraw*` path or a USB serial, and the
-channel is the RF channel. The dongle's `/dev/hidraw*` node is owned by the
+The hub discovers the connected USB radio dongles automatically and assigns them
+to the RF channels the inventory uses — no `--dongle` flag. It always starts,
+even with no dongle connected: each channel stays offline until a dongle is
+available, and a dongle plugged in later is assigned to an orphan channel (and
+freed for another when unplugged). A dongle's `/dev/hidraw*` node is owned by the
 `plugdev` group via the shipped udev rule, so no `sudo` is needed (see
 [USB access](lib/site/README.md#usb-access)). See [lib/site/README.md](lib/site/README.md)
 for the inventory model, commands and flags.
