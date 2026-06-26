@@ -240,6 +240,11 @@ republished every 5 s.
 
 **Per node** — `<prefix>.node.<node>.<reg>`:
 
+The `<node>` segment is always a single path component: any `.` in the instance
+name is replaced by `-` (e.g. instance `basement.fan` →
+`<prefix>.node.basement-fan.rate.rx.all`, never `…node.basement.fan.rate.rx.all`),
+so the node name stays at a fixed position for selectors like Grafana.
+
 | Register | Type | Meaning |
 |----------|------|---------|
 | `online` | bool | Node is answering (watch-refresh misses below the liveness threshold). |

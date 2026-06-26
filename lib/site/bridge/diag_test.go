@@ -138,3 +138,33 @@ func TestDiagnostics_PublishesNodeAndDongle(t *testing.T) {
 		}
 	}
 }
+
+// TestDiagnostics_NodeNameIsSinglePathComponent checks that a dotted node name
+// is collapsed to one registry path component (dots → dashes), so the node name
+// always sits at a fixed position for selectors like Grafana.
+func TestDiagnostics_NodeNameIsSinglePathComponent(t *testing.T) {
+	src := fakeSnap{s: engine.NodeStats{RxAll: 5, LastRx: 1700000000, Online: true}}
+	reg := newMultiReg()
+	d := NewDiagnostics(src, reg, "bleriot", 30*time.Second, time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d.Serve(ctx,
+		[]DiagNode{{Name: "basement.fan", Addr: [4]byte{1, 2, 3, 4}}},
+		nil,
+	)
+
+	// The node name "basement.fan" must become the single component "basement-fan"
+	// and never split the path: bleriot.node.basement-fan.rate.rx.all, not
+	// bleriot.node.basement.fan.rate.rx.all.
+	if got := recvWithinDiag(t, reg.channel("bleriot.node.basement-fan.online"), time.Second); got != true {
+		t.Errorf("bleriot.node.basement-fan.online = %v, want true", got)
+	}
+	if got := recvWithinDiag(t, reg.channel("bleriot.node.basement-fan.count.rx.all"), time.Second); got != int64(5) {
+		t.Errorf("bleriot.node.basement-fan.count.rx.all = %v, want 5", got)
+	}
+	if reg.channel("bleriot.node.basement.fan.online") != nil {
+		t.Errorf("dotted node name leaked an extra path component: bleriot.node.basement.fan.online was provided")
+	}
+}
