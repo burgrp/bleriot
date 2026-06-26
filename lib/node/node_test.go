@@ -319,11 +319,25 @@ func TestWatchAllRepliesWithSingleAck(t *testing.T) {
 	if r.sent[0].dst != hubAddr {
 		t.Fatalf("ack dst = %X, want hub", r.sent[0].dst)
 	}
-	if reg != protocol.RegAll || value != 0 {
-		t.Fatalf("ack reg/value = %d/%d, want 0/0", reg, value)
+	// A newly created watch-all subscription reports VALUE=1 (§8.3) so the hub
+	// re-seeds; here it is the first subscribe, so it is fresh.
+	if reg != protocol.RegAll || value != 1 {
+		t.Fatalf("ack reg/value = %d/%d, want %d/1", reg, value, protocol.RegAll)
 	}
 	if flags&protocol.FlagPush != 0 {
 		t.Fatalf("ack flags = %#x, PUSH must be clear", flags)
+	}
+
+	// A refresh of the same watch-all subscription is not fresh: VALUE=0, so the
+	// hub does not needlessly re-seed in steady state.
+	r.rx = append(r.rx, encodeReq(t, protocol.TypeWATCH, protocol.RegAll, 1))
+	n.Poll()
+	if len(r.sent) != 2 {
+		t.Fatalf("watch-all refresh sent %d packets total, want a single further ACK", len(r.sent))
+	}
+	_, typ, _, reg, value = decodeReply(t, r.sent[1].packet)
+	if typ != protocol.TypeACK || reg != protocol.RegAll || value != 0 {
+		t.Fatalf("refresh ack type/reg/value = %#x/%d/%d, want ACK/%d/0", typ, reg, value, protocol.RegAll)
 	}
 }
 

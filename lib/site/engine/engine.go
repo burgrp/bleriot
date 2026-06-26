@@ -72,9 +72,15 @@ type Update struct {
 type Callback func(Update)
 
 // AllCallback receives subscription updates for a watch-all subscription (§8.3):
-// every register's push is delivered with its register ID. When the node goes
-// offline (liveness, §10) the callback is invoked once with reg == RegAll and a
-// NULL Update to signal that all of the node's registers are now unknown.
+// every register's push is delivered with its register ID. The reserved register
+// RegAll carries two node-level signals instead of a register value:
+//   - reg == RegAll with a NULL Update: the node went offline (liveness, §10);
+//     all of its registers are now unknown.
+//   - reg == RegAll with a non-NULL Update: the node reported the watch-all
+//     subscription as freshly (re)created — it lost its (in-RAM) subscription
+//     table, e.g. across a reboot. Because a watch-all draws no value dump, this
+//     is the hub's cue to re-seed every register so values that changed while the
+//     node was down are picked up.
 type AllCallback func(reg uint16, u Update)
 
 // RegAll is the reserved register ID 0 used by WatchAll/UnwatchAll to subscribe
@@ -248,13 +254,20 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 			return
 		}
 		e.mu.Lock()
-		_, live := e.watchAll[addr]
+		cb, live := e.watchAll[addr]
 		e.mu.Unlock()
 		if !live {
 			continue
 		}
-		_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
+		u, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
 		e.noteLivenessAll(addr, err)
+		// A non-zero ACK value means the node registered this as a fresh
+		// subscription (§8.3) — it lost its table, e.g. across a reboot. Signal the
+		// watcher to re-seed every register, since a watch-all draws no value dump,
+		// so values that reverted while the node was down are picked up.
+		if err == nil && u.Value != 0 {
+			cb(RegAll, Update{})
+		}
 	}
 }
 
@@ -423,7 +436,13 @@ func (e *Engine) WatchAll(ctx context.Context, addr [node.AddrLen]byte, cb AllCa
 	e.watchAll[addr] = cb
 	e.mu.Unlock()
 
-	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
+	u, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
+	// A fresh subscription (non-zero ACK value, §8.3) tells the caller to seed
+	// every register; on the very first subscribe the registers have no value yet,
+	// so this simply confirms the seeding the caller already performs.
+	if err == nil && u.Value != 0 {
+		cb(RegAll, Update{})
+	}
 	return err
 }
 
@@ -571,9 +590,12 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 			nm.rxIS.Add(1)
 		}
 	case protocol.TypeACK:
-		// A SET acknowledgement: resolves the pending SET only. It carries no
-		// value, so clear value/flags and never invoke a subscription callback.
-		value, flags = 0, 0
+		// A SET acknowledgement carries no value; a watch-all WATCH ACK (§8.3)
+		// carries a fresh-subscription flag in VALUE (1 = newly created, e.g. after
+		// the node rebooted and lost its table). Clear FLAGS so a stray guard/NULL
+		// bit cannot leak into the Update, but preserve VALUE so that flag reaches
+		// the watch-all refresh logic.
+		flags = 0
 		if nm != nil {
 			nm.rxACK.Add(1)
 		}

@@ -184,7 +184,7 @@ so `REG=0` is free as this all-registers sentinel.
 
 ```
 Hub  →  Node    TYPE=WATCH  REG=0  VALUE=1                          (watch-all)
-Node →  Hub     TYPE=ACK    REG=0  VALUE=0                          (single reply)
+Node →  Hub     TYPE=ACK    REG=0  VALUE=<1 if new, 0 if refresh>   (single reply)
 Node →  Hub     TYPE=IS     REG=R  VALUE=<new value>  FLAGS.PUSH=1  (on each change)
 Hub  →  Node    TYPE=ACK    REG=R  VALUE=0                          (acknowledges the push)
 Hub  →  Node    TYPE=WATCH  REG=0  VALUE=0                          (unwatch-all)
@@ -202,6 +202,16 @@ waiting for its next change. Thereafter the node pushes each
 changed register exactly as for an individual subscription — a real `REG`, with
 FLAGS.PUSH=1, acknowledged per push. A node sends one push per change even when a
 hub holds both a watch-all and an individual watch for that register.
+
+The watch-all ACK's `VALUE` reports whether the subscription was **newly
+created** (`1`) or a **refresh** of one the node already held (`0`). A node's
+subscription table lives in RAM, so a reboot wipes it: the hub's next watch-all
+refresh is then registered afresh and answered with `VALUE=1`, which the hub
+takes as a cue to re-seed every register (re-GET), picking up values that
+reverted to their power-on defaults while the node was down. Without this, a
+power-cycle shorter than the liveness window (§10) would leave the hub holding
+the pre-reboot value — the node neither dumps values on a watch-all nor pushes a
+change it made before any hub was subscribed.
 
 Watch-all collapses what would otherwise be one WATCH refresh per register into a
 single refresh per node (§10), which both saves airtime and avoids overflowing a

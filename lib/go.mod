@@ -25,3 +25,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 )
+
+// Design phase: consume the in-tree pan211x driver (SetChannelBLE/SetChannelRF)
+// directly from its local checkout instead of a tagged release.
+replace github.com/burgrp/tinygo-drivers/pan211x => /home/paul/git/tinygo-drivers/pan211x

@@ -146,12 +146,19 @@ func (b *Bridge) ServeNode(ctx context.Context, n *node.Node) {
 	log := b.log.With("device", n.Name, "address", n.Address)
 	if err := b.tx.WatchAll(ctx, n.Address, func(reg uint16, u engine.Update) {
 		if reg == engine.RegAll {
-			// The node was detected offline (§10): null every register and clear
-			// its seeded flag so the value is re-fetched once the node answers
-			// again (e.g. after a dropped radio link recovers).
+			// Node-level signal (§8.3, §10). Clear every register's seeded flag so
+			// each value is re-fetched from the node: a watch-all draws no value dump,
+			// so the hub must GET the current values itself. A NULL signal additionally
+			// means the node went offline (§10), so null every register too so a
+			// vanished node's stale value stops being reported; a non-NULL signal means
+			// the node freshly (re)subscribed — e.g. it rebooted and lost its
+			// subscription table — and is up, so we only re-seed (no NULL, to avoid
+			// flapping the registry value through nil and back).
 			for _, rc := range channels {
 				rc.seeded.Store(false)
-				deliver(rc.updates, engine.Update{Null: true})
+				if u.Null {
+					deliver(rc.updates, engine.Update{Null: true})
+				}
 			}
 			return
 		}
@@ -182,9 +189,10 @@ func deliver(ch chan engine.Update, u engine.Update) {
 // watch-all subscription (§8.3) never dumps current values, so the hub must GET
 // them itself; this loop re-fetches the value every time the register loses it.
 // seeded is cleared by a failed initial GET (the node was unreachable at
-// startup) and by the offline signal (§10) the engine raises when the dongle
-// disconnects, which ServeNode's watch-all callback turns into a seeded reset on
-// every register. The loop retries until the node answers: a successful GET,
+// startup), by the offline signal (§10) the engine raises when the dongle
+// disconnects, and by a fresh watch-all (re)subscription (§8.3) the engine
+// reports after the node reboots and loses its subscription table — all of which
+// ServeNode's watch-all callback turns into a seeded reset on every register. The loop retries until the node answers: a successful GET,
 // even one returning NULL, marks the register seeded and the loop idles until
 // the value is lost again. This is what re-populates a register after the dongle is unplugged and
 // replugged — the offline NULL clears seeded, and the first GET that succeeds

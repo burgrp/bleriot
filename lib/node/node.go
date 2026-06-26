@@ -198,12 +198,23 @@ func (n *Node) Poll() bool {
 			// from) every register with a single table entry tagged RegAll, and
 			// answer with one ACK — no value dump. The hub seeds values with GETs
 			// and learns changes from the per-register pushes Notify produces.
+			//
+			// The ACK's VALUE reports whether this subscription was newly created
+			// (1) or merely refreshed an existing one (0). A node that just
+			// rebooted has an empty (in-RAM) subscription table, so the hub's next
+			// watch-all refresh registers afresh and is answered with VALUE=1; the
+			// hub takes that as its cue to re-seed every register (a watch-all
+			// draws no value dump), picking up values that changed while the node
+			// was down.
+			var fresh int32
 			if value != 0 {
-				n.subscribe(src, protocol.RegAll)
+				if n.subscribe(src, protocol.RegAll) {
+					fresh = 1
+				}
 			} else {
 				n.unsubscribe(src, protocol.RegAll)
 			}
-			n.send(src, protocol.TypeACK, 0, protocol.RegAll, 0)
+			n.send(src, protocol.TypeACK, 0, protocol.RegAll, fresh)
 		} else if value != 0 {
 			n.subscribe(src, reg)
 			v, null := n.dev.Read(reg)
@@ -392,14 +403,17 @@ func (n *Node) send(dst [4]byte, typ, flags byte, reg uint16, value int32) {
 	n.lastTxNanos = nanotime()
 }
 
-// subscribe records a (hub, tag) watch, refreshing it if it already exists.
-// A full table evicts the oldest entry (round-robin via nextSub).
-func (n *Node) subscribe(addr [4]byte, tag uint16) {
+// subscribe records a (hub, tag) watch, refreshing it if it already exists. It
+// reports whether the subscription was newly created (true) rather than a
+// refresh of one already present; the watch-all path relays that to the hub in
+// its ACK so a rebooted node — whose table was wiped — prompts the hub to
+// re-seed. A full table evicts the oldest entry (round-robin via nextSub).
+func (n *Node) subscribe(addr [4]byte, tag uint16) bool {
 	var free *sub
 	for i := range n.subs {
 		s := &n.subs[i]
 		if s.active && s.addr == addr && s.tag == tag {
-			return // already subscribed
+			return false // already subscribed
 		}
 		if free == nil && !s.active {
 			free = s
@@ -412,6 +426,7 @@ func (n *Node) subscribe(addr [4]byte, tag uint16) {
 	free.addr = addr
 	free.tag = tag
 	free.active = true
+	return true
 }
 
 // unsubscribe drops a (hub, tag) watch if present.
