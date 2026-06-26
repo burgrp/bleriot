@@ -195,13 +195,13 @@ type nodeMetricSet struct {
 }
 
 // pathComponent collapses a name into a single registry path component by
-// replacing the path separator (".") with "-". Unlike a device register, which
+// replacing the path separator (".") with "_". Unlike a device register, which
 // uses the dotted node name as a hierarchical prefix (node "basement.fan" +
 // register "duty" → "basement.fan.duty"), a diagnostic register must keep the
 // node name in one fixed position (node "basement.fan" →
-// "<prefix>.node.basement-fan.rate.rx.all") so downstream selectors such as
+// "<prefix>.node.basement_fan.rate.rx.all") so downstream selectors such as
 // Grafana can pick the node by a fixed path-component index.
-func pathComponent(name string) string { return strings.ReplaceAll(name, ".", "-") }
+func pathComponent(name string) string { return strings.ReplaceAll(name, ".", "_") }
 
 func (m *nodeMetricSet) prefixDot() string {
 	return m.prefix + ".node." + pathComponent(m.name) + "."
