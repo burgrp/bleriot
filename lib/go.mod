@@ -16,8 +16,8 @@ go 1.25.2
 
 require (
 	github.com/burgrp/reg v1.0.12
-	github.com/burgrp/tinygo-drivers/bb/spi v0.0.0-20260625223434-c95187c9c07f
-	github.com/burgrp/tinygo-drivers/pan211x v0.0.0-20260529225117-75c3fff7a486
+	github.com/burgrp/tinygo-drivers/bb/spi v1.0.0
+	github.com/burgrp/tinygo-drivers/pan211x v1.0.0
 	github.com/lmittmann/tint v1.1.3
 	github.com/spf13/cobra v1.10.2
 )
@@ -29,6 +29,6 @@ require (
 
 // Design phase: consume the in-tree pan211x driver (SetChannelBLE/SetChannelRF)
 // directly from its local checkout instead of a tagged release.
-replace github.com/burgrp/tinygo-drivers/pan211x => /home/paul/git/tinygo-drivers/pan211x
+// replace github.com/burgrp/tinygo-drivers/pan211x => /home/paul/git/tinygo-drivers/pan211x
 
-replace github.com/burgrp/tinygo-drivers/bb/spi => /home/paul/git/tinygo-drivers/bb/spi
+// replace github.com/burgrp/tinygo-drivers/bb/spi => /home/paul/git/tinygo-drivers/bb/spi

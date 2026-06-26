@@ -1,3 +1,5 @@
+//go:build !tinygo
+
 // Command hub is the example BleRiot site binary. It declares the deployment as
 // inventory-as-code and hands it to the shared host runtime, which provides the
 // hub, provision and new subcommands.

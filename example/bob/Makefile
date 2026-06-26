@@ -7,7 +7,7 @@ CMSIS_PACK = PY32F030
 
 IMAGE = image.elf
 
-.PHONY: build flash gdb rtt install-pack disassembly
+.PHONY: build flash gdb rtt install-pack disassembly new provision hub
 
 build:
 	tinygo build --stack-size 1024b --size html --serial rtt --scheduler tasks -print-allocs=. --gc leaking --target ${TARGET_TINYGO} -o ${IMAGE} .
@@ -29,3 +29,12 @@ install-pack:
 
 disassembly: build
 	arm-none-eabi-objdump -dS ${IMAGE} > disassembly.txt
+
+new:
+	go run . new
+
+provision:
+	go run . provision
+
+hub:
+	go run . hub --diagnostics rf
