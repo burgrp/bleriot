@@ -49,7 +49,7 @@ The hub runs entirely on the Linux host:
 - **`lib/site`** (the BleRiot host library) owns all protocol intelligence —
   per-node XTEA keys, register tables, retries/timeouts, push-subscription
   bookkeeping, and the Registry client — and drives the radio directly. A site
-  repository drives it with inventory-as-code (see [`example/hub`](example/hub))
+  repository drives it with inventory-as-code (see [`example/bob`](example/bob))
   and runs it on a Linux SBC.
 - The **USB radio dongle** is a passive USB-to-SPI bridge: an
   [MCP2210](usb) drives a PAN211x radio over SPI with **no microcontroller and no
@@ -76,8 +76,7 @@ hardware designs.
 | [`lib/node/`](lib/node) | The firmware-side BleRiot runtime: the receive/dispatch loop, XTEA codec and `GET`/`SET`/`WATCH` handling. Imported by node firmware; allocation-free in steady state. | — |
 | [`lib/site/`](lib/site) | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, provisioning, Registry bridge. | [lib/site/README.md](lib/site/README.md) |
 | [`usb/`](usb) | KiCad design for the USB radio dongle (MCP2210 USB-to-SPI bridge + PAN211x). | — |
-| [`example/hub/`](example/hub) | Example site binary (own module): declares an inventory-as-code deployment and runs the host runtime. | — |
-| [`example/bob/`](example/bob) | Example device-type module (own module): flat TinyGo firmware (`package main`) plus an importable `spec` subpackage (`Config` + `Type()` + register tags) shared with the host. | — |
+| [`example/bob/`](example/bob) | Example device-type module (own module). One flat `package main` holds both targets, split by build tag: the TinyGo node firmware (`//go:build tinygo`) and the example host hub (`//go:build !tinygo`) that declares an inventory-as-code deployment and runs the host runtime. Its importable `spec` subpackage (`Config` + `Type()` + register tags) is shared by both. | — |
 | [`bob/`](bob) | KiCad PCB design (breakout board v1.3, the reference node hardware). | — |
 | [`sub/hw-kicad/`](sub/hw-kicad) | Shared KiCad symbol/footprint library (git submodule). | — |
 
@@ -112,7 +111,7 @@ hardware designs.
 ### Host hub
 
 ```sh
-cd example/hub
+cd example/bob
 go run . hub --registry http://localhost:8080
 ```
 
@@ -128,7 +127,7 @@ for the inventory model, commands and flags.
 ### Provisioning a device
 
 ```sh
-cd example/hub
+cd example/bob
 go run . new          # read the attached device's UID, print an Instance stub
 go run . provision    # write its identity + config to flash over SWD
 ```
@@ -142,13 +141,17 @@ See [lib/site/README.md](lib/site/README.md#provision--new-flags) for the SWD fl
 ```
 lib/shared  ──────┬─► lib/site   (also: github.com/burgrp/reg, cobra)
  (codec, config,  ├─► lib/node   (the firmware runtime)
-  inventory)      └─► example/bob firmware (also: pan211x driver, TinyGo)
+  inventory)      │
+                  └─► example/bob ─┬─ firmware  (//go:build tinygo:  lib/node + pan211x, TinyGo)
+                                   └─ host hub  (//go:build !tinygo: lib/site)
 ```
 
 `lib/shared` is intentionally dependency-free and build-tag-free so the exact
 same source compiles into both the Linux host and the TinyGo node firmware,
-single-sourcing the on-wire formats. The two `example/*` modules consume `lib`
-via local `replace` directives.
+single-sourcing the on-wire formats. The `example/bob` module is dual-target: one
+flat `package main` whose firmware (`//go:build tinygo`) and host hub
+(`//go:build !tinygo`) entry points are selected by build tag, and it consumes
+`lib` via a local `replace` directive.
 
 ---
 

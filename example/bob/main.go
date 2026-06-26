@@ -26,15 +26,12 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/burgrp/bleriot/example/bob/spec"
 	"github.com/burgrp/bleriot/lib/node"
 	"github.com/burgrp/bleriot/lib/shared/config"
-	"github.com/burgrp/bleriot/lib/shared/protocol"
 
-	"github.com/burgrp/tinygo-drivers/bb/spi"
-	"github.com/burgrp/tinygo-drivers/pan211x"
+	"github.com/burgrp/bleriot/lib/node/pan211x"
 )
 
 const (
@@ -76,8 +73,14 @@ func main() {
 	pinLedGreen.Low()
 	pinLedRed.High()
 
-	pageData := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(spec.Chip.PageAddr))), spec.Chip.PageBytes)
-	header, cfgBytes, err := config.Decode(pageData)
+	device := &Device{}
+
+	node, cfgBytes, err := pan211x.StartNode(&spec.Chip, pinSpiSck, pinSpiData, pinSpiCsn, device)
+	if err != nil {
+		panic("failed to start node: " + err.Error())
+	}
+	device.node = node
+
 	if err != nil {
 		if config.IsUnprovisioned(err) {
 			haltBlink("unprovisioned", 1000*time.Millisecond)
@@ -89,28 +92,10 @@ func main() {
 		DefaultGreenPeriod: binary.LittleEndian.Uint32(cfgBytes[4:8]),
 	}
 
-	println("Provisioned: channel", int(header.Channel), "spreadFactor", int(header.SpreadFactor))
-
-	radio := pan211x.NewDriverBLELongRange(
-		pan211x.NewRegistersSPI(spi.NewMaster(pinSpiSck, pinSpiData), pinSpiCsn))
-	must(radio.Init(pan211x.ConfigBLELongRange{
-		PayloadLen:      protocol.PacketLen,
-		SerialInterface: pan211x.SerialInterfaceSPI3W,
-		SpreadFactor:    pan211x.SpreadFactor(header.SpreadFactor),
-	}))
-	must(radio.SetChannelRF(header.Channel, header.Channel))
-	must(radio.EnableRxAddress(0, header.Address))
-	println("Radio initialized")
-
 	println("Device config: defaultRedPeriod", cfg.DefaultRedPeriod, "defaultGreenPeriod", cfg.DefaultGreenPeriod)
 
-	device := &Device{}
 	device.redPeriod.Store(int32(cfg.DefaultRedPeriod))
 	device.greenPeriod.Store(int32(cfg.DefaultGreenPeriod))
-
-	node, err := node.New(radio, header.Address, header.Key, device)
-	must(err)
-	device.node = node
 
 	go device.ledLoop(pinLedRed, &device.redPeriod)
 	go device.ledLoop(pinLedGreen, &device.greenPeriod)

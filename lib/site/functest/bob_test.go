@@ -28,8 +28,8 @@ import (
 	"github.com/burgrp/bleriot/lib/site/radio/mcpdongle"
 )
 
-// bob's real identity, mirroring example/hub/main.go. The RF address is derived
-// from the UID (CRC32), exactly as the hub does.
+// bob's real identity, mirroring example/bob/test-hub.go. The RF address is
+// derived from the UID (CRC32), exactly as the hub does.
 var (
 	bobUID = [12]byte{0x5A, 0x33, 0x50, 0x41, 0x12, 0x32, 0x35, 0x32, 0x29, 0x93, 0x95, 0x00}
 	bobKey = [node.KeyLen]byte{

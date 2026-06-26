@@ -44,7 +44,8 @@ func main() {
 }
 ```
 
-A complete, runnable site binary lives in [`../../example/hub`](../../example/hub).
+A complete, runnable site binary lives in [`../../example/bob`](../../example/bob),
+behind `//go:build !tinygo` in the same flat `package main` as the node firmware.
 
 ---
 
@@ -59,7 +60,7 @@ new        read an attached device's UID and print an Instance stub
 ```
 
 ```sh
-cd ../../example/hub
+cd ../../example/bob
 go run . hub --registry http://localhost:8080
 go run . --debug hub                           # verbose: shows radio traffic
 go run . provision                            # provision the attached device
@@ -174,8 +175,11 @@ dual-target Go module:
   both targets, but the firmware never calls it, so TinyGo's dead-code
   elimination strips it (and the `inventory` package it references) from the
   image.
-- The firmware entry point lives behind `//go:build tinygo` and drives the
-  shared [`lib/node`](../node) runtime over the radio.
+- One flat `package main` holds both entry points, selected by build tag: the
+  firmware (`//go:build tinygo`) drives the shared [`lib/node`](../node) runtime
+  over the radio, and the example host hub (`//go:build !tinygo`) declares the
+  inventory and hands it to [`lib/site/cli`](cli). So a single module is both the
+  node firmware and its example hub.
 
 ### Provisioning page
 
