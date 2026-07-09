@@ -96,7 +96,7 @@ func descriptorFor(dt inventory.DeviceType) (*node.Descriptor, error) {
 	regs := make([]node.Register, len(dt.Registers))
 	for i, r := range dt.Registers {
 		regs[i] = node.Register{
-			ID:         uint16(r.Tag),
+			ID:         r.Tag,
 			Name:       r.Name,
 			Type:       node.RegType(r.Type),
 			Multiplier: r.Multiplier,

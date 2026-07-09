@@ -33,8 +33,9 @@ const (
 type Register struct {
 	// Tag is the permanent wire identity of this register: unique and non-zero
 	// within its DeviceType, never reused once retired. It is hand-assigned, like
-	// a protobuf field number.
-	Tag uint8
+	// a protobuf field number. The wire carries it as a uint16 (protocol REG
+	// field), so tags may span the full 1..65535 range.
+	Tag uint16
 	// Name is the register name exposed to the hub and Registry (e.g. "setpoint").
 	Name string
 	// Type interprets the int32 wire value (int/float/bool).
@@ -158,7 +159,7 @@ func (dt DeviceType) Validate() error {
 	if dt.Name == "" {
 		return fmt.Errorf("device type: name is required")
 	}
-	seenTag := make(map[uint8]bool, len(dt.Registers))
+	seenTag := make(map[uint16]bool, len(dt.Registers))
 	seenName := make(map[string]bool, len(dt.Registers))
 	for _, r := range dt.Registers {
 		if r.Tag == 0 {
