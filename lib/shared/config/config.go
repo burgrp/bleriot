@@ -72,6 +72,21 @@ const (
 	SpreadFactorS2 SpreadFactor = 1
 )
 
+// String returns the symbolic spread-factor name ("S8"/"S2") so logs read
+// clearly instead of showing the raw 0/1. Every return is a compile-time string
+// literal that lives in read-only flash, so firmware use adds no RAM. It also
+// makes SpreadFactor a fmt.Stringer, which slog/fmt call automatically.
+func (s SpreadFactor) String() string {
+	switch s {
+	case SpreadFactorS8:
+		return "S8"
+	case SpreadFactorS2:
+		return "S2"
+	default:
+		return "S?"
+	}
+}
+
 // Header is the fixed-size identity prefix of a provisioning page.
 type Header struct {
 	Magic        uint32

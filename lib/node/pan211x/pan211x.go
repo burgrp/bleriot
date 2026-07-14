@@ -29,7 +29,7 @@ func StartNode(chip *inventory.Chip, pinSpiSck, pinSpiData, pinSpiCsn machine.Pi
 	if err != nil {
 		return nil, nil, err
 	}
-	println("Provisioned channel", int(header.Channel), ", spreadFactor", int(header.SpreadFactor))
+	println("Provisioned channel", int(header.Channel), ", spreadFactor", header.SpreadFactor.String())
 
 	radio := pan211x.NewDriverBLELongRange(pan211x.NewRegistersSPI(spi.NewMaster(pinSpiSck, pinSpiData), pinSpiCsn))
 
