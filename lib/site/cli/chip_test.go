@@ -7,7 +7,7 @@ import (
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 )
 
-var altChip = inventory.Chip{Name: "stm32g0", Target: "stm32g030x6", UIDAddr: 0x1FFF7590}
+var altChip = inventory.Chip{Name: "stm32g0", PyocdTarget: "stm32g030x6", UIDAddr: 0x1FFF7590}
 
 func TestResolveChip(t *testing.T) {
 	t.Run("auto-selects sole inventory chip", func(t *testing.T) {

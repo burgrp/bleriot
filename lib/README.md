@@ -433,7 +433,10 @@ the wire never sees the instance concept.
    `CRC32(UID)`, key, channel, spread factor) and config into the firmware. The
    device module's Makefile runs `gen` as part of `build`, then flashes the image
    over SWD. At boot the firmware self-checks that its UID matches the baked-in
-   address (§11.5).
+   address (§11.5). From a hub that owns the inventory, `bleriot make <name>
+   flash` does this for any device without leaving the hub: it locates the
+   firmware source, injects the device's identity and its chip's build/flash
+   targets, and runs make.
 3. **Run.** Run `hub`: the host builds every inventory device's register
    descriptor, derives its address, and bridges its registers to the Registry.
 

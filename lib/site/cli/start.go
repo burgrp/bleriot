@@ -14,9 +14,10 @@
 //
 // Subcommands:
 //
-//	hub  bridge the inventory's nodes to the Registry
-//	gen  emit a device's baked-in identity + config as firmware source
-//	new  read an attached device's UID and print an Instance stub
+//	hub   bridge the inventory's nodes to the Registry
+//	gen   emit a device's baked-in identity + config as firmware source
+//	make  build/flash a device's firmware via GNU make, identity injected
+//	new   read an attached device's UID and print an Instance stub
 package cli
 
 import (
@@ -53,7 +54,7 @@ func newRootCmd(inv inventory.Inventory) *cobra.Command {
 		Use:   "bleriot",
 		Short: "BleRiot host for an inventory-as-code deployment",
 		Long: "bleriot runs the host side of a BleRiot deployment described in code: " +
-			"bridge nodes to the Registry, generate device firmware provisioning, and onboard new ones.",
+			"bridge nodes to the Registry, build and flash device firmware, and onboard new ones.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
@@ -70,6 +71,7 @@ func newRootCmd(inv inventory.Inventory) *cobra.Command {
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging (shows serial communication)")
 	root.AddCommand(newHubCmd(inv))
 	root.AddCommand(newGenCmd(inv))
+	root.AddCommand(newMakeCmd(inv))
 	root.AddCommand(newNewCmd(inv))
 	return root
 }

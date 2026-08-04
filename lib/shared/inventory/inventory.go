@@ -58,23 +58,31 @@ type DeviceType struct {
 	// Registers is the device's register table. Slice order is irrelevant to the
 	// wire; each register is identified by its Tag.
 	Registers []Register
-	// Chip is the MCU the device's firmware runs on. It tells the onboarding
-	// command how to reach the device over SWD (pyocd target and UID address). It
-	// is only needed to read the UID when onboarding; the hub ignores it.
+	// Chip is the MCU the device's firmware runs on. It tells the build and
+	// onboarding tooling how to build the image (tinygo target), flash it, and read
+	// the UID over SWD (pyocd target, CMSIS pack, UID address). It is only used by
+	// the build/flash/onboarding commands; the running hub ignores it.
 	Chip Chip
 }
 
-// Chip describes an MCU type from the provisioning tooling's point of view: how
-// to address it over SWD. It is a firmware/hardware fact of a device type, not a
-// per-device deployment fact, so it lives on the DeviceType. Predefined chips
-// are provided as package-level values (e.g. PY32F030x8); a site can also declare
-// its own.
+// Chip describes an MCU type from the build and provisioning tooling's point of
+// view: how to build its firmware image, flash it, and address it over SWD. It
+// is a firmware/hardware fact of a device type, not a per-device deployment
+// fact, so it lives on the DeviceType. Predefined chips are provided as
+// package-level values (e.g. PY32F030x8); a site can also declare its own.
 type Chip struct {
 	// Name selects the chip on the command line (--chip) and identifies it in
-	// errors, e.g. "py32f030".
+	// errors, e.g. "py32f030x8".
 	Name string
-	// Target is the pyocd target name, e.g. "py32f030x8".
-	Target string
+	// TinygoTarget is the tinygo --target name used to build the firmware image,
+	// e.g. "py32f030_64k_8k".
+	TinygoTarget string
+	// PyocdTarget is the pyocd target name used to flash the image and to read the
+	// UID over SWD, e.g. "py32f030x8".
+	PyocdTarget string
+	// CmsisPack is the pyocd CMSIS pack that provides the target definition, e.g.
+	// "PY32F030".
+	CmsisPack string
 	// UIDAddr is the memory address of the 12-byte MCU unique ID.
 	UIDAddr uint32
 }
@@ -83,16 +91,20 @@ var py32UIDAddr = uint32(0x1FFF0E00) // 12-byte unique ID on PY32
 
 // PY32F003x6 is the Puya PY32F003x6 chip profile.
 var PY32F003x6 = Chip{
-	Name:    "py32f003x6",
-	Target:  "py32f003x6",
-	UIDAddr: py32UIDAddr,
+	Name:         "py32f003x6",
+	TinygoTarget: "py32f003x6",
+	PyocdTarget:  "py32f003x6",
+	CmsisPack:    "PY32F003",
+	UIDAddr:      py32UIDAddr,
 }
 
 // PY32F030x8 is the Puya PY32F030x8 chip profile.
 var PY32F030x8 = Chip{
-	Name:    "py32f030x8",
-	Target:  "py32f030x8",
-	UIDAddr: py32UIDAddr,
+	Name:         "py32f030x8",
+	TinygoTarget: "py32f030_64k_8k",
+	PyocdTarget:  "py32f030x8",
+	CmsisPack:    "PY32F030",
+	UIDAddr:      py32UIDAddr,
 }
 
 // Channel is an RF channel together with the spreading factor every node on it

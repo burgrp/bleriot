@@ -129,11 +129,14 @@ for the inventory model, commands and flags.
 ```sh
 cd example/bob
 go run . new          # read the attached device's UID, print an Instance stub
-go run . gen          # bake its identity + config into firmware source
+make flash            # bake identity + config into firmware, build, flash over SWD
 ```
 
-`gen` is run automatically by `make build`, which then flashes the image over
-SWD. See [lib/site/README.md](lib/site/README.md#new-flags) for the SWD flags.
+`make build`/`make flash` run `gen` automatically. From a hub that owns the
+inventory, `bleriot make <name> flash` does the same for any device: it locates
+the firmware source, injects the device's identity and its chip's build/flash
+targets, and runs make. See [lib/site/README.md](lib/site/README.md#new-flags)
+for the SWD flags.
 
 ---
 
@@ -160,5 +163,5 @@ flat `package main` whose firmware (`//go:build tinygo`) and host hub
 
 - **[Protocol specification](lib/README.md)** — the authoritative wire-format,
   security, transaction, and register-model spec.
-- **[Host library](lib/site/README.md)** — inventory-as-code model, the `hub`/`gen`/`new` commands, the USB radio dongle drivers, and internal packages.
+- **[Host library](lib/site/README.md)** — inventory-as-code model, the `hub`/`gen`/`make`/`new` commands, the USB radio dongle drivers, and internal packages.
 

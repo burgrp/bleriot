@@ -102,11 +102,13 @@ command takes a single flag:
 |------|---------|---------|
 | `--chip` | — | Chip to read over SWD. Required only when the inventory declares more than one chip; otherwise the sole chip is selected automatically. |
 
-A `Chip` bundles `Target` (pyocd target name) and `UIDAddr` (memory address of
-the 12-byte MCU unique ID). `inventory.PY32F030x8` (`py32f030x8`, UID
-`0x1FFF0E00`) is built in; declare a `Chip{...}` on a device type to support other
-MCUs. `--chip` accepts a built-in chip name even on an empty inventory, so the
-very first device can be onboarded with `new`.
+A `Chip` bundles the build and flash targets — `TinygoTarget` (tinygo
+`--target`), `PyocdTarget` (pyocd target name), `CmsisPack` (pyocd CMSIS pack) —
+and `UIDAddr` (memory address of the 12-byte MCU unique ID). `inventory.PY32F030x8`
+(`py32f030_64k_8k`/`py32f030x8`, UID `0x1FFF0E00`) is built in; declare a
+`Chip{...}` on a device type to support other MCUs. `--chip` accepts a built-in
+chip name even on an empty inventory, so the very first device can be onboarded
+with `new`.
 
 `new` reads the UID of a device not yet in the inventory and prints a paste-ready
 `inventory.Instance{}` stub to add to the source. `gen` then bakes an inventory
@@ -114,6 +116,15 @@ instance's identity (the RF address derived as `CRC32(UID)`, key, channel, sprea
 factor) and `Config` into a generated Go file the firmware build compiles in; it
 touches no hardware. The device module's Makefile runs `gen` as part of `build`
 and flashes the resulting image over SWD.
+
+`make <name> [make-args...]` builds or flashes a device straight from the hub: it
+locates the device type's firmware source (the nearest Makefile above its `Config`
+package, or `--root`), then runs GNU make there with the hub's `gen <name>` as the
+provisioning generator and the chip's `TinygoTarget`/`PyocdTarget`/`CmsisPack`
+injected as make variables. So `bleriot make bob flash` bakes bob's hub-owned
+identity and flashes it, without the firmware directory needing its own inventory.
+It needs the firmware source and toolchain (make, tinygo, pyocd) present, so run
+it from a hub checkout.
 
 ### USB access
 
@@ -216,7 +227,7 @@ address, so an image flashed to the wrong board refuses to join the network.
 
 | Path | Responsibility |
 |------|----------------|
-| [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `gen` and `new` subcommands, and the `Probe` interface (SWD read-UID) with its `pyocd` implementation. |
+| [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `gen`, `make` and `new` subcommands, and the `Probe` interface (SWD read-UID) with its `pyocd` implementation. |
 | [`../shared/inventory`](../shared/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. Shared with the firmware. |
 | [`../shared/config`](../shared/config) | Identity primitives and constants (address/key/UID lengths, spread factor), shared verbatim with the firmware. |
 | [`engine`](engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |

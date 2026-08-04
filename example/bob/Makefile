@@ -1,9 +1,15 @@
 # BOB node firmware (flat package main, build tag tinygo). Hardware targets
 # (py32, and future stm32/host) are selected by the TinyGo --target and build
 # tags rather than separate directories.
-TARGET_TINYGO = py32f030_64k_8k
-TARGET_PYOCD = py32f030x8
-CMSIS_PACK = PY32F030
+#
+# The target names and the provisioning generator are overridable so the hub's
+# "bleriot make <name> ..." can inject a device's chip targets and bake its
+# identity from the hub inventory; standalone "make flash" uses the defaults
+# below and this directory's own inventory.
+TARGET_TINYGO ?= py32f030_64k_8k
+TARGET_PYOCD ?= py32f030x8
+CMSIS_PACK ?= PY32F030
+GEN ?= go run . gen
 
 IMAGE = image.elf
 
@@ -14,7 +20,7 @@ IMAGE = image.elf
 # provisioning_gen.go is never truncated to an empty (unparseable) file while
 # "go run" is compiling.
 gen:
-	go run . gen > provisioning_gen.go.tmp && mv provisioning_gen.go.tmp provisioning_gen.go
+	${GEN} > provisioning_gen.go.tmp && mv provisioning_gen.go.tmp provisioning_gen.go
 
 build: gen
 	tinygo build --stack-size 1024b --size html --serial rtt --scheduler tasks -print-allocs=. --gc leaking --target ${TARGET_TINYGO} -o ${IMAGE} .
