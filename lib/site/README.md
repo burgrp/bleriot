@@ -104,9 +104,10 @@ command takes a single flag:
 
 A `Chip` bundles the build and flash targets — `TinygoTarget` (tinygo
 `--target`), `PyocdTarget` (pyocd target name), `CmsisPack` (pyocd CMSIS pack) —
-and `UIDAddr` (memory address of the 12-byte MCU unique ID). `inventory.PY32F030x8`
-(`py32f030_64k_8k`/`py32f030x8`, UID `0x1FFF0E00`) is built in; declare a
-`Chip{...}` on a device type to support other MCUs. `--chip` accepts a built-in
+and `UIDAddr` (memory address of the 12-byte MCU unique ID). The `puya` package
+provides built-in profiles for PY32F002A/B, every PY32F003 density, and every
+PY32F030 density; declare a `Chip{...}` on a device type to support other MCUs.
+`--chip` accepts a built-in
 chip name even on an empty inventory, so the very first device can be onboarded
 with `new`.
 
@@ -233,6 +234,7 @@ address, so an image flashed to the wrong board refuses to join the network.
 |------|----------------|
 | [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `gen`, `make` and `new` subcommands, and the `Probe` interface (SWD read-UID) with its `pyocd` implementation. |
 | [`../shared/inventory`](../shared/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. Shared with the firmware. |
+| [`../shared/puya`](../shared/puya) | Puya PY32 chip profiles and per-family memory-map constants. Shared with the firmware. |
 | [`../shared/config`](../shared/config) | Identity primitives and constants (address/key/UID lengths, spread factor), shared verbatim with the firmware. |
 | [`engine`](engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
 | [`radio`](radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |

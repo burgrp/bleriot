@@ -14,7 +14,15 @@ import (
 // inventory declaring them, so a brand-new deployment can onboard its first
 // device with --chip before any instance exists.
 var builtinChips = []inventory.Chip{
+	puya.PY32F002Ax5,
+	puya.PY32F002Bx5,
+	puya.PY32F003x4,
 	puya.PY32F003x6,
+	puya.PY32F003x7,
+	puya.PY32F003x8,
+	puya.PY32F030x4,
+	puya.PY32F030x6,
+	puya.PY32F030x7,
 	puya.PY32F030x8,
 }
 

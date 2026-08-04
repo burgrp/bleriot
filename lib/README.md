@@ -8,8 +8,8 @@ Hardware-independent specification for the BleRiot IoT register protocol.
 >
 > - [`shared`](shared) — neutral, dependency-free, build-tag-free packages used by
 >   both firmware and host: `protocol` (packet codec + XTEA, §4–§8), `config`
->   (identity primitives and constants, §11.5) and `inventory` (the
->   inventory-as-code model, §11).
+>   (identity primitives and constants, §11.5), `inventory` (the
+>   inventory-as-code model, §11), and `puya` (PY32 chip profiles and memory maps).
 > - [`node`](node) — the firmware-side runtime (receive/dispatch loop, §7–§8).
 > - [`site`](site) — the host hub library; see [site/README.md](site/README.md).
 

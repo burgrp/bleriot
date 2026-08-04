@@ -12,7 +12,7 @@ import (
 
 func TestBuildMakeArgs(t *testing.T) {
 	chip := inventory.Chip{
-		TinygoTarget: "py32f030_64k_8k",
+		TinygoTarget: "py32f030x8",
 		PyocdTarget:  "py32f030x8",
 		CmsisPack:    "PY32F030",
 	}
@@ -21,7 +21,7 @@ func TestBuildMakeArgs(t *testing.T) {
 		"-C", "/src/node",
 		"flash", "-j2",
 		"BLERIOT_MAKE=1",
-		"TARGET_TINYGO=py32f030_64k_8k",
+		"TARGET_TINYGO=py32f030x8",
 		"TARGET_PYOCD=py32f030x8",
 		"CMSIS_PACK=PY32F030",
 	}

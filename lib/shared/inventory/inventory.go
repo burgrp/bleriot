@@ -75,7 +75,7 @@ type Chip struct {
 	// errors, e.g. "py32f030x8".
 	Name string
 	// TinygoTarget is the tinygo --target name used to build the firmware image,
-	// e.g. "py32f030_64k_8k".
+	// e.g. "py32f030x8".
 	TinygoTarget string
 	// PyocdTarget is the pyocd target name used to flash the image and to read the
 	// UID over SWD, e.g. "py32f030x8".
