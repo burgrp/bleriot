@@ -17,7 +17,7 @@
 //	hub   bridge the inventory's nodes to the Registry
 //	gen   emit a device's baked-in identity + config as firmware source
 //	make  build/flash a device's firmware via GNU make, identity injected
-//	new   read an attached device's UID and print an Instance stub
+//	new   generate a random identity and print an Instance stub
 package cli
 
 import (
@@ -77,15 +77,14 @@ func newRootCmd(inv inventory.Inventory) *cobra.Command {
 }
 
 // buildNode converts an inventory Instance into the engine/bridge view of a
-// node: its register descriptor plus its provisioned identity. The RF address is
-// derived from the device's UID (it is never stored in the inventory).
+// node: its register descriptor plus its provisioned identity.
 func buildNode(inst inventory.Instance) (*node.Node, error) {
 	desc, err := descriptorFor(inst.Type)
 	if err != nil {
 		return nil, err
 	}
 	id := node.Identity{
-		Address: node.AddressFromUID(inst.UID),
+		Address: inst.Address,
 		Key:     inst.Key,
 	}
 	return node.NewNode(inst.Name, inst.Channel.Number, desc, id), nil

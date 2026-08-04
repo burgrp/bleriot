@@ -21,7 +21,6 @@ var PY32F003x4 = inventory.Chip{
 	TinygoTarget: "py32f003x4",
 	PyocdTarget:  "py32f003x4",
 	CmsisPack:    "PY32F003",
-	UIDAddr:      F003UIDAddr,
 }
 
 // PY32F003x6 is the Puya PY32F003x6 chip profile (32 KB flash / 4 KB RAM).
@@ -30,7 +29,6 @@ var PY32F003x6 = inventory.Chip{
 	TinygoTarget: "py32f003x6",
 	PyocdTarget:  "py32f003x6",
 	CmsisPack:    "PY32F003",
-	UIDAddr:      F003UIDAddr,
 }
 
 // PY32F003x7 is the Puya PY32F003x7 chip profile (48 KB flash / 6 KB RAM).
@@ -39,7 +37,6 @@ var PY32F003x7 = inventory.Chip{
 	TinygoTarget: "py32f003x7",
 	PyocdTarget:  "py32f003x7",
 	CmsisPack:    "PY32F003",
-	UIDAddr:      F003UIDAddr,
 }
 
 // PY32F003x8 is the Puya PY32F003x8 chip profile (64 KB flash / 8 KB RAM).
@@ -48,5 +45,4 @@ var PY32F003x8 = inventory.Chip{
 	TinygoTarget: "py32f003x8",
 	PyocdTarget:  "py32f003x8",
 	CmsisPack:    "PY32F003",
-	UIDAddr:      F003UIDAddr,
 }

@@ -11,8 +11,6 @@ package config
 
 // Field widths shared by firmware and host.
 const (
-	// UIDLen is the MCU unique-ID length in bytes (used to derive the RF address).
-	UIDLen = 12
 	// AddrLen is the BleRiot RF address length in bytes.
 	AddrLen = 4
 	// KeyLen is the XTEA shared-key length in bytes.

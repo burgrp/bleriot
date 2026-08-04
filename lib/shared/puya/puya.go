@@ -1,7 +1,6 @@
 // Package puya provides chip profiles and on-chip memory-map constants for Puya
-// PY32 microcontrollers. It is the BleRiot build/flash/onboarding tooling's
-// knowledge of how to build a device's firmware image (TinyGo target), flash it,
-// and read its unique ID over SWD (pyocd target, CMSIS pack, UID address).
+// PY32 microcontrollers. It is BleRiot's knowledge of how to build a device's
+// firmware image (TinyGo target) and flash it (pyocd target and CMSIS pack).
 //
 // The profiles are plain inventory.Chip values, so a DeviceType selects one by
 // assigning it to DeviceType.Chip and a site may still declare its own chip

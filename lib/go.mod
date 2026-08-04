@@ -2,14 +2,14 @@
 // wire format, the firmware-side runtime, and the host hub.
 //
 //   - lib/shared — neutral, dependency-free, build-tag-free packages shared by
-//     firmware and host (protocol codec + XTEA, provisioning-page config, the
+//     firmware and host (protocol codec + XTEA, identity primitives, the
 //     inventory-as-code model). The on-wire formats are single-sourced here and
 //     compile for the host and under TinyGo alike (see lib/README.md, the
 //     protocol specification).
 //   - lib/node — the firmware-side BleRiot runtime (receive/dispatch loop, XTEA
 //     codec, GET/SET/WATCH), imported by node firmware.
 //   - lib/site — the host (Linux-SBC) hub library: engine, radio dongle drivers,
-//     provisioning and the Registry bridge (see lib/site/README.md).
+//     firmware identity generation and the Registry bridge (see lib/site/README.md).
 module github.com/burgrp/bleriot/lib
 
 go 1.25.2

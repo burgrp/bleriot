@@ -13,9 +13,6 @@
 // before each build).
 //
 // On boot bleriotMain:
-//   - self-checks the image was flashed to the intended chip by re-deriving the
-//     RF address from the MCU unique ID and comparing it to the baked-in address,
-//     halting with a blink pattern on mismatch;
 //   - initialises the PAN211x radio in BLE LongRange mode and applies the
 //     channel and receive address from the provisioning;
 //   - builds the bob device and the node runtime, then loops forever:
@@ -32,11 +29,9 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/burgrp/bleriot/example/bob/spec"
 	"github.com/burgrp/bleriot/lib/node"
-	"github.com/burgrp/bleriot/lib/shared/config"
 
 	"github.com/burgrp/bleriot/lib/node/pan211x"
 )
@@ -83,14 +78,6 @@ func bleriotMain(prov node.Provisioning, cfg spec.Config) {
 	pinLedGreen.Low()
 	pinLedRed.High()
 
-	// Self-check: this image was built for one specific device. Confirm it was
-	// flashed to that device by re-deriving the RF address from the MCU unique ID
-	// and comparing it to the baked-in address. A mismatch means the wrong image
-	// is on this chip; refuse to join the network.
-	if node.AddressFromUID(readUID()) != prov.Address {
-		haltBlink("wrong device: UID does not match baked-in address", 1000*time.Millisecond)
-	}
-
 	device := &Device{}
 
 	n, err := pan211x.StartNode(prov, pinSpiSck, pinSpiData, pinSpiCsn, device)
@@ -122,16 +109,6 @@ func bleriotMain(prov node.Provisioning, cfg spec.Config) {
 		}
 	}
 
-}
-
-// readUID reads the 12-byte MCU unique ID from its fixed memory address. The
-// self-check derives the RF address from it (AddressFromUID) and compares to the
-// address the host baked into the image.
-func readUID() [config.UIDLen]byte {
-	var uid [config.UIDLen]byte
-	src := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(spec.Chip.UIDAddr))), config.UIDLen)
-	copy(uid[:], src)
-	return uid
 }
 
 // func memstat() {

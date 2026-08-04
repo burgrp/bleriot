@@ -86,9 +86,9 @@ hardware designs.
 
 1. **Inventory as code** (see [lib/site](lib/site/README.md)). A deployment is a Go
    program: it declares its devices — each binding a device type's register
-   table, the MCU `UID`, XTEA key, channel and config — as an
+   table, random RF address, XTEA key, channel and config — as an
    `inventory.Inventory` and hands it to `cli.Start`. Register identity on the
-   wire is a permanent per-type `Tag`; there is no JSON and no code generation.
+   wire is a permanent per-type `Tag`; there is no JSON or generated descriptor.
    See [protocol §11](lib/README.md#11-register-model-and-node-identity).
 
 2. **On the node** (firmware). The node stores raw `int32` per wire ID, encrypts
@@ -128,14 +128,14 @@ for the inventory model, commands and flags.
 
 ```sh
 cd example/bob
-go run . new             # read the attached device's UID, print an Instance stub
+go run . new             # generate a random address + key, print an Instance stub
 go run . make bob flash  # bake identity + config, build, and flash over SWD
 ```
 
 `bleriot make <name> flash` builds and flashes any device from the hub: it
 locates the firmware source, writes the baked-in identity + config into it,
 injects the chip's build/flash targets, and runs make. See
-[lib/site/README.md](lib/site/README.md#new-flags) for the SWD flags.
+[lib/site/README.md](lib/site/README.md#commands) for details.
 
 ---
 

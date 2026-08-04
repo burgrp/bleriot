@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"go/parser"
 	"go/token"
-	"hash/crc32"
 	"strings"
 	"testing"
 
@@ -12,19 +11,11 @@ import (
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 )
 
-// expectedAddrLiteral renders the byte-array literal the generator must emit for
-// a UID's derived address (CRC32, big-endian), matching byteArrayLiteral.
-func expectedAddrLiteral(uid [config.UIDLen]byte) string {
-	crc := crc32.ChecksumIEEE(uid[:])
-	addr := []byte{byte(crc >> 24), byte(crc >> 16), byte(crc >> 8), byte(crc)}
-	return byteArrayLiteral(addr)
-}
-
 func TestResolveInstance(t *testing.T) {
 	one := sampleInstance()
 	two := sampleInstance()
 	two.Name = "other"
-	two.UID = [config.UIDLen]byte{0x99}
+	two.Address = [config.AddrLen]byte{0x99}
 
 	t.Run("sole instance is the default", func(t *testing.T) {
 		got, err := resolveInstance(inventory.Inventory{one}, "")
@@ -86,11 +77,11 @@ func TestRunGenOutput(t *testing.T) {
 		"func main() {",
 		"bleriotMain(",
 		"node.Provisioning{",
-		expectedAddrLiteral(inst.UID), // derived RF address
-		byteArrayLiteral(inst.Key[:]), // XTEA key
-		"Channel:      37",            // channel number
-		"SpreadFactor: 1",             // SpreadFactorS2
-		"DefaultRedPeriod",            // config field baked in
+		byteArrayLiteral(inst.Address[:]), // RF address
+		byteArrayLiteral(inst.Key[:]),     // XTEA key
+		"Channel:      37",                // channel number
+		"SpreadFactor: 1",                 // SpreadFactorS2
+		"DefaultRedPeriod",                // config field baked in
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {

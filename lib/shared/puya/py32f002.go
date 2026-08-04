@@ -18,7 +18,6 @@ var PY32F002Ax5 = inventory.Chip{
 	TinygoTarget: "py32f002ax5",
 	PyocdTarget:  "py32f002ax5",
 	CmsisPack:    "PY32F002A",
-	UIDAddr:      F002AUIDAddr,
 }
 
 // PY32F002B system region (PY32F002B Datasheet V1.8, §4 "Memory Map", Table 4-1).
@@ -38,5 +37,4 @@ var PY32F002Bx5 = inventory.Chip{
 	TinygoTarget: "py32f002bx5",
 	PyocdTarget:  "py32f002bx5",
 	CmsisPack:    "PY32F002B",
-	UIDAddr:      F002BUIDAddr,
 }

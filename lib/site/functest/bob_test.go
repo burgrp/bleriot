@@ -28,11 +28,10 @@ import (
 	"github.com/burgrp/bleriot/lib/site/radio/mcpdongle"
 )
 
-// bob's real identity, mirroring example/bob/test-hub.go. The RF address is
-// derived from the UID (CRC32), exactly as the hub does.
+// bob's real identity, mirroring example/bob/test-hub.go.
 var (
-	bobUID = [12]byte{0x5A, 0x33, 0x50, 0x41, 0x12, 0x32, 0x35, 0x32, 0x29, 0x93, 0x95, 0x00}
-	bobKey = [node.KeyLen]byte{
+	bobAddress = [node.AddrLen]byte{0xCC, 0x81, 0xAF, 0x84}
+	bobKey     = [node.KeyLen]byte{
 		0x04, 0xB8, 0xAF, 0x87, 0x5D, 0x55, 0xFC, 0x76,
 		0xAC, 0x96, 0x7F, 0xA7, 0x94, 0x20, 0x08, 0x22,
 	}
@@ -54,7 +53,7 @@ var bobSpread = pan211x.SpreadFactorS8
 
 // setupBob opens the single hub dongle named by BLERIOT_DONGLE_HUB, brings up the
 // engine on the Far channel, and registers the real bob node. It returns the
-// engine and bob's derived address; the dongle is closed via tb.Cleanup. refresh
+// engine and bob's address; the dongle is closed via tb.Cleanup. refresh
 // sets the WATCH refresh interval: a long value isolates spontaneous pushes from
 // solicited re-reads when measuring push loss.
 func setupBob(tb testing.TB, retries int, refresh time.Duration) (*engine.Engine, [node.AddrLen]byte) {
@@ -90,7 +89,7 @@ func setupBob(tb testing.TB, retries int, refresh time.Duration) (*engine.Engine
 		tb.Fatalf("AddRadio: %v", err)
 	}
 
-	addr := node.AddressFromUID(bobUID)
+	addr := bobAddress
 	n := node.NewNode("bob", bobChannel, &node.Descriptor{}, node.Identity{Address: addr, Key: bobKey})
 	if err := eng.AddNode(n); err != nil {
 		cancel()

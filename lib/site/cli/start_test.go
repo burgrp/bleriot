@@ -17,16 +17,6 @@ import (
 	"github.com/burgrp/bleriot/lib/site/radio"
 )
 
-// fakeProbe is an in-memory Probe for tests.
-type fakeProbe struct {
-	uid     [config.UIDLen]byte
-	readErr error
-}
-
-func (f *fakeProbe) ReadUID(context.Context) ([config.UIDLen]byte, error) {
-	return f.uid, f.readErr
-}
-
 type bobConfig struct {
 	DefaultRedPeriod   uint32
 	DefaultGreenPeriod uint32
@@ -46,7 +36,7 @@ func sampleType() inventory.DeviceType {
 func sampleInstance() inventory.Instance {
 	return inventory.Instance{
 		Name:    "kitchen",
-		UID:     [config.UIDLen]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		Address: [config.AddrLen]byte{1, 2, 3, 4},
 		Key:     [config.KeyLen]byte{0xAA, 0xBB, 0xCC, 0xDD},
 		Channel: inventory.Channel{Name: "near", Number: 37, SpreadFactor: config.SpreadFactorS2},
 		Type:    sampleType(),
@@ -68,8 +58,8 @@ func TestBuildNode(t *testing.T) {
 	if n.Name != "kitchen" || n.Channel != 37 {
 		t.Fatalf("node name/channel = %q/%d", n.Name, n.Channel)
 	}
-	if n.Address != node.AddressFromUID(inst.UID) {
-		t.Fatalf("node address not derived from UID")
+	if n.Address != inst.Address {
+		t.Fatalf("node address mismatch")
 	}
 	if n.Key != inst.Key {
 		t.Fatalf("node key mismatch")
@@ -84,19 +74,21 @@ func TestBuildNode(t *testing.T) {
 
 func TestRunNewPrintsStub(t *testing.T) {
 	inv := inventory.Inventory{sampleInstance()}
-	uid := [config.UIDLen]byte{0x10, 0x20, 0x30}
-	fp := &fakeProbe{uid: uid}
+	random := bytes.NewReader([]byte{
+		0x10, 0x20, 0x30, 0x40, // address
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, // key
+	})
 
 	var buf bytes.Buffer
-	if err := runNew(context.Background(), inv, fp, &buf, discardLogger()); err != nil {
+	if err := runNew(inv, random, &buf); err != nil {
 		t.Fatalf("runNew: %v", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "Name:    \"TODO\"") {
 		t.Fatalf("stub missing Instance literal:\n%s", out)
 	}
-	if !strings.Contains(out, "0x10, 0x20, 0x30") {
-		t.Fatalf("stub missing UID bytes:\n%s", out)
+	if !strings.Contains(out, "Address: [4]byte{0x10, 0x20, 0x30, 0x40}") {
+		t.Fatalf("stub missing address bytes:\n%s", out)
 	}
 	// The stub must carry a freshly generated, non-zero key rather than a
 	// placeholder.
@@ -108,6 +100,22 @@ func TestRunNewPrintsStub(t *testing.T) {
 	}
 	if strings.Contains(out, "Key:     [16]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}") {
 		t.Fatalf("generated key is all zero:\n%s", out)
+	}
+}
+
+func TestRandomAddressSkipsReservedAndDuplicate(t *testing.T) {
+	inv := inventory.Inventory{{Address: [config.AddrLen]byte{1, 2, 3, 4}}}
+	random := bytes.NewReader([]byte{
+		0, 0, 0, 0, // reserved
+		1, 2, 3, 4, // duplicate
+		5, 6, 7, 8, // accepted
+	})
+	got, err := randomAddress(inv, random)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != ([config.AddrLen]byte{5, 6, 7, 8}) {
+		t.Fatalf("address = %X, want 05060708", got)
 	}
 }
 

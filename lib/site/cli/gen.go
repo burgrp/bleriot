@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/burgrp/bleriot/lib/shared/inventory"
-	"github.com/burgrp/bleriot/lib/site/node"
 )
 
 // firmwareNodePkg is the import path of the firmware-side node package that
@@ -101,14 +100,12 @@ func instanceNames(inv inventory.Inventory) string {
 // and calls bleriotMain with it and the instance's config. The result is
 // formatted (and thereby parse-checked) before being returned.
 func renderProvisioning(inst inventory.Instance) (string, error) {
-	addr := node.AddressFromUID(inst.UID)
-
 	prov := fmt.Sprintf(`node.Provisioning{
 	Address:      %s,
 	Key:          %s,
 	Channel:      %d,
 	SpreadFactor: %d,
-}`, byteArrayLiteral(addr[:]), byteArrayLiteral(inst.Key[:]), inst.Channel.Number, uint8(inst.Channel.SpreadFactor))
+}`, byteArrayLiteral(inst.Address[:]), byteArrayLiteral(inst.Key[:]), inst.Channel.Number, uint8(inst.Channel.SpreadFactor))
 
 	// The generated main() always needs the firmware node package for
 	// Provisioning; the config literal may pull in the package(s) that declare its

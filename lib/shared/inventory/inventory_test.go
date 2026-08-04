@@ -54,8 +54,8 @@ func TestDeviceTypeValidate_Errors(t *testing.T) {
 
 func TestInventoryValidate_OK(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
-		{Name: "living", Channel: Channel{Name: "near", Number: 11}, Type: bobType()},
+		{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+		{Name: "living", Address: [config.AddrLen]byte{2}, Channel: Channel{Name: "near", Number: 11}, Type: bobType()},
 	}
 	if err := inv.Validate(); err != nil {
 		t.Fatalf("expected valid, got %v", err)
@@ -71,16 +71,31 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("duplicate name", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "kitchen", Address: [config.AddrLen]byte{2}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for duplicate instance name")
 		}
 	})
+	t.Run("reserved zero address", func(t *testing.T) {
+		inv := Inventory{{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()}}
+		if err := inv.Validate(); err == nil {
+			t.Fatal("expected error for zero address")
+		}
+	})
+	t.Run("duplicate address", func(t *testing.T) {
+		inv := Inventory{
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "living", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+		}
+		if err := inv.Validate(); err == nil {
+			t.Fatal("expected error for duplicate address")
+		}
+	})
 	t.Run("bad device type propagates", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: DeviceType{Name: "t", Registers: []Register{{Tag: 0, Name: "a", Type: TypeBool}}}},
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: DeviceType{Name: "t", Registers: []Register{{Tag: 0, Name: "a", Type: TypeBool}}}},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error from invalid device type")
@@ -88,7 +103,7 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("missing channel name", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Number: 37}, Type: bobType()},
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Number: 37}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for unnamed channel")
@@ -96,8 +111,8 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("one number two names", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
-			{Name: "living", Channel: Channel{Name: "near", Number: 37}, Type: bobType()},
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "living", Address: [config.AddrLen]byte{2}, Channel: Channel{Name: "near", Number: 37}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for one channel number with two names")
@@ -105,8 +120,8 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("one name two numbers", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
-			{Name: "living", Channel: Channel{Name: "far", Number: 11}, Type: bobType()},
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+			{Name: "living", Address: [config.AddrLen]byte{2}, Channel: Channel{Name: "far", Number: 11}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for one channel name with two numbers")
@@ -114,8 +129,8 @@ func TestInventoryValidate_Errors(t *testing.T) {
 	})
 	t.Run("mixed spread factor on one channel", func(t *testing.T) {
 		inv := Inventory{
-			{Name: "kitchen", Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: bobType()},
-			{Name: "living", Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: bobType()},
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS8}, Type: bobType()},
+			{Name: "living", Address: [config.AddrLen]byte{2}, Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactorS2}, Type: bobType()},
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error for mixed spread factor on one channel")
