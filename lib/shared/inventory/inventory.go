@@ -68,8 +68,8 @@ type DeviceType struct {
 // Chip describes an MCU type from the build and provisioning tooling's point of
 // view: how to build its firmware image, flash it, and address it over SWD. It
 // is a firmware/hardware fact of a device type, not a per-device deployment
-// fact, so it lives on the DeviceType. Predefined chips are provided as
-// package-level values (e.g. PY32F030x8); a site can also declare its own.
+// fact, so it lives on the DeviceType. Predefined Puya PY32 chips are provided by
+// the puya package (e.g. puya.PY32F030x8); a site can also declare its own.
 type Chip struct {
 	// Name selects the chip on the command line (--chip) and identifies it in
 	// errors, e.g. "py32f030x8".
@@ -85,26 +85,6 @@ type Chip struct {
 	CmsisPack string
 	// UIDAddr is the memory address of the 12-byte MCU unique ID.
 	UIDAddr uint32
-}
-
-var py32UIDAddr = uint32(0x1FFF0E00) // 12-byte unique ID on PY32
-
-// PY32F003x6 is the Puya PY32F003x6 chip profile.
-var PY32F003x6 = Chip{
-	Name:         "py32f003x6",
-	TinygoTarget: "py32f003x6",
-	PyocdTarget:  "py32f003x6",
-	CmsisPack:    "PY32F003",
-	UIDAddr:      py32UIDAddr,
-}
-
-// PY32F030x8 is the Puya PY32F030x8 chip profile.
-var PY32F030x8 = Chip{
-	Name:         "py32f030x8",
-	TinygoTarget: "py32f030_64k_8k",
-	PyocdTarget:  "py32f030x8",
-	CmsisPack:    "PY32F030",
-	UIDAddr:      py32UIDAddr,
 }
 
 // Channel is an RF channel together with the spreading factor every node on it

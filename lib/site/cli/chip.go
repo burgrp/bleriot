@@ -7,14 +7,15 @@ import (
 	"strings"
 
 	"github.com/burgrp/bleriot/lib/shared/inventory"
+	"github.com/burgrp/bleriot/lib/shared/puya"
 )
 
 // builtinChips are chip profiles the provisioning commands know without the
 // inventory declaring them, so a brand-new deployment can onboard its first
 // device with --chip before any instance exists.
 var builtinChips = []inventory.Chip{
-	inventory.PY32F003x6,
-	inventory.PY32F030x8,
+	puya.PY32F003x6,
+	puya.PY32F030x8,
 }
 
 // chipCatalog collects every selectable chip, keyed by name: the built-ins plus
@@ -86,7 +87,7 @@ func resolveChip(inv inventory.Inventory, name string) (inventory.Chip, error) {
 		}
 	case 0:
 		return inventory.Chip{}, fmt.Errorf(
-			"no chip declared by any device type; set DeviceType.Chip (e.g. inventory.PY32F030x8) or pass --chip (known: %s)",
+			"no chip declared by any device type; set DeviceType.Chip (e.g. puya.PY32F030x8) or pass --chip (known: %s)",
 			chipNames(catalog))
 	}
 	return inventory.Chip{}, fmt.Errorf("inventory declares multiple chips (%s); select one with --chip", chipNames(declared))

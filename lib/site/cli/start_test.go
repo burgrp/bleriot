@@ -11,6 +11,7 @@ import (
 
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
+	"github.com/burgrp/bleriot/lib/shared/puya"
 	"github.com/burgrp/bleriot/lib/site/engine"
 	"github.com/burgrp/bleriot/lib/site/node"
 	"github.com/burgrp/bleriot/lib/site/radio"
@@ -34,7 +35,7 @@ type bobConfig struct {
 func sampleType() inventory.DeviceType {
 	return inventory.DeviceType{
 		Name: "bob",
-		Chip: inventory.PY32F030x8,
+		Chip: puya.PY32F030x8,
 		Registers: []inventory.Register{
 			{Tag: 1, Name: "green", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
 			{Tag: 2, Name: "red", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},

@@ -5,6 +5,7 @@ import (
 
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
+	"github.com/burgrp/bleriot/lib/shared/puya"
 )
 
 var altChip = inventory.Chip{Name: "stm32g0", PyocdTarget: "stm32g030x6", UIDAddr: 0x1FFF7590}
@@ -16,7 +17,7 @@ func TestResolveChip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveChip: %v", err)
 		}
-		if c != inventory.PY32F030x8 {
+		if c != puya.PY32F030x8 {
 			t.Fatalf("got %+v, want PY32F030x8", c)
 		}
 	})
@@ -32,7 +33,7 @@ func TestResolveChip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveChip: %v", err)
 		}
-		if c != inventory.PY32F030x8 {
+		if c != puya.PY32F030x8 {
 			t.Fatalf("got %+v, want PY32F030x8", c)
 		}
 	})

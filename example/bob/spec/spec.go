@@ -1,6 +1,9 @@
 package spec
 
-import "github.com/burgrp/bleriot/lib/shared/inventory"
+import (
+	"github.com/burgrp/bleriot/lib/shared/inventory"
+	"github.com/burgrp/bleriot/lib/shared/puya"
+)
 
 type Config struct {
 	DefaultRedPeriod   uint32
@@ -13,7 +16,7 @@ const (
 	RegGpio     = 3 // GPIO PA0..6 pins state (int)
 )
 
-var Chip = inventory.PY32F030x8
+var Chip = puya.PY32F030x8
 
 func Type() inventory.DeviceType {
 	return inventory.DeviceType{
