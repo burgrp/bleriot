@@ -1,13 +1,26 @@
 package node
 
 import (
+	"math"
 	"testing"
 )
 
+func scaledTemperatureToValue(wire int32) any {
+	return float64(wire) / 100
+}
+
+func scaledTemperatureFromValue(value any) (int32, error) {
+	f, err := toFloat(value)
+	if err != nil {
+		return 0, err
+	}
+	return saturateInt32(math.Round(f * 100)), nil
+}
+
 func sampleRegisters() []Register {
 	return []Register{
-		{ID: 7911, Name: "outdoor.temperature", Type: TypeFloat, Multiplier: 1, Divider: 100, Metadata: map[string]string{"unit": "celsius"}},
-		{ID: 6470, Name: "outdoor.humidity", Type: TypeInt, Multiplier: 1, Divider: 1},
+		{ID: 7911, Name: "outdoor.temperature", Type: TypeFloat, ToValue: scaledTemperatureToValue, FromValue: scaledTemperatureFromValue, Metadata: map[string]string{"unit": "celsius"}},
+		{ID: 6470, Name: "outdoor.humidity", Type: TypeInt},
 		{ID: 4466, Name: "aux.relay", Type: TypeBool},
 	}
 }
@@ -97,5 +110,19 @@ func TestFloatRoundTrip(t *testing.T) {
 		if err != nil || back != wire {
 			t.Errorf("round trip %d -> %v -> %d (err %v)", wire, v, back, err)
 		}
+	}
+}
+
+func TestDefaultFloatConversion(t *testing.T) {
+	d, err := NewDescriptor(nil, []Register{{ID: 1, Name: "value", Type: TypeFloat}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := d.ByID(1)
+	if got := r.ToValue(42); got != float64(42) {
+		t.Fatalf("ToValue(42) = %v, want float64(42)", got)
+	}
+	if got, err := r.FromValue(42.4); err != nil || got != 42 {
+		t.Fatalf("FromValue(42.4) = %d, %v; want 42, nil", got, err)
 	}
 }

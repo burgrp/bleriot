@@ -319,21 +319,39 @@ tags are unique within the type.
 
 ### 11.3 Register
 
-| Field      | Type               | Description                                                   |
-|------------|--------------------|---------------------------------------------------------------|
-| tag        | uint8              | Permanent wire identity: unique, non-zero, never reused       |
-| name       | string             | Register name, unique within the device type                  |
-| type       | enum               | `int`, `float`, or `bool`                                     |
-| multiplier | int32              | Hub scaling: `display = wire × multiplier / divider`          |
-| divider    | int32              | See multiplier; must not be zero for non-`bool` registers     |
-| metadata   | map<string,string> | Key-value pairs merged into the hub's register record         |
+| Field     | Type                  | Description                                                   |
+|-----------|-----------------------|---------------------------------------------------------------|
+| tag       | uint8                 | Permanent wire identity: unique, non-zero, never reused       |
+| name      | string                | Register name, unique within the device type                  |
+| type      | enum                  | `int`, `float`, or `bool`                                     |
+| toValue   | func(int32) any       | Optional wire-to-Registry conversion                          |
+| fromValue | func(any) (int32,error) | Optional Registry-to-wire conversion                        |
+| metadata  | map<string,string>    | Key-value pairs merged into the hub's register record         |
 
-All registers carry `int32` on the wire (§8). `type`, `multiplier`, and
-`divider` are hub-side hints only — the node always sends raw `int32`.
+All registers carry `int32` on the wire (§8). `type` and the conversion
+functions are hub-side only — the node always sends raw `int32`. With no
+functions, the host applies the natural conversion for `type`: `int32` to
+`int64`, nonzero to `bool`, or `int32` to `float64`. A custom conversion must
+provide both directions. For example, a temperature stored in hundredths of a
+degree can expose degrees directly:
 
-- **`int`** — no scaling; multiplier=1, divider=1 is the identity.
-- **`float`** — wire value is scaled: e.g. multiplier=1, divider=100 means wire value `1234` displays as `12.34`.
-- **`bool`** — wire value 0 = false, 1 = true; multiplier/divider are ignored.
+```go
+inventory.Register{
+  Tag:  4,
+  Name: "temperature",
+  Type: inventory.TypeFloat,
+  ToValue: func(wire int32) any {
+    return float64(wire) / 100
+  },
+  FromValue: func(value any) (int32, error) {
+    degrees, ok := value.(float64)
+    if !ok {
+      return 0, fmt.Errorf("expected float64, got %T", value)
+    }
+    return int32(math.Round(degrees * 100)), nil
+  },
+}
+```
 
 The register name is scoped by the device instance name when published to the
 Registry: instance `kitchen` + register `temperature` → `kitchen.temperature`.
@@ -390,9 +408,9 @@ A `bob` device type, authored in Go (tags hand-assigned, permanent):
 inventory.DeviceType{
     Name: "bob",
     Registers: []inventory.Register{
-        {Tag: 1, Name: "green", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
-        {Tag: 2, Name: "red", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
-        {Tag: 3, Name: "gpio", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
+    {Tag: 1, Name: "green", Type: inventory.TypeInt},
+    {Tag: 2, Name: "red", Type: inventory.TypeInt},
+    {Tag: 3, Name: "gpio", Type: inventory.TypeInt},
     },
 }
 ```

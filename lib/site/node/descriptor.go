@@ -2,8 +2,8 @@
 // (built from a device type's register table) plus its separately provisioned
 // identity (address and XTEA key, lib/README.md §11.5).
 //
-// The descriptor maps wire register IDs to names, hub-side types, and scaling.
-// The host bridges these to the external Registry using ToValue/FromValue.
+// The descriptor maps wire register IDs to names, hub-side types, and value
+// conversion functions. The host bridges these to the external Registry.
 package node
 
 import (
@@ -24,12 +24,15 @@ const (
 
 // Register is one resolved register from a node descriptor.
 type Register struct {
-	ID         uint16
-	Name       string
-	Type       RegType
-	Multiplier int32
-	Divider    int32
-	Metadata   map[string]string
+	ID   uint16
+	Name string
+	Type RegType
+	// ToValue and FromValue convert between raw int32 wire values and
+	// Registry-facing values. NewDescriptor installs Type-based defaults when
+	// both are nil; custom functions must be supplied as a pair.
+	ToValue   func(wire int32) any
+	FromValue func(value any) (int32, error)
+	Metadata  map[string]string
 }
 
 // Descriptor is a node's register table, plus indexes for lookup by wire ID and
@@ -69,8 +72,11 @@ func (d *Descriptor) index() error {
 		if _, dup := d.byName[r.Name]; dup {
 			return fmt.Errorf("duplicate register name %q", r.Name)
 		}
-		if r.Type != TypeBool && r.Divider == 0 {
-			return fmt.Errorf("register %q has zero divider", r.Name)
+		if (r.ToValue == nil) != (r.FromValue == nil) {
+			return fmt.Errorf("register %q must define both ToValue and FromValue", r.Name)
+		}
+		if r.ToValue == nil {
+			r.ToValue, r.FromValue = defaultConversion(r.Name, r.Type)
 		}
 		d.byID[r.ID] = r
 		d.byName[r.Name] = r
@@ -90,44 +96,33 @@ func (d *Descriptor) ByName(name string) (*Register, bool) {
 	return r, ok
 }
 
-// ToValue converts a raw int32 wire value into the Registry-facing value for
-// this register's type: bool, int64, or float64.
-func (r *Register) ToValue(wire int32) any {
-	switch r.Type {
+// defaultConversion returns the Registry conversion implied by a register's
+// Type. Numeric Registry values are accepted in Go's common int/float forms.
+func defaultConversion(name string, typ RegType) (func(int32) any, func(any) (int32, error)) {
+	switch typ {
 	case TypeBool:
-		return wire != 0
+		return func(wire int32) any { return wire != 0 }, func(value any) (int32, error) {
+			b, ok := value.(bool)
+			if !ok {
+				return 0, fmt.Errorf("register %q expects bool, got %T", name, value)
+			}
+			if b {
+				return 1, nil
+			}
+			return 0, nil
+		}
 	case TypeFloat:
-		return float64(wire) * float64(r.Multiplier) / float64(r.Divider)
+		return func(wire int32) any { return float64(wire) }, numericFromValue(name)
 	default: // int
-		return int64(wire)
+		return func(wire int32) any { return int64(wire) }, numericFromValue(name)
 	}
 }
 
-// FromValue converts a Registry-facing value into the raw int32 wire value for
-// this register's type. Numeric values are accepted as any of Go's int/float
-// kinds (as produced by JSON unmarshalling into any).
-func (r *Register) FromValue(v any) (int32, error) {
-	switch r.Type {
-	case TypeBool:
-		b, ok := v.(bool)
-		if !ok {
-			return 0, fmt.Errorf("register %q expects bool, got %T", r.Name, v)
-		}
-		if b {
-			return 1, nil
-		}
-		return 0, nil
-	case TypeFloat:
-		f, err := toFloat(v)
+func numericFromValue(name string) func(any) (int32, error) {
+	return func(value any) (int32, error) {
+		f, err := toFloat(value)
 		if err != nil {
-			return 0, fmt.Errorf("register %q: %w", r.Name, err)
-		}
-		scaled := f * float64(r.Divider) / float64(r.Multiplier)
-		return saturateInt32(math.Round(scaled)), nil
-	default: // int
-		f, err := toFloat(v)
-		if err != nil {
-			return 0, fmt.Errorf("register %q: %w", r.Name, err)
+			return 0, fmt.Errorf("register %q: %w", name, err)
 		}
 		return saturateInt32(math.Round(f)), nil
 	}

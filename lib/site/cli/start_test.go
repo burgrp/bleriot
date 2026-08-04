@@ -27,8 +27,8 @@ func sampleType() inventory.DeviceType {
 		Name: "bob",
 		Chip: puya.PY32F030x8,
 		Registers: []inventory.Register{
-			{Tag: 1, Name: "green", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
-			{Tag: 2, Name: "red", Type: inventory.TypeInt, Multiplier: 1, Divider: 1},
+			{Tag: 1, Name: "green", Type: inventory.TypeInt},
+			{Tag: 2, Name: "red", Type: inventory.TypeInt},
 		},
 	}
 }
@@ -69,6 +69,27 @@ func TestBuildNode(t *testing.T) {
 	}
 	if _, ok := n.ByID(2); !ok {
 		t.Fatalf("register tag 2 not mapped")
+	}
+}
+
+func TestDescriptorForPreservesConversion(t *testing.T) {
+	dt := sampleType()
+	dt.Registers[0].ToValue = func(wire int32) any { return int64(wire) + 10 }
+	dt.Registers[0].FromValue = func(value any) (int32, error) { return int32(value.(int64)) - 10, nil }
+
+	desc, err := descriptorFor(dt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := desc.ByID(1)
+	if !ok {
+		t.Fatal("missing register 1")
+	}
+	if got := r.ToValue(5); got != int64(15) {
+		t.Fatalf("ToValue(5) = %v, want 15", got)
+	}
+	if got, err := r.FromValue(int64(15)); err != nil || got != 5 {
+		t.Fatalf("FromValue(15) = %d, %v; want 5, nil", got, err)
 	}
 }
 

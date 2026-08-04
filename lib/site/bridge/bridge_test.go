@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -141,7 +142,15 @@ func (r *fakeReg) provided() (name string, initial any, metadata map[string]any)
 func floatReg() *node.Register {
 	return &node.Register{
 		ID: testRegID, Name: "outdoor.temperature",
-		Type: node.TypeFloat, Multiplier: 1, Divider: 100,
+		Type:    node.TypeFloat,
+		ToValue: func(wire int32) any { return float64(wire) / 100 },
+		FromValue: func(value any) (int32, error) {
+			f, ok := value.(float64)
+			if !ok {
+				return 0, fmt.Errorf("expected float64, got %T", value)
+			}
+			return int32(f * 100), nil
+		},
 		Metadata: map[string]string{"unit": "celsius"},
 	}
 }

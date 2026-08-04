@@ -4,8 +4,8 @@ import "testing"
 
 func TestNewDescriptor(t *testing.T) {
 	regs := []Register{
-		{ID: 1, Name: "green", Type: TypeInt, Multiplier: 1, Divider: 1},
-		{ID: 2, Name: "red", Type: TypeInt, Multiplier: 1, Divider: 1},
+		{ID: 1, Name: "green", Type: TypeInt},
+		{ID: 2, Name: "red", Type: TypeInt},
 	}
 
 	d, err := NewDescriptor(map[string]string{"device": "bob"}, regs)
@@ -35,7 +35,7 @@ func TestNewDescriptorRejectsBadTable(t *testing.T) {
 			{ID: 1, Name: "a", Type: TypeBool},
 			{ID: 2, Name: "a", Type: TypeBool},
 		}},
-		{"zero divider", []Register{{ID: 1, Name: "a", Type: TypeFloat, Multiplier: 1}}},
+		{"incomplete conversion", []Register{{ID: 1, Name: "a", Type: TypeFloat, ToValue: func(wire int32) any { return wire }}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

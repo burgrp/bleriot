@@ -10,9 +10,9 @@ func bobType() DeviceType {
 	return DeviceType{
 		Name: "bob",
 		Registers: []Register{
-			{Tag: 1, Name: "green", Type: TypeInt, Multiplier: 1, Divider: 1},
-			{Tag: 2, Name: "red", Type: TypeInt, Multiplier: 1, Divider: 1},
-			{Tag: 3, Name: "gpio", Type: TypeInt, Multiplier: 1, Divider: 1},
+			{Tag: 1, Name: "green", Type: TypeInt},
+			{Tag: 2, Name: "red", Type: TypeInt},
+			{Tag: 3, Name: "gpio", Type: TypeInt},
 		},
 	}
 }
@@ -39,8 +39,8 @@ func TestDeviceTypeValidate_Errors(t *testing.T) {
 			{Tag: 1, Name: "a", Type: TypeBool},
 			{Tag: 2, Name: "a", Type: TypeBool},
 		}}},
-		{"non-bool zero divider", DeviceType{Name: "t", Registers: []Register{
-			{Tag: 1, Name: "a", Type: TypeFloat, Multiplier: 1, Divider: 0},
+		{"incomplete conversion", DeviceType{Name: "t", Registers: []Register{
+			{Tag: 1, Name: "a", Type: TypeFloat, ToValue: func(wire int32) any { return wire }},
 		}}},
 	}
 	for _, c := range cases {

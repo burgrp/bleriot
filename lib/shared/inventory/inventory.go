@@ -39,11 +39,11 @@ type Register struct {
 	Name string
 	// Type interprets the int32 wire value (int/float/bool).
 	Type RegType
-	// Multiplier and Divider scale the wire value for display:
-	// display = wire * Multiplier / Divider. Divider must be non-zero for
-	// non-bool registers.
-	Multiplier int32
-	Divider    int32
+	// ToValue and FromValue optionally convert between the raw int32 wire value
+	// and the value exposed through the Registry. They must either both be nil,
+	// which selects the default conversion for Type, or both be set.
+	ToValue   func(wire int32) any
+	FromValue func(value any) (int32, error)
 	// Metadata is arbitrary descriptive data forwarded to the Registry.
 	Metadata map[string]string
 }
@@ -126,8 +126,8 @@ type Instance struct {
 type Inventory []Instance
 
 // Validate checks the device type's register table: Tags must be non-zero and
-// unique, register names must be non-empty and unique, and non-bool registers
-// must have a non-zero Divider.
+// unique, register names must be non-empty and unique, and custom value
+// conversion functions must be supplied as a pair.
 func (dt DeviceType) Validate() error {
 	if dt.Name == "" {
 		return fmt.Errorf("device type: name is required")
@@ -149,8 +149,8 @@ func (dt DeviceType) Validate() error {
 			return fmt.Errorf("device type %q: duplicate register name %q", dt.Name, r.Name)
 		}
 		seenName[r.Name] = true
-		if r.Type != TypeBool && r.Divider == 0 {
-			return fmt.Errorf("device type %q: register %q is non-bool but has zero divider", dt.Name, r.Name)
+		if (r.ToValue == nil) != (r.FromValue == nil) {
+			return fmt.Errorf("device type %q: register %q must define both ToValue and FromValue", dt.Name, r.Name)
 		}
 	}
 	return nil

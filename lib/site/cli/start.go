@@ -97,12 +97,12 @@ func descriptorFor(dt inventory.DeviceType) (*node.Descriptor, error) {
 	regs := make([]node.Register, len(dt.Registers))
 	for i, r := range dt.Registers {
 		regs[i] = node.Register{
-			ID:         r.Tag,
-			Name:       r.Name,
-			Type:       node.RegType(r.Type),
-			Multiplier: r.Multiplier,
-			Divider:    r.Divider,
-			Metadata:   r.Metadata,
+			ID:        r.Tag,
+			Name:      r.Name,
+			Type:      node.RegType(r.Type),
+			ToValue:   r.ToValue,
+			FromValue: r.FromValue,
+			Metadata:  r.Metadata,
 		}
 	}
 	return node.NewDescriptor(map[string]string{"device": dt.Name}, regs)
