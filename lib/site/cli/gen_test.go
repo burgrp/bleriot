@@ -74,7 +74,7 @@ func TestRunGenOutput(t *testing.T) {
 	out := buf.String()
 
 	// It is valid, parseable Go.
-	if _, err := parser.ParseFile(token.NewFileSet(), "provisioning_gen.go", out, parser.AllErrors); err != nil {
+	if _, err := parser.ParseFile(token.NewFileSet(), "main_gen.go", out, parser.AllErrors); err != nil {
 		t.Fatalf("generated source does not parse: %v\n%s", err, out)
 	}
 
@@ -135,7 +135,7 @@ func TestRunGenNilConfig(t *testing.T) {
 		t.Fatalf("runGen: %v", err)
 	}
 	out := buf.String()
-	if _, err := parser.ParseFile(token.NewFileSet(), "provisioning_gen.go", out, parser.AllErrors); err != nil {
+	if _, err := parser.ParseFile(token.NewFileSet(), "main_gen.go", out, parser.AllErrors); err != nil {
 		t.Fatalf("generated source does not parse: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "bleriotMain(node.Provisioning{") {

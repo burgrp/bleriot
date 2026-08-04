@@ -2,5 +2,5 @@ image.elf
 size-report.html
 __pycache__
 disassembly.txt
-provisioning_gen.go
-provisioning_gen.go.tmp
+main_gen.go
+main_gen.go.tmp

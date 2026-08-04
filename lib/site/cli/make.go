@@ -31,25 +31,41 @@ import (
 func newMakeCmd(inv inventory.Inventory) *cobra.Command {
 	var root string
 	cmd := &cobra.Command{
-		Use:   "make <name> [make-args...]",
+		Use:   "make [name] [make-args...]",
 		Short: "Build/flash a device's firmware via GNU make, with its identity injected",
-		Long: "Run GNU make on a device's firmware source tree with the named inventory " +
-			"instance's identity and config injected (as the provisioning generator) and its chip's " +
-			"build/flash targets injected as make variables. The firmware source tree is inferred " +
-			"from the device type's Config package (the nearest enclosing directory with a Makefile), " +
-			"or given with --root. Arguments after the name pass straight through to make, e.g. " +
-			"\"bleriot make bob flash\". Requires the firmware source tree and toolchain (make, tinygo, " +
-			"pyocd) to be present, so run it from a checkout of the hub, not a stripped binary.",
-		Args: cobra.MinimumNArgs(1),
+		Long: "Run GNU make on a device's firmware source tree with the inventory instance's " +
+			"identity and config baked in and its chip's build/flash targets injected as make " +
+			"variables. Name the instance, or omit it to use the sole one. The firmware source tree " +
+			"is inferred from the device type's Config package (the nearest enclosing directory with " +
+			"a Makefile), or given with --root. Arguments other than a leading instance name pass " +
+			"straight through to make, e.g. \"bleriot make bob flash\". Requires the firmware source " +
+			"tree and toolchain (make, tinygo, pyocd) present, so run it from a checkout of the hub.",
+		Args: cobra.ArbitraryArgs,
 	}
 	// Stop flag parsing at the first positional so make's own flags (e.g. -j) pass
-	// through untouched; --root must therefore precede the instance name.
+	// through untouched; --root must therefore precede the arguments.
 	cmd.Flags().SetInterspersed(false)
 	cmd.Flags().StringVar(&root, "root", "", "firmware source tree (default: inferred from the device type's Config package)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return runMake(inv, args[0], root, args[1:], os.Stdout, os.Stderr)
+		name, makeArgs := splitInstanceArgs(inv, args)
+		return runMake(inv, name, root, makeArgs, os.Stdout, os.Stderr)
 	}
 	return cmd
+}
+
+// splitInstanceArgs separates an optional leading instance name from the make
+// passthrough arguments. The first argument is the instance name only when it
+// names a known instance; otherwise every argument goes to make and the sole
+// inventory instance is used (resolveInstance enforces that there is exactly one).
+func splitInstanceArgs(inv inventory.Inventory, args []string) (name string, makeArgs []string) {
+	if len(args) > 0 {
+		for _, inst := range inv {
+			if inst.Name == args[0] {
+				return args[0], args[1:]
+			}
+		}
+	}
+	return "", args
 }
 
 // runMake resolves the instance, locates its firmware source tree, writes the
@@ -84,10 +100,12 @@ func runMake(inv inventory.Inventory, name, root string, userArgs []string, stdo
 }
 
 // buildMakeArgs assembles make's argv: "-C <root>", the user's passthrough
-// arguments, then the chip's build/flash targets as variable assignments. Empty
-// chip fields are omitted.
+// arguments, then the injected variable assignments — the BLERIOT_MAKE sentinel
+// (which the Makefile's guard uses to tell a hub-driven build from a direct one)
+// and the chip's build/flash targets. Empty chip fields are omitted.
 func buildMakeArgs(root string, chip inventory.Chip, userArgs []string) []string {
 	args := append([]string{"-C", root}, userArgs...)
+	args = append(args, bleriotMakeVar+"=1")
 	if chip.TinygoTarget != "" {
 		args = append(args, "TARGET_TINYGO="+chip.TinygoTarget)
 	}
@@ -100,21 +118,27 @@ func buildMakeArgs(root string, chip inventory.Chip, userArgs []string) []string
 	return args
 }
 
-// provisioningGenFile is the generated file (gitignored) the firmware build
-// compiles in; the Makefile knows it only by convention.
-const provisioningGenFile = "provisioning_gen.go"
+// bleriotMakeVar is the make variable this command sets so the device Makefile's
+// guard can tell it was invoked through "bleriot make" (and need not bounce the
+// goal back through it).
+const bleriotMakeVar = "BLERIOT_MAKE"
 
-// writeProvisioning renders the instance's baked-in provisioning source and
-// writes it into the firmware source tree as provisioningGenFile. It writes via a
-// temp file + rename so a concurrent build never sees a half-written file, and
-// skips the write entirely when the content is unchanged so an unrelated make
-// target (e.g. rtt) does not bump the file's mtime and force a rebuild.
+// generatedMainFile is the generated file (gitignored) the firmware build
+// compiles in: a trivial main() that calls bleriotMain with the baked-in identity
+// and config. The Makefile knows it only by convention.
+const generatedMainFile = "main_gen.go"
+
+// writeProvisioning renders the instance's baked-in main() source and writes it
+// into the firmware source tree as generatedMainFile. It writes via a temp file +
+// rename so a concurrent build never sees a half-written file, and skips the write
+// entirely when the content is unchanged so an unrelated make target (e.g. rtt)
+// does not bump the file's mtime and force a rebuild.
 func writeProvisioning(root string, inst inventory.Instance) error {
 	src, err := renderProvisioning(inst)
 	if err != nil {
 		return fmt.Errorf("instance %q: %w", inst.Name, err)
 	}
-	dst := filepath.Join(root, provisioningGenFile)
+	dst := filepath.Join(root, generatedMainFile)
 	if existing, err := os.ReadFile(dst); err == nil && string(existing) == src {
 		return nil
 	}

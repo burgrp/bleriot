@@ -20,6 +20,7 @@ func TestBuildMakeArgs(t *testing.T) {
 	want := []string{
 		"-C", "/src/node",
 		"flash", "-j2",
+		"BLERIOT_MAKE=1",
 		"TARGET_TINYGO=py32f030_64k_8k",
 		"TARGET_PYOCD=py32f030x8",
 		"CMSIS_PACK=PY32F030",
@@ -36,7 +37,7 @@ func TestBuildMakeArgs(t *testing.T) {
 
 func TestBuildMakeArgsOmitsEmptyChipFields(t *testing.T) {
 	got := buildMakeArgs("/src", inventory.Chip{PyocdTarget: "stm32g030x6"}, nil)
-	want := []string{"-C", "/src", "TARGET_PYOCD=stm32g030x6"}
+	want := []string{"-C", "/src", "BLERIOT_MAKE=1", "TARGET_PYOCD=stm32g030x6"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -92,6 +93,29 @@ func TestInferRootNilConfig(t *testing.T) {
 	}
 }
 
+func TestSplitInstanceArgs(t *testing.T) {
+	inv := inventory.Inventory{{Name: "bob"}, {Name: "kitchen"}}
+	tests := []struct {
+		args     []string
+		wantName string
+		wantMake []string
+	}{
+		{[]string{"bob", "flash"}, "bob", []string{"flash"}},
+		{[]string{"flash"}, "", []string{"flash"}},
+		{[]string{"kitchen"}, "kitchen", nil},
+		{nil, "", nil},
+	}
+	for _, tt := range tests {
+		name, mk := splitInstanceArgs(inv, tt.args)
+		if name != tt.wantName {
+			t.Errorf("args %v: name = %q, want %q", tt.args, name, tt.wantName)
+		}
+		if strings.Join(mk, "\x00") != strings.Join(tt.wantMake, "\x00") {
+			t.Errorf("args %v: make = %v, want %v", tt.args, mk, tt.wantMake)
+		}
+	}
+}
+
 func TestWriteProvisioning(t *testing.T) {
 	root := t.TempDir()
 	inst := inventory.Instance{Name: "n", Channel: inventory.Channel{Number: 37}}
@@ -99,7 +123,7 @@ func TestWriteProvisioning(t *testing.T) {
 	if err := writeProvisioning(root, inst); err != nil {
 		t.Fatalf("writeProvisioning: %v", err)
 	}
-	dst := filepath.Join(root, "provisioning_gen.go")
+	dst := filepath.Join(root, "main_gen.go")
 	data, err := os.ReadFile(dst)
 	if err != nil {
 		t.Fatalf("reading generated file: %v", err)

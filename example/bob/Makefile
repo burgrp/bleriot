@@ -2,11 +2,24 @@
 # (py32, and future stm32/host) are selected by the TinyGo --target and build
 # tags rather than separate directories.
 #
-# Build and flash this firmware with the hub's "bleriot make <name> ..." (e.g.
-# "go run . make bob flash"): it writes provisioning_gen.go (the baked-in identity
-# + config) into this directory and injects the device's chip targets
-# (TARGET_TINYGO, TARGET_PYOCD, CMSIS_PACK) as make variables. The recipes below
-# assume those are supplied, so they are not meant to be run standalone.
+# The hub's "bleriot make <name> ..." (e.g. "go run . make bob flash") drives this
+# Makefile: it writes main_gen.go (the baked-in identity + config) into this
+# directory and injects the chip targets (TARGET_TINYGO, TARGET_PYOCD, CMSIS_PACK)
+# and the BLERIOT_MAKE sentinel as make variables.
+#
+# Running make directly (e.g. "make flash") has none of those, so the guard below
+# bounces every goal back through "go run . make", which bakes the identity and
+# re-enters this Makefile with BLERIOT_MAKE set. Bare "make" builds.
+ifndef BLERIOT_MAKE
+
+$(or $(MAKECMDGOALS),build): __bleriot_bounce
+	@:
+.PHONY: __bleriot_bounce $(MAKECMDGOALS)
+__bleriot_bounce:
+	@go run . make $(MAKECMDGOALS)
+
+else
+
 IMAGE = image.elf
 
 .PHONY: build flash gdb rtt install-pack disassembly new hub
@@ -37,3 +50,5 @@ new:
 
 hub:
 	go run . hub --diagnostics rf
+
+endif

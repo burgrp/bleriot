@@ -117,14 +117,18 @@ factor) and `Config` into a generated Go file the firmware build compiles in; it
 touches no hardware and emits to stdout, so it is mainly for inspection —
 `bleriot make` (below) writes the same file as part of building.
 
-`make <name> [make-args...]` builds or flashes a device straight from the hub: it
+`make [name] [make-args...]` builds or flashes a device straight from the hub: it
 locates the device type's firmware source (the nearest Makefile above its `Config`
 package, or `--root`), writes the baked-in identity + config into it as
-`provisioning_gen.go`, then runs GNU make there with the chip's
-`TinygoTarget`/`PyocdTarget`/`CmsisPack` injected as make variables. So
+`main_gen.go`, then runs GNU make there with the chip's
+`TinygoTarget`/`PyocdTarget`/`CmsisPack` and a `BLERIOT_MAKE` sentinel injected as
+make variables. Name the instance, or omit it to use the sole one. So
 `bleriot make bob flash` bakes bob's hub-owned identity and flashes it, without
-the firmware directory needing its own inventory. It needs the firmware source and
-toolchain (make, tinygo, pyocd) present, so run it from a hub checkout.
+the firmware directory needing its own inventory. The example Makefile also has a
+guard: running `make flash` directly (without the sentinel) bounces the goal back
+through `go run . make`, so a single-device dir builds correctly either way. It
+needs the firmware source and toolchain (make, tinygo, pyocd) present, so run it
+from a hub checkout.
 
 ### USB access
 
