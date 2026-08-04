@@ -80,7 +80,7 @@ All multi-byte fields inside BLOCK are **little-endian**.
 
 ## 5. Security
 
-All packets are encrypted with **XTEA** using the node's shared key (provisioned via §10). The 8-byte BLOCK field contains the payload: TYPE, FLAGS, REG, and VALUE. There is no per-packet nonce in this format.
+All packets are encrypted with **XTEA** using the node's shared key (provisioned via §11.5). The 8-byte BLOCK field contains the payload: TYPE, FLAGS, REG, and VALUE. There is no per-packet nonce in this format.
 
 The version byte is used for wire-format compatibility and does not add confidentiality or replay protection.
 
