@@ -17,16 +17,14 @@ import (
 )
 
 // newMakeCmd builds the "make" subcommand: a thin wrapper around GNU make that
-// builds or flashes one inventory instance's firmware straight from the hub. It
-// locates the device type's firmware source tree, then runs make there with two
-// things injected from the authoritative hub inventory:
+// builds or flashes one inventory instance's firmware straight from the hub.
+// From the authoritative hub inventory it:
 //
-//   - GEN, the command the Makefile runs to produce the baked-in provisioning
-//     source. It points back at this binary's own "gen <name>" subcommand, so the
-//     identity and config come from the hub, not from whatever inventory (if any)
-//     lives next to the firmware.
-//   - the chip's build/flash targets (TARGET_TINYGO, TARGET_PYOCD, CMSIS_PACK) as
-//     make variables, so the Makefile need not hard-code them.
+//   - writes the baked-in provisioning source (identity + config) into the
+//     firmware source tree, so the identity comes from the hub, not from whatever
+//     inventory (if any) lives next to the firmware;
+//   - injects the chip's build/flash targets (TARGET_TINYGO, TARGET_PYOCD,
+//     CMSIS_PACK) as make variables, so the Makefile need not hard-code them.
 //
 // Everything after the instance name is passed straight through to make, e.g.
 // "bleriot make bob flash".
@@ -54,10 +52,10 @@ func newMakeCmd(inv inventory.Inventory) *cobra.Command {
 	return cmd
 }
 
-// runMake resolves the instance, locates its firmware source tree, and runs make
-// there with the hub's identity generator and the chip's targets injected. make's
-// stdio is wired straight through so its output (and any RTT console it launches)
-// reaches the operator.
+// runMake resolves the instance, locates its firmware source tree, writes the
+// baked-in provisioning source into it, and runs make there with the chip's
+// targets injected. make's stdio is wired straight through so its output (and any
+// RTT console it launches) reaches the operator.
 func runMake(inv inventory.Inventory, name, root string, userArgs []string, stdout, stderr io.Writer) error {
 	if err := inv.Validate(); err != nil {
 		return fmt.Errorf("inventory: %w", err)
@@ -72,12 +70,10 @@ func runMake(inv inventory.Inventory, name, root string, userArgs []string, stdo
 			return err
 		}
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locating bleriot executable: %w", err)
+	if err := writeProvisioning(root, inst); err != nil {
+		return err
 	}
-	genCmd := fmt.Sprintf("%s gen %s", self, inst.Name)
-	args := buildMakeArgs(root, genCmd, inst.Type.Chip, userArgs)
+	args := buildMakeArgs(root, inst.Type.Chip, userArgs)
 
 	slog.Debug("running make", "dir", root, "args", args)
 	c := exec.Command("make", args...)
@@ -88,13 +84,10 @@ func runMake(inv inventory.Inventory, name, root string, userArgs []string, stdo
 }
 
 // buildMakeArgs assembles make's argv: "-C <root>", the user's passthrough
-// arguments, then the injected variable assignments. GEN overrides the Makefile's
-// default generator so the provisioning source is baked from the hub inventory;
-// the TARGET_/CMSIS_ vars supply the chip's build and flash targets. Empty chip
-// fields are omitted so the Makefile keeps its own defaults for them.
-func buildMakeArgs(root, genCmd string, chip inventory.Chip, userArgs []string) []string {
+// arguments, then the chip's build/flash targets as variable assignments. Empty
+// chip fields are omitted.
+func buildMakeArgs(root string, chip inventory.Chip, userArgs []string) []string {
 	args := append([]string{"-C", root}, userArgs...)
-	args = append(args, "GEN="+genCmd)
 	if chip.TinygoTarget != "" {
 		args = append(args, "TARGET_TINYGO="+chip.TinygoTarget)
 	}
@@ -105,6 +98,35 @@ func buildMakeArgs(root, genCmd string, chip inventory.Chip, userArgs []string) 
 		args = append(args, "CMSIS_PACK="+chip.CmsisPack)
 	}
 	return args
+}
+
+// provisioningGenFile is the generated file (gitignored) the firmware build
+// compiles in; the Makefile knows it only by convention.
+const provisioningGenFile = "provisioning_gen.go"
+
+// writeProvisioning renders the instance's baked-in provisioning source and
+// writes it into the firmware source tree as provisioningGenFile. It writes via a
+// temp file + rename so a concurrent build never sees a half-written file, and
+// skips the write entirely when the content is unchanged so an unrelated make
+// target (e.g. rtt) does not bump the file's mtime and force a rebuild.
+func writeProvisioning(root string, inst inventory.Instance) error {
+	src, err := renderProvisioning(inst)
+	if err != nil {
+		return fmt.Errorf("instance %q: %w", inst.Name, err)
+	}
+	dst := filepath.Join(root, provisioningGenFile)
+	if existing, err := os.ReadFile(dst); err == nil && string(existing) == src {
+		return nil
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, []byte(src), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // inferRoot locates the firmware source tree for an instance from its Config

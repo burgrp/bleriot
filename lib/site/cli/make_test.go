@@ -3,7 +3,9 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 )
@@ -14,11 +16,10 @@ func TestBuildMakeArgs(t *testing.T) {
 		PyocdTarget:  "py32f030x8",
 		CmsisPack:    "PY32F030",
 	}
-	got := buildMakeArgs("/src/node", "/usr/bin/bleriot gen bob", chip, []string{"flash", "-j2"})
+	got := buildMakeArgs("/src/node", chip, []string{"flash", "-j2"})
 	want := []string{
 		"-C", "/src/node",
 		"flash", "-j2",
-		"GEN=/usr/bin/bleriot gen bob",
 		"TARGET_TINYGO=py32f030_64k_8k",
 		"TARGET_PYOCD=py32f030x8",
 		"CMSIS_PACK=PY32F030",
@@ -34,8 +35,8 @@ func TestBuildMakeArgs(t *testing.T) {
 }
 
 func TestBuildMakeArgsOmitsEmptyChipFields(t *testing.T) {
-	got := buildMakeArgs("/src", "gen", inventory.Chip{PyocdTarget: "stm32g030x6"}, nil)
-	want := []string{"-C", "/src", "GEN=gen", "TARGET_PYOCD=stm32g030x6"}
+	got := buildMakeArgs("/src", inventory.Chip{PyocdTarget: "stm32g030x6"}, nil)
+	want := []string{"-C", "/src", "TARGET_PYOCD=stm32g030x6"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -88,5 +89,44 @@ func TestInferRootNilConfig(t *testing.T) {
 	_, err := inferRoot(inventory.Instance{Name: "n"})
 	if err == nil {
 		t.Fatal("expected error for nil Config")
+	}
+}
+
+func TestWriteProvisioning(t *testing.T) {
+	root := t.TempDir()
+	inst := inventory.Instance{Name: "n", Channel: inventory.Channel{Number: 37}}
+
+	if err := writeProvisioning(root, inst); err != nil {
+		t.Fatalf("writeProvisioning: %v", err)
+	}
+	dst := filepath.Join(root, "provisioning_gen.go")
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("reading generated file: %v", err)
+	}
+	if !strings.Contains(string(data), "DO NOT EDIT") {
+		t.Fatalf("generated file missing header:\n%s", data)
+	}
+
+	// An identical re-render must not rewrite the file (mtime stays old), so an
+	// unrelated make target does not force a rebuild.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(dst, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProvisioning(root, inst); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(dst); info.ModTime().After(time.Now().Add(-time.Minute)) {
+		t.Fatal("file was rewritten despite identical content")
+	}
+
+	// Changed content must rewrite the file (mtime becomes recent).
+	inst.Channel.Number = 38
+	if err := writeProvisioning(root, inst); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := os.Stat(dst); info.ModTime().Before(time.Now().Add(-time.Minute)) {
+		t.Fatal("file was not rewritten after content change")
 	}
 }

@@ -2,27 +2,16 @@
 # (py32, and future stm32/host) are selected by the TinyGo --target and build
 # tags rather than separate directories.
 #
-# The target names and the provisioning generator are overridable so the hub's
-# "bleriot make <name> ..." can inject a device's chip targets and bake its
-# identity from the hub inventory; standalone "make flash" uses the defaults
-# below and this directory's own inventory.
-TARGET_TINYGO ?= py32f030_64k_8k
-TARGET_PYOCD ?= py32f030x8
-CMSIS_PACK ?= PY32F030
-GEN ?= go run . gen
-
+# Build and flash this firmware with the hub's "bleriot make <name> ..." (e.g.
+# "go run . make bob flash"): it writes provisioning_gen.go (the baked-in identity
+# + config) into this directory and injects the device's chip targets
+# (TARGET_TINYGO, TARGET_PYOCD, CMSIS_PACK) as make variables. The recipes below
+# assume those are supplied, so they are not meant to be run standalone.
 IMAGE = image.elf
 
-.PHONY: build flash gdb rtt install-pack disassembly new gen hub
+.PHONY: build flash gdb rtt install-pack disassembly new hub
 
-# gen bakes the inventory instance's identity + config into a generated file the
-# firmware build compiles in. Write via a temp file so a stale, valid
-# provisioning_gen.go is never truncated to an empty (unparseable) file while
-# "go run" is compiling.
-gen:
-	${GEN} > provisioning_gen.go.tmp && mv provisioning_gen.go.tmp provisioning_gen.go
-
-build: gen
+build:
 	tinygo build --stack-size 1024b --size html --serial rtt --scheduler tasks -print-allocs=. --gc leaking --target ${TARGET_TINYGO} -o ${IMAGE} .
 
 flash: build

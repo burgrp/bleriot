@@ -368,8 +368,9 @@ spreading factor.
 `address` (§3) and `key` (§5) are **not** part of any device type. They are
 per-chip and the key is secret, so they are **baked into the firmware image** for
 one specific device, together with the device's RF channel, spread factor and
-config. The host `bleriot gen` command emits a small generated Go file that
-supplies these values to the firmware's `bleriotMain` entry point; there is no
+config. The host generates a small Go file that supplies these values to the
+firmware's `bleriotMain` entry point — `bleriot make` writes it as part of
+building, and `bleriot gen` emits the same source to stdout; there is no
 provisioning page in flash and nothing is written over SWD.
 
 The RF address is **derived, not stored**: both the host and the firmware compute
@@ -428,15 +429,13 @@ the wire never sees the instance concept.
 1. **Onboard.** Attach a new device and run `new`: the host reads its UID over
    SWD and prints a paste-ready `Instance{}` stub. Fill in the name, key,
    channel, type and config, and commit it to the inventory source.
-2. **Generate + flash.** Run `gen` (name the instance, or rely on the sole one):
-   the host emits a generated Go file that bakes the device's identity (address =
-   `CRC32(UID)`, key, channel, spread factor) and config into the firmware. The
-   device module's Makefile runs `gen` as part of `build`, then flashes the image
-   over SWD. At boot the firmware self-checks that its UID matches the baked-in
-   address (§11.5). From a hub that owns the inventory, `bleriot make <name>
-   flash` does this for any device without leaving the hub: it locates the
-   firmware source, injects the device's identity and its chip's build/flash
-   targets, and runs make.
+2. **Build + flash.** Run `make <name> flash` (name the instance, or rely on the
+   sole one): the host writes a generated Go file that bakes the device's identity
+   (address = `CRC32(UID)`, key, channel, spread factor) and config into the
+   firmware source, injects the chip's build/flash targets, and runs the device
+   module's Makefile to build and flash the image over SWD. At boot the firmware
+   self-checks that its UID matches the baked-in address (§11.5). (`gen` emits the
+   same generated source to stdout for inspection.)
 3. **Run.** Run `hub`: the host builds every inventory device's register
    descriptor, derives its address, and bridges its registers to the Registry.
 

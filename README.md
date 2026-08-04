@@ -128,15 +128,14 @@ for the inventory model, commands and flags.
 
 ```sh
 cd example/bob
-go run . new          # read the attached device's UID, print an Instance stub
-make flash            # bake identity + config into firmware, build, flash over SWD
+go run . new             # read the attached device's UID, print an Instance stub
+go run . make bob flash  # bake identity + config, build, and flash over SWD
 ```
 
-`make build`/`make flash` run `gen` automatically. From a hub that owns the
-inventory, `bleriot make <name> flash` does the same for any device: it locates
-the firmware source, injects the device's identity and its chip's build/flash
-targets, and runs make. See [lib/site/README.md](lib/site/README.md#new-flags)
-for the SWD flags.
+`bleriot make <name> flash` builds and flashes any device from the hub: it
+locates the firmware source, writes the baked-in identity + config into it,
+injects the chip's build/flash targets, and runs make. See
+[lib/site/README.md](lib/site/README.md#new-flags) for the SWD flags.
 
 ---
 
