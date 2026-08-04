@@ -72,9 +72,9 @@ hardware designs.
 | Path | What it is | Docs |
 |------|------------|------|
 | [`lib/`](lib) | The BleRiot library module. Its top-level README is the full **protocol specification**. | [lib/README.md](lib/README.md) |
-| [`lib/shared/`](lib/shared) | Neutral, dependency-free, build-tag-free packages shared by firmware and host: [`protocol`](lib/shared/protocol) (packet codec + XTEA), [`config`](lib/shared/config) (provisioning-page format), [`inventory`](lib/shared/inventory) (inventory-as-code model). Compile for host and TinyGo alike. | [lib/README.md](lib/README.md) |
+| [`lib/shared/`](lib/shared) | Neutral, dependency-free, build-tag-free packages shared by firmware and host: [`protocol`](lib/shared/protocol) (packet codec + XTEA), [`config`](lib/shared/config) (identity primitives and constants), [`inventory`](lib/shared/inventory) (inventory-as-code model). Compile for host and TinyGo alike. | [lib/README.md](lib/README.md) |
 | [`lib/node/`](lib/node) | The firmware-side BleRiot runtime: the receive/dispatch loop, XTEA codec and `GET`/`SET`/`WATCH` handling. Imported by node firmware; allocation-free in steady state. | — |
-| [`lib/site/`](lib/site) | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, provisioning, Registry bridge. | [lib/site/README.md](lib/site/README.md) |
+| [`lib/site/`](lib/site) | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, firmware provisioning generator, Registry bridge. | [lib/site/README.md](lib/site/README.md) |
 | [`usb/`](usb) | KiCad design for the USB radio dongle (MCP2210 USB-to-SPI bridge + PAN211x). | — |
 | [`example/bob/`](example/bob) | Example device-type module (own module). One flat `package main` holds both targets, split by build tag: the TinyGo node firmware (`//go:build tinygo`) and the example host hub (`//go:build !tinygo`) that declares an inventory-as-code deployment and runs the host runtime. Its importable `spec` subpackage (`Config` + `Type()` + register tags) is shared by both. | — |
 | [`bob/`](bob) | KiCad PCB design (breakout board v1.3, the reference node hardware). | — |
@@ -89,7 +89,7 @@ hardware designs.
    table, the MCU `UID`, XTEA key, channel and config — as an
    `inventory.Inventory` and hands it to `cli.Start`. Register identity on the
    wire is a permanent per-type `Tag`; there is no JSON and no code generation.
-   See [protocol §11](lib/README.md#11-register-model-and-provisioning).
+   See [protocol §11](lib/README.md#11-register-model-and-node-identity).
 
 2. **On the node** (firmware). The node stores raw `int32` per wire ID, encrypts
    each packet with its XTEA key, and answers `GET`/`SET`/`WATCH` over the air
@@ -124,15 +124,16 @@ freed for another when unplugged). A dongle's `/dev/hidraw*` node is owned by th
 [USB access](lib/site/README.md#usb-access)). See [lib/site/README.md](lib/site/README.md)
 for the inventory model, commands and flags.
 
-### Provisioning a device
+### Onboarding a device
 
 ```sh
 cd example/bob
 go run . new          # read the attached device's UID, print an Instance stub
-go run . provision    # write its identity + config to flash over SWD
+go run . gen          # bake its identity + config into firmware source
 ```
 
-See [lib/site/README.md](lib/site/README.md#provision--new-flags) for the SWD flags.
+`gen` is run automatically by `make build`, which then flashes the image over
+SWD. See [lib/site/README.md](lib/site/README.md#new-flags) for the SWD flags.
 
 ---
 
@@ -159,5 +160,5 @@ flat `package main` whose firmware (`//go:build tinygo`) and host hub
 
 - **[Protocol specification](lib/README.md)** — the authoritative wire-format,
   security, transaction, and register-model spec.
-- **[Host library](lib/site/README.md)** — inventory-as-code model, the `hub`/`provision`/`new` commands, the USB radio dongle drivers, and internal packages.
+- **[Host library](lib/site/README.md)** — inventory-as-code model, the `hub`/`gen`/`new` commands, the USB radio dongle drivers, and internal packages.
 

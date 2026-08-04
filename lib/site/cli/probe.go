@@ -11,27 +11,22 @@ import (
 	"github.com/burgrp/bleriot/lib/shared/config"
 )
 
-// Probe is the SWD debug-probe surface the provisioning commands need: read a
-// device's MCU unique ID and write a raw image to its provisioning flash page.
-// It is a small interface so the commands can be tested without hardware.
+// Probe is the SWD debug-probe surface the onboarding command needs: read a
+// device's MCU unique ID. It is a small interface so the command can be tested
+// without hardware.
 type Probe interface {
 	// ReadUID reads the 12-byte MCU unique ID of the attached device.
 	ReadUID(ctx context.Context) ([config.UIDLen]byte, error)
-	// WritePage writes image to the device's provisioning flash page.
-	WritePage(ctx context.Context, image []byte) error
 }
 
 // PyOCDProbe drives a device over SWD by shelling out to pyocd, the same tool
-// used to flash firmware. It reads the UID from a fixed memory address and
-// writes the provisioning page to a fixed flash address; both are MCU/firmware
-// facts supplied by the caller.
+// used to flash firmware. It reads the UID from a fixed memory address, an
+// MCU/firmware fact supplied by the caller.
 type PyOCDProbe struct {
 	// Target is the pyocd target name (e.g. "py32f030x8").
 	Target string
 	// UIDAddr is the memory address of the 12-byte MCU unique ID.
 	UIDAddr uint32
-	// PageAddr is the flash address of the provisioning page.
-	PageAddr uint32
 	// Logger receives debug logs; nil is allowed.
 	Logger *slog.Logger
 }
@@ -70,32 +65,6 @@ func (p *PyOCDProbe) ReadUID(ctx context.Context) ([config.UIDLen]byte, error) {
 	}
 	copy(uid[:], data)
 	return uid, nil
-}
-
-// WritePage flashes image to the provisioning page address. It writes image to a
-// temporary file and loads it at PageAddr.
-func (p *PyOCDProbe) WritePage(ctx context.Context, image []byte) error {
-	tmp, err := os.CreateTemp("", "bleriot-page-*.bin")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(image); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-
-	args := []string{
-		"load",
-		"-t", p.Target,
-		"--base-address", fmt.Sprintf("0x%08X", p.PageAddr),
-		tmpName,
-	}
-	return p.run(ctx, args...)
 }
 
 // runCommander runs a single pyocd commander command non-interactively.

@@ -2,10 +2,10 @@
 
 // Command hub is the example BleRiot site binary. It declares the deployment as
 // inventory-as-code and hands it to the shared host runtime, which provides the
-// hub, provision and new subcommands.
+// hub, gen and new subcommands.
 //
 //	go run . new
-//	go run . provision
+//	go run . gen
 //	go run . hub --registry http://localhost:8080
 package main
 
@@ -37,7 +37,7 @@ func main() {
 			Type:    bob.Type(),
 			Config: bob.Config{
 				DefaultRedPeriod:   500,
-				DefaultGreenPeriod: 100,
+				DefaultGreenPeriod: 500,
 			},
 		},
 	})

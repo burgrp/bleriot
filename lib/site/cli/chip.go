@@ -105,9 +105,8 @@ func chipNames(chips map[string]inventory.Chip) string {
 // chipProbe builds the hardware Probe that drives the given chip over SWD.
 func chipProbe(c inventory.Chip, logger *slog.Logger) Probe {
 	return &PyOCDProbe{
-		Target:   c.Target,
-		UIDAddr:  c.UIDAddr,
-		PageAddr: c.PageAddr,
-		Logger:   logger,
+		Target:  c.Target,
+		UIDAddr: c.UIDAddr,
+		Logger:  logger,
 	}
 }

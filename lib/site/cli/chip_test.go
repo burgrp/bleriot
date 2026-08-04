@@ -1,14 +1,13 @@
 package cli
 
 import (
-	"context"
 	"testing"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 )
 
-var altChip = inventory.Chip{Name: "stm32g0", Target: "stm32g030x6", UIDAddr: 0x1FFF7590, PageAddr: 0x0800F800}
+var altChip = inventory.Chip{Name: "stm32g0", Target: "stm32g030x6", UIDAddr: 0x1FFF7590}
 
 func TestResolveChip(t *testing.T) {
 	t.Run("auto-selects sole inventory chip", func(t *testing.T) {
@@ -62,19 +61,4 @@ func TestResolveChip(t *testing.T) {
 			t.Fatalf("got %+v, want altChip", c)
 		}
 	})
-}
-
-func TestRunProvisionWrongChip(t *testing.T) {
-	inst := sampleInstance() // device type runs on PY32F030x8
-	inv := inventory.Inventory{inst}
-	fp := &fakeProbe{uid: inst.UID}
-
-	// Operator selected a different chip than the matched device's type.
-	err := runProvision(context.Background(), inv, altChip, fp, discardLogger())
-	if err == nil {
-		t.Fatal("expected error for chip mismatch")
-	}
-	if fp.written != nil {
-		t.Fatal("must not write a page when the chip mismatches")
-	}
 }

@@ -6,7 +6,7 @@
 //   - its identity: the MCU unique ID (from which the RF address is derived),
 //     the XTEA key, and the RF channel;
 //   - its device type (a shared DeviceType describing the register table);
-//   - its device-type-specific Config (a fixed-size struct, see the config package).
+//   - its device-type-specific Config (any value, baked into the firmware image).
 //
 // Register identity on the wire is a stable, hand-assigned Tag (like a protobuf
 // field number), not the slice position, so the register table can be reordered
@@ -58,9 +58,9 @@ type DeviceType struct {
 	// Registers is the device's register table. Slice order is irrelevant to the
 	// wire; each register is identified by its Tag.
 	Registers []Register
-	// Chip is the MCU the device's firmware runs on. It tells the provisioning
-	// commands how to reach the device over SWD (pyocd target, UID and page
-	// addresses). It is only needed for provisioning; the hub ignores it.
+	// Chip is the MCU the device's firmware runs on. It tells the onboarding
+	// command how to reach the device over SWD (pyocd target and UID address). It
+	// is only needed to read the UID when onboarding; the hub ignores it.
 	Chip Chip
 }
 
@@ -77,36 +77,22 @@ type Chip struct {
 	Target string
 	// UIDAddr is the memory address of the 12-byte MCU unique ID.
 	UIDAddr uint32
-	// PageAddr is the flash address of the provisioning page.
-	PageAddr uint32
-	// PageBytes is the size of the read window the firmware maps at PageAddr on
-	// boot: large enough for the provisioning header, the device Config, and the
-	// trailing CRC. The decoder tolerates slack, so it need not be exact.
-	PageBytes uint32
 }
 
 var py32UIDAddr = uint32(0x1FFF0E00) // 12-byte unique ID on PY32
 
-func py32lastPageAddr(flashKB uint32) uint32 {
-	return 0x08000000 + (flashKB-1)*1024
-}
-
 // PY32F003x6 is the Puya PY32F003x6 chip profile.
 var PY32F003x6 = Chip{
-	Name:      "py32f003x6",
-	Target:    "py32f003x6",
-	UIDAddr:   py32UIDAddr,
-	PageAddr:  py32lastPageAddr(32),
-	PageBytes: 64,
+	Name:    "py32f003x6",
+	Target:  "py32f003x6",
+	UIDAddr: py32UIDAddr,
 }
 
 // PY32F030x8 is the Puya PY32F030x8 chip profile.
 var PY32F030x8 = Chip{
-	Name:      "py32f030x8",
-	Target:    "py32f030x8",
-	UIDAddr:   py32UIDAddr,
-	PageAddr:  py32lastPageAddr(64),
-	PageBytes: 64,
+	Name:    "py32f030x8",
+	Target:  "py32f030x8",
+	UIDAddr: py32UIDAddr,
 }
 
 // Channel is an RF channel together with the spreading factor every node on it
@@ -143,9 +129,9 @@ type Instance struct {
 	Channel Channel
 	// Type is the device's type (register table).
 	Type DeviceType
-	// Config is the device-type-specific configuration written to the device's
-	// provisioning page. It must be a fixed-size value (see the config package); nil means
-	// no config.
+	// Config is the device-type-specific configuration baked into the device's
+	// firmware image by the "gen" command. It may be any value the firmware's
+	// bleriotMain accepts; nil means no config.
 	Config any
 }
 

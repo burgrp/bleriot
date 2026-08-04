@@ -54,16 +54,16 @@ behind `//go:build !tinygo` in the same flat `package main` as the node firmware
 `cli.Start` provides three subcommands:
 
 ```
-hub        bridge the inventory's RF nodes to the Registry
-provision  write a device's identity + config to its flash over SWD
-new        read an attached device's UID and print an Instance stub
+hub  bridge the inventory's RF nodes to the Registry
+gen  emit a device's baked-in identity + config as firmware source
+new  read an attached device's UID and print an Instance stub
 ```
 
 ```sh
 cd ../../example/bob
 go run . hub --registry http://localhost:8080
 go run . --debug hub                           # verbose: shows radio traffic
-go run . provision                            # provision the attached device
+go run . gen                                  # generate the firmware provisioning source
 go run . new                                  # onboard a brand-new device
 ```
 
@@ -91,29 +91,29 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
 | `--diag-window` | `30s` | Averaging window for the diagnostic `rate.*` registers. |
 
-### `provision` / `new` flags
+### `new` flags
 
-Both talk to the attached device over SWD via `pyocd`. The chip-specific details
-(pyocd target, UID memory address, provisioning-page flash address) are a
-property of the device's MCU and are declared once on the device type's `Chip`
-field, so the commands take a single flag:
+`new` talks to the attached device over SWD via `pyocd` to read its UID. The
+chip-specific details (pyocd target, UID memory address) are a property of the
+device's MCU and are declared once on the device type's `Chip` field, so the
+command takes a single flag:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--chip` | — | Chip to drive over SWD. Required only when the inventory declares more than one chip; otherwise the sole chip is selected automatically. |
+| `--chip` | — | Chip to read over SWD. Required only when the inventory declares more than one chip; otherwise the sole chip is selected automatically. |
 
-A `Chip` bundles `Target` (pyocd target name), `UIDAddr` (memory address of the
-12-byte MCU unique ID) and `PageAddr` (flash address of the provisioning page).
-`inventory.PY32F030x8` (`py32f030x8`, UID `0x1FFF0E00`, page `0x0800F800`) is
-built in; declare a `Chip{...}` on a device type to support other MCUs. `--chip`
-accepts a built-in chip name even on an empty inventory, so the very first
-device can be onboarded with `new`.
+A `Chip` bundles `Target` (pyocd target name) and `UIDAddr` (memory address of
+the 12-byte MCU unique ID). `inventory.PY32F030x8` (`py32f030x8`, UID
+`0x1FFF0E00`) is built in; declare a `Chip{...}` on a device type to support other
+MCUs. `--chip` accepts a built-in chip name even on an empty inventory, so the
+very first device can be onboarded with `new`.
 
-`provision` reads the device's UID, matches it against the inventory **by UID
-alone** (no device name argument), and writes its provisioning page — the RF
-address (derived as `CRC32(UID)`), key, channel and `Config` — to flash. `new`
-reads the UID of a device not yet in the inventory and prints a paste-ready
-`inventory.Instance{}` stub to add to the source.
+`new` reads the UID of a device not yet in the inventory and prints a paste-ready
+`inventory.Instance{}` stub to add to the source. `gen` then bakes an inventory
+instance's identity (the RF address derived as `CRC32(UID)`, key, channel, spread
+factor) and `Config` into a generated Go file the firmware build compiles in; it
+touches no hardware. The device module's Makefile runs `gen` as part of `build`
+and flashes the resulting image over SWD.
 
 ### USB access
 
@@ -132,7 +132,7 @@ Re-plug the dongle if it was already connected, and make sure your user is in
 the `plugdev` group (`id` should list it; otherwise `sudo usermod -aG plugdev
 $USER` and re-login). The rule matches the MCP2210 by its USB ID `04d8:00de`.
 
-> Provisioning over SWD (`provision` / `new`) drives the SWD probe through
+> Reading the UID over SWD (`new`) drives the SWD probe through
 > `pyocd`, which has its own access requirements independent of this rule.
 
 ---
@@ -141,7 +141,7 @@ $USER` and re-login). The rule matches the MCP2210 by its USB ID `04d8:00de`.
 
 The [`inventory`](../shared/inventory) package is the type-safe model of a
 deployment. It is part of [`lib/shared`](../shared) — shared with the firmware so
-both sides agree on register tags and the provisioning format — not host-only
+both sides agree on register tags and the identity format — not host-only
 code.
 
 - **`Register`** — one register of a device type. Its `Tag` (a `uint8`, like a
@@ -170,7 +170,7 @@ The RF address is never stored: both the host and the firmware derive it as
 A device type (e.g. [`../../example/bob`](../../example/bob)) is its own,
 dual-target Go module:
 
-- `Config` (a fixed-size struct) is shared by host and firmware.
+- `Config` is shared by host and firmware.
 - `Type() inventory.DeviceType` describes the register table. It is compiled into
   both targets, but the firmware never calls it, so TinyGo's dead-code
   elimination strips it (and the `inventory` package it references) from the
@@ -181,20 +181,34 @@ dual-target Go module:
   inventory and hands it to [`lib/site/cli`](cli). So a single module is both the
   node firmware and its example hub.
 
-### Provisioning page
+### Generated provisioning file
 
-The host and firmware agree on one flash page per device, encoded by the shared
-[`config`](../shared/config) package (`encoding/binary`, fixed-width,
-CRC-checked):
+There is no provisioning page in flash. Instead, `bleriot gen` emits a small
+generated Go file (`//go:build tinygo`, gitignored, regenerated by the device
+module's Makefile) that bakes one inventory instance's identity and config into
+the firmware image:
 
+```go
+//go:build tinygo
+
+// Code generated by "bleriot gen"; DO NOT EDIT.
+package main
+
+func main() {
+	bleriotMain(node.Provisioning{
+		Address:      [4]byte{ /* CRC32(UID) */ },
+		Key:          [16]byte{ /* XTEA key */ },
+		Channel:      37,
+		SpreadFactor: 0,
+	}, spec.Config{ /* device config */ })
+}
 ```
-header  magic | layout | configLen | channel | spreadFactor | address | key
-config  the device type's fixed-size Config struct
-crc32   CRC-32 (IEEE) over everything before it
-```
 
-The firmware reads it once at boot; `config.IsUnprovisioned` distinguishes an
-erased page from a corrupt one.
+`node.Provisioning` (address, key, channel, spread factor) lives in the shared
+[`lib/node`](../node) package; the `Config` literal is rendered from the
+inventory value with `%#v`. The firmware's hand-written `bleriotMain` receives
+both. At boot the firmware self-checks that its MCU UID hashes to the baked-in
+address, so an image flashed to the wrong board refuses to join the network.
 
 ---
 
@@ -202,9 +216,9 @@ erased page from a corrupt one.
 
 | Path | Responsibility |
 |------|----------------|
-| [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `provision` and `new` subcommands, and the `Probe` interface (SWD read-UID / write-page) with its `pyocd` implementation. |
+| [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `gen` and `new` subcommands, and the `Probe` interface (SWD read-UID) with its `pyocd` implementation. |
 | [`../shared/inventory`](../shared/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. Shared with the firmware. |
-| [`../shared/config`](../shared/config) | The provisioning page codec, shared verbatim with the firmware (host packs it, firmware reads it). |
+| [`../shared/config`](../shared/config) | Identity primitives and constants (address/key/UID lengths, spread factor), shared verbatim with the firmware. |
 | [`engine`](engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
 | [`radio`](radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |
 | [`radio/mcpdongle`](radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |

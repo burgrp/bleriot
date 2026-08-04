@@ -18,22 +18,12 @@ import (
 
 // fakeProbe is an in-memory Probe for tests.
 type fakeProbe struct {
-	uid      [config.UIDLen]byte
-	readErr  error
-	written  []byte
-	writeErr error
+	uid     [config.UIDLen]byte
+	readErr error
 }
 
 func (f *fakeProbe) ReadUID(context.Context) ([config.UIDLen]byte, error) {
 	return f.uid, f.readErr
-}
-
-func (f *fakeProbe) WritePage(_ context.Context, image []byte) error {
-	if f.writeErr != nil {
-		return f.writeErr
-	}
-	f.written = append([]byte(nil), image...)
-	return nil
 }
 
 type bobConfig struct {
@@ -88,53 +78,6 @@ func TestBuildNode(t *testing.T) {
 	}
 	if _, ok := n.ByID(2); !ok {
 		t.Fatalf("register tag 2 not mapped")
-	}
-}
-
-func TestRunProvisionWritesPage(t *testing.T) {
-	inst := sampleInstance()
-	inv := inventory.Inventory{inst}
-	fp := &fakeProbe{uid: inst.UID}
-
-	if err := runProvision(context.Background(), inv, inventory.PY32F030x8, fp, discardLogger()); err != nil {
-		t.Fatalf("runProvision: %v", err)
-	}
-	if fp.written == nil {
-		t.Fatal("no page written")
-	}
-
-	var got bobConfig
-	h, err := config.Unmarshal(fp.written, &got)
-	if err != nil {
-		t.Fatalf("Unmarshal written page: %v", err)
-	}
-	if h.Address != node.AddressFromUID(inst.UID) {
-		t.Fatalf("page address not derived from UID")
-	}
-	if h.Key != inst.Key {
-		t.Fatalf("page key mismatch")
-	}
-	if h.Channel != inst.Channel.Number {
-		t.Fatalf("page channel = %d, want %d", h.Channel, inst.Channel.Number)
-	}
-	if h.SpreadFactor != inst.Channel.SpreadFactor {
-		t.Fatalf("page spread factor = %d, want %d", h.SpreadFactor, inst.Channel.SpreadFactor)
-	}
-	if got != inst.Config {
-		t.Fatalf("page config = %+v, want %+v", got, inst.Config)
-	}
-}
-
-func TestRunProvisionUnknownUID(t *testing.T) {
-	inv := inventory.Inventory{sampleInstance()}
-	fp := &fakeProbe{uid: [config.UIDLen]byte{0xFF}} // not in inventory
-
-	err := runProvision(context.Background(), inv, inventory.PY32F030x8, fp, discardLogger())
-	if err == nil {
-		t.Fatal("expected error for unknown UID")
-	}
-	if fp.written != nil {
-		t.Fatal("must not write a page for an unknown device")
 	}
 }
 

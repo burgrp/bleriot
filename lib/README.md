@@ -8,8 +8,8 @@ Hardware-independent specification for the BleRiot IoT register protocol.
 >
 > - [`shared`](shared) — neutral, dependency-free, build-tag-free packages used by
 >   both firmware and host: `protocol` (packet codec + XTEA, §4–§8), `config`
->   (the provisioning page, §11.5) and `inventory` (the inventory-as-code model,
->   §11).
+>   (identity primitives and constants, §11.5) and `inventory` (the
+>   inventory-as-code model, §11).
 > - [`node`](node) — the firmware-side runtime (receive/dispatch loop, §7–§8).
 > - [`site`](site) — the host hub library; see [site/README.md](site/README.md).
 
@@ -31,14 +31,14 @@ These parameters are mandatory for all BleRiot-compatible radio implementations:
 
 | Parameter        | Value                                                                   |
 |------------------|-------------------------------------------------------------------------|
-| Channel          | Per-node, provisioned via §11 (e.g. channel 10 = 2440 MHz)             |
+| Channel          | Per-node, baked into firmware via §11 (e.g. channel 10 = 2440 MHz)     |
 | Sync word        | Destination device address (4 bytes, little-endian) — see §3           |
 | Data rate        | 250 kbps                                                                |
 | Modulation       | GFSK                                                                    |
 | Packet format    | BLE-compatible (preamble, sync word, PDU, 3-byte CRC, whitening)       |
 | PDU size         | 13 bytes (fixed)                                                        |
 
-Each node operates on a single channel defined in its provisioning page (§11.5). The hub may have multiple radio interfaces, each assigned to a different channel, allowing nodes to be grouped by channel for spectrum spread or logical partitioning.
+Each node operates on a single channel baked into its firmware image (§11.5). The hub may have multiple radio interfaces, each assigned to a different channel, allowing nodes to be grouped by channel for spectrum spread or logical partitioning.
 
 The RF sync word for each transmission is set to the 4-byte destination device address. Radio hardware that supports address/pipe filtering must configure its receive address to the device's own address, so only packets destined for that device are passed to the protocol layer. The 32-bit address space makes accidental collision with foreign RF traffic negligible.
 
@@ -265,7 +265,7 @@ acknowledgement:
 
 ---
 
-## 11. Register Model and Provisioning
+## 11. Register Model and Node Identity
 
 The protocol carries registers as bare `uint16` IDs on the wire (§4). Names,
 types, scaling, and metadata are **hub-side knowledge** and are deliberately
@@ -276,7 +276,7 @@ There is no runtime descriptor exchange and no offline code-generation step.
 
 This section defines the register model (tags, types, scaling), the
 inventory-as-code authoring model (device types and instances), and the
-node-identity provisioning path.
+node-identity path (baked into the firmware image).
 
 ### 11.1 Concepts
 
@@ -284,7 +284,7 @@ node-identity provisioning path.
 |---------|------|-----------------|-------------------|
 | **Device type** | A reusable, named register table (`Name` + `Registers`). Defines register *names*, tags, types, scaling, and metadata. | Hand-authored Go (device-type module's `Type()`) | Yes (tags) |
 | **Instance** | One physical device: its name, MCU `UID`, key, channel, device type, and config. Describes *what a node is and where it is*. | Hand-authored Go (the site inventory) | n/a |
-| **Node identity** | The node's `address` (§3) and shared `key` (§5). Per-chip; the key is secret. | Provisioning page (written over SWD) | n/a |
+| **Node identity** | The node's `address` (§3) and shared `key` (§5). Per-chip; the key is secret. | Baked into the firmware image (`bleriot gen`, §11.5) | n/a |
 
 The single most important rule: **a register's wire identity is its hand-assigned
 `Tag`** (a `uint8`, like a protobuf field number) — unique and non-zero within a
@@ -350,38 +350,43 @@ times.
 | name     | string    | Device name, unique within the inventory (scopes register names) |
 | uid      | [12]byte  | MCU unique ID; the RF address is derived from it (§11.5)         |
 | key      | [16]byte  | XTEA shared key (§5)                                             |
-| channel  | uint8     | RF channel the device listens and transmits on (§2)             |
+| channel  | Channel   | RF channel (number + spread factor) the device uses (§2); declared once and shared across instances |
 | type     | DeviceType| The device's register table (§11.2)                             |
-| config   | any       | Device-type-specific configuration (a fixed-size struct)        |
+| config   | any       | Device-type-specific configuration baked into the firmware image |
+
+A `Channel` bundles a required, unique `Name`, the RF `Number`, and the
+`SpreadFactor` every node on it uses (a dongle transmits one factor at a time, so
+binding the two prevents two nodes on one channel from disagreeing). The zero
+`SpreadFactor` is the highest-range S8.
 
 The host validates the inventory at startup: tags are unique and non-zero within
-each device type, and instance names are unique.
+each device type, instance names are unique, and each channel uses a single
+spreading factor.
 
-### 11.5 Node Identity Provisioning
+### 11.5 Node Identity
 
 `address` (§3) and `key` (§5) are **not** part of any device type. They are
-per-chip and the key is secret, so they are written to the device by the
-provisioning tooling over SWD, together with the device's RF channel and config,
-as a single **provisioning page** in flash.
+per-chip and the key is secret, so they are **baked into the firmware image** for
+one specific device, together with the device's RF channel, spread factor and
+config. The host `bleriot gen` command emits a small generated Go file that
+supplies these values to the firmware's `bleriotMain` entry point; there is no
+provisioning page in flash and nothing is written over SWD.
 
 The RF address is **derived, not stored**: both the host and the firmware compute
-`address = CRC32(MCU_UID)` (§3), so it never appears in the inventory. The host
-reads the device's 12-byte UID over SWD, looks the device up in the inventory by
-UID, and writes its page.
+`address = CRC32(MCU_UID)` (§3), so it never appears in the inventory. `gen`
+looks the device up in the inventory (by name, or the sole instance) and bakes in
+the derived address alongside the key, channel and config.
 
-The **provisioning page** layout (encoded identically by host and firmware, so
-they cannot disagree on the bytes):
+The identity travels as a `node.Provisioning` value (address, key, channel,
+spread factor) plus the device type's `Config`. The generated file is a trivial
+`main()` that calls `bleriotMain(prov, cfg)`; everything else is hand-written
+firmware.
 
-```
-header  magic | layout | configLen | channel | pad | address | key
-config  the device type's fixed-size config struct
-crc32   CRC-32 (IEEE) over everything before it
-```
-
-The firmware reads the page once at boot to learn its identity and config; it
-emits **no descriptor at runtime**. A device whose page has never been written is
-detected by a magic mismatch (an erased page), distinct from a corrupt page
-(CRC mismatch).
+**Boot-time self-check.** Because an image is built for one specific device, the
+firmware verifies at boot that it was flashed to the intended chip: it reads its
+own MCU UID, re-derives `CRC32(UID)`, and compares it to the baked-in address. On
+mismatch it refuses to join the network (halts with a blink pattern), so an image
+flashed to the wrong board cannot impersonate another node.
 
 ### 11.6 Worked Example
 
@@ -406,7 +411,7 @@ inventory.Inventory{
         Name:    "bob",
         UID:     [12]byte{ /* MCU unique ID, read over SWD */ },
         Key:     [16]byte{ /* XTEA key */ },
-        Channel: 37,
+        Channel: inventory.Channel{Name: "far", Number: 37},
         Type:    bob.Type(),
         Config:  bob.Config{DefaultRedPeriod: 500, DefaultGreenPeriod: 100},
     },
@@ -418,19 +423,21 @@ its wire REG, and publishes `bob.green`, `bob.red` and `bob.gpio` to the
 Registry. Two instances of the same type coexist because their *names* differ;
 the wire never sees the instance concept.
 
-### 11.7 Onboarding and Provisioning Workflow
+### 11.7 Onboarding and Build Workflow
 
 1. **Onboard.** Attach a new device and run `new`: the host reads its UID over
    SWD and prints a paste-ready `Instance{}` stub. Fill in the name, key,
    channel, type and config, and commit it to the inventory source.
-2. **Provision.** Run `provision`: the host reads the attached device's UID,
-   finds the matching inventory instance **by UID alone**, builds its
-   provisioning page (address = `CRC32(UID)`, key, channel, config) and writes it
-   to flash over SWD.
+2. **Generate + flash.** Run `gen` (name the instance, or rely on the sole one):
+   the host emits a generated Go file that bakes the device's identity (address =
+   `CRC32(UID)`, key, channel, spread factor) and config into the firmware. The
+   device module's Makefile runs `gen` as part of `build`, then flashes the image
+   over SWD. At boot the firmware self-checks that its UID matches the baked-in
+   address (§11.5).
 3. **Run.** Run `hub`: the host builds every inventory device's register
    descriptor, derives its address, and bridges its registers to the Registry.
 
-Adding or provisioning a device is an edit to the inventory **source**, type-checked
+Adding or updating a device is an edit to the inventory **source**, type-checked
 by the Go compiler — there are no JSON files to hand-edit and no descriptor pool
 to keep in sync.
 

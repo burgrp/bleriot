@@ -90,3 +90,13 @@ func byteArrayLiteral(b []byte) string {
 	out += "}"
 	return out
 }
+
+// findByUID returns the instance whose UID matches uid.
+func findByUID(inv inventory.Inventory, uid [config.UIDLen]byte) (inventory.Instance, bool) {
+	for _, inst := range inv {
+		if inst.UID == uid {
+			return inst, true
+		}
+	}
+	return inventory.Instance{}, false
+}
