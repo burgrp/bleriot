@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestBuildChipSettings(t *testing.T) {
@@ -112,6 +114,66 @@ func TestParseSPITransferBusBusy(t *testing.T) {
 	resp[1] = spiStatusBusBusy
 	if _, err := parseSPITransfer(resp); !errors.Is(err, ErrBusBusy) {
 		t.Fatalf("err = %v, want ErrBusBusy", err)
+	}
+}
+
+func TestTransferStalled(t *testing.T) {
+	d := &Device{lastTxBytes: 1}
+	commands := 0
+	d.commandHook = func(req [reportLen]byte) ([reportLen]byte, error) {
+		commands++
+		var resp [reportLen]byte
+		resp[0] = req[0]
+		resp[1] = spiStatusInProgress
+		return resp, nil
+	}
+
+	if _, err := d.Transfer([]byte{0x42}); !errors.Is(err, ErrTransferStalled) {
+		t.Fatalf("Transfer error = %v, want ErrTransferStalled", err)
+	}
+	if commands != maxNoProgressPolls {
+		t.Fatalf("commands = %d, want %d", commands, maxNoProgressPolls)
+	}
+}
+
+func TestTransferResetsNoProgressAfterData(t *testing.T) {
+	d := &Device{lastTxBytes: 2}
+	commands := 0
+	d.commandHook = func(req [reportLen]byte) ([reportLen]byte, error) {
+		commands++
+		var resp [reportLen]byte
+		resp[0] = req[0]
+		if commands == maxNoProgressPolls {
+			resp[1] = spiStatusOK
+			resp[2] = 2
+			resp[4], resp[5] = 0xAA, 0xBB
+		} else {
+			resp[1] = spiStatusInProgress
+		}
+		return resp, nil
+	}
+
+	got, err := d.Transfer([]byte{1, 2})
+	if err != nil {
+		t.Fatalf("Transfer: %v", err)
+	}
+	if !bytes.Equal(got, []byte{0xAA, 0xBB}) {
+		t.Fatalf("Transfer = % X, want AA BB", got)
+	}
+}
+
+type silentHID struct{}
+
+func (silentHID) Write(p []byte) (int, error) { return len(p), nil }
+func (silentHID) Read([]byte) (int, error)    { return 0, syscall.EAGAIN }
+func (silentHID) Close() error                { return nil }
+
+func TestCommandTimesOutWhenDeviceStopsResponding(t *testing.T) {
+	d := &Device{f: silentHID{}, commandTimeout: 2 * time.Millisecond}
+	var req [reportLen]byte
+	req[0] = cmdSPITransfer
+	if _, err := d.command(req); !errors.Is(err, ErrCommandTimeout) {
+		t.Fatalf("command error = %v, want ErrCommandTimeout", err)
 	}
 }
 

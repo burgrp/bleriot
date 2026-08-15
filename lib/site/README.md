@@ -235,6 +235,10 @@ both.
 - The MCP2210 transport **self-heals** from a desynced HID stream: if an aborted
   session left a stale response queued on the device, `command` discards
   mismatched responses until it reads the one matching its request.
+- MCP2210 HID commands and SPI progress are bounded. A silent USB device or a
+  bridge that remains in SPI-in-progress state is failed instead of blocking the
+  receive loop; receive-side transport failures close and reopen the dongle just
+  like send failures.
 - `Watch` subscriptions are persistent intents: they are retained even if the
   initial attempt times out, and re-`WATCH`ed periodically so a node that comes
   up later (or reboots) is resubscribed automatically.

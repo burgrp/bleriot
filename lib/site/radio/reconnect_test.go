@@ -12,12 +12,13 @@ import (
 
 // fakeDongle is a controllable Dongle for testing the Reconnecting supervisor.
 type fakeDongle struct {
-	mu       sync.Mutex
-	sendErr  error // returned by Send when non-nil
-	rx       bool  // Receive returns one packet when true
-	closed   bool
-	sendN    int
-	receiveN int
+	mu         sync.Mutex
+	sendErr    error // returned by Send when non-nil
+	receiveErr error // returned by Receive when non-nil
+	rx         bool  // Receive returns one packet when true
+	closed     bool
+	sendN      int
+	receiveN   int
 }
 
 func (f *fakeDongle) Send(dst [4]byte, payload []byte) error {
@@ -28,13 +29,21 @@ func (f *fakeDongle) Send(dst [4]byte, payload []byte) error {
 }
 
 func (f *fakeDongle) Receive(buf []byte) (int, bool) {
+	n, ok, _ := f.ReceiveWithError(buf)
+	return n, ok
+}
+
+func (f *fakeDongle) ReceiveWithError(buf []byte) (int, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.receiveN++
-	if f.rx {
-		return len(buf), true
+	if f.receiveErr != nil {
+		return 0, false, f.receiveErr
 	}
-	return 0, false
+	if f.rx {
+		return len(buf), true, nil
+	}
+	return 0, false, nil
 }
 
 func (f *fakeDongle) ReplyGuard() time.Duration { return 0 }
@@ -149,6 +158,41 @@ func TestReconnecting_ReopensAfterSendFailure(t *testing.T) {
 	waitFor(t, func() bool { return first.isClosed() })
 
 	// The supervisor reopens a fresh device and Send succeeds again.
+	waitFor(t, func() bool {
+		mu.Lock()
+		n := len(devs)
+		mu.Unlock()
+		return n >= 2 && r.Send([4]byte{}, nil) == nil
+	})
+}
+
+func TestReconnecting_ReopensAfterReceiveFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	var devs []*fakeDongle
+	open := func() (Dongle, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		d := &fakeDongle{}
+		devs = append(devs, d)
+		return d, nil
+	}
+
+	r := NewReconnecting(ctx, open, 0, 5*time.Millisecond, quietLogger())
+	defer r.Close()
+	waitFor(t, func() bool { return r.Send([4]byte{}, nil) == nil })
+
+	mu.Lock()
+	first := devs[0]
+	mu.Unlock()
+	first.mu.Lock()
+	first.receiveErr = errors.New("disconnected")
+	first.mu.Unlock()
+
+	r.Receive(make([]byte, 4))
+	waitFor(t, func() bool { return first.isClosed() })
 	waitFor(t, func() bool {
 		mu.Lock()
 		n := len(devs)

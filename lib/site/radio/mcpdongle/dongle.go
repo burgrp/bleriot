@@ -21,8 +21,9 @@ import (
 // MCP2210 device handle, the radio driver, a lock serialising all USB access,
 // and two status LEDs. It satisfies radio.Dongle (Send / Receive / Close).
 type Dongle struct {
-	dev    *mcp2210.Device
-	driver *pan211x.DriverBLELongRange
+	dev       *mcp2210.Device
+	registers *registers
+	driver    *pan211x.DriverBLELongRange
 	// guard is the reply turnaround delay this dongle asks nodes to honour, fixed
 	// at Open from the spreading factor (see ReplyGuard).
 	guard time.Duration
@@ -45,7 +46,8 @@ func Open(dev *mcp2210.Device, channel uint8, spreadFactor pan211x.SpreadFactor,
 		dev.Close()
 		return nil, err
 	}
-	driver := pan211x.NewDriverBLELongRange(newRegisters(dev))
+	registers := newRegisters(dev)
+	driver := pan211x.NewDriverBLELongRange(registers)
 	if err := driver.Init(pan211x.ConfigBLELongRange{
 		PayloadLen:      protocol.PacketLen,
 		SerialInterface: pan211x.SerialInterfaceSPI3W,
@@ -62,7 +64,7 @@ func Open(dev *mcp2210.Device, channel uint8, spreadFactor pan211x.SpreadFactor,
 		dev.Close()
 		return nil, err
 	}
-	d := &Dongle{dev: dev, driver: driver, guard: replyGuard(spreadFactor)}
+	d := &Dongle{dev: dev, registers: registers, driver: driver, guard: replyGuard(spreadFactor)}
 	d.red = newLED(d.setGPIO, ledRedPin)
 	d.green = newLED(d.setGPIO, ledGreenPin)
 	return d, nil
@@ -86,19 +88,31 @@ func (d *Dongle) Send(dst [4]byte, payload []byte) error {
 	d.red.trigger()
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.driver.Send(dst, payload)
+	err := d.driver.Send(dst, payload)
+	if transportErr := d.registers.takeError(); err == nil {
+		err = transportErr
+	}
+	return err
 }
 
 // Receive polls for one packet, lighting the green activity LED when one
-// arrives. It never blocks.
+// arrives. Transport errors are available to supervisors via ReceiveWithError.
 func (d *Dongle) Receive(buf []byte) (int, bool) {
+	n, ok, _ := d.ReceiveWithError(buf)
+	return n, ok
+}
+
+// ReceiveWithError polls for one packet and preserves register transport
+// errors that the PAN211x driver's two-result Receive API cannot represent.
+func (d *Dongle) ReceiveWithError(buf []byte) (int, bool, error) {
 	d.mu.Lock()
 	n, ok := d.driver.Receive(buf)
+	err := d.registers.takeError()
 	d.mu.Unlock()
-	if ok {
+	if ok && err == nil {
 		d.green.trigger()
 	}
-	return n, ok
+	return n, ok, err
 }
 
 // ReplyGuard reports the reply turnaround delay this dongle asks nodes to wait

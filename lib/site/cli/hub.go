@@ -284,6 +284,14 @@ type claimedDongle struct {
 	release func()
 }
 
+func (c *claimedDongle) ReceiveWithError(buf []byte) (int, bool, error) {
+	if errorDongle, ok := c.Dongle.(radio.ReceiveErrorDongle); ok {
+		return errorDongle.ReceiveWithError(buf)
+	}
+	n, received := c.Dongle.Receive(buf)
+	return n, received, nil
+}
+
 func (c *claimedDongle) Close() error {
 	c.once.Do(c.release)
 	return c.Dongle.Close()

@@ -9,9 +9,12 @@ package mcp2210
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // USB identifiers of a stock MCP2210.
@@ -24,6 +27,10 @@ const (
 // exactly this many bytes on the wire.
 const reportLen = 64
 
+// defaultCommandTimeout bounds one MCP2210 HID request/response exchange. A
+// healthy full-speed USB device responds in milliseconds.
+const defaultCommandTimeout = 250 * time.Millisecond
+
 // maxStaleDrain bounds how many mismatched (stale) responses command will
 // discard while looking for the one matching its request, before giving up.
 const maxStaleDrain = 16
@@ -31,10 +38,18 @@ const maxStaleDrain = 16
 // ErrNotFound is returned by Open when no matching MCP2210 device exists.
 var ErrNotFound = errors.New("mcp2210: device not found")
 
+// ErrCommandTimeout is returned when an open MCP2210 stops accepting commands
+// or producing responses.
+var ErrCommandTimeout = errors.New("mcp2210: command timeout")
+
 // Device is an open connection to a single MCP2210 over its hidraw node.
 type Device struct {
-	f   *os.File
+	f   io.ReadWriteCloser
 	cfg SPIConfig
+	// commandHook replaces HID I/O in unit tests.
+	commandHook func([reportLen]byte) ([reportLen]byte, error)
+	// commandTimeout overrides defaultCommandTimeout in unit tests.
+	commandTimeout time.Duration
 	// lastTxBytes caches the SPI "bytes per transaction" currently programmed
 	// into the chip so Transfer only re-sends the SPI settings when the
 	// transaction size changes.
@@ -42,6 +57,13 @@ type Device struct {
 	// gpioValues mirrors the last GPIO output bitmap written via SetGPIO so each
 	// update preserves the other pins.
 	gpioValues uint16
+}
+
+func (d *Device) issue(req [reportLen]byte) ([reportLen]byte, error) {
+	if d.commandHook != nil {
+		return d.commandHook(req)
+	}
+	return d.command(req)
 }
 
 // Open connects to an MCP2210.
@@ -55,7 +77,7 @@ func Open(selector string) (*Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(devnode, os.O_RDWR, 0)
+	f, err := os.OpenFile(devnode, os.O_RDWR|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("mcp2210: open %s: %w", devnode, err)
 	}
@@ -86,11 +108,37 @@ func (d *Device) command(req [reportLen]byte) ([reportLen]byte, error) {
 	var resp [reportLen]byte
 	buf := make([]byte, reportLen+1) // [0]=report number, then payload
 	copy(buf[1:], req[:])
-	if _, err := d.f.Write(buf); err != nil {
-		return resp, fmt.Errorf("mcp2210: write report: %w", err)
+	timeout := d.commandTimeout
+	if timeout <= 0 {
+		timeout = defaultCommandTimeout
 	}
-	for attempts := 0; ; attempts++ {
+	deadline := time.Now().Add(timeout)
+	for {
+		n, err := d.f.Write(buf)
+		if isWouldBlock(err) && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if isWouldBlock(err) {
+			return resp, ErrCommandTimeout
+		}
+		if err != nil {
+			return resp, fmt.Errorf("mcp2210: write report: %w", err)
+		}
+		if n != len(buf) {
+			return resp, fmt.Errorf("mcp2210: short write: %d bytes", n)
+		}
+		break
+	}
+	for stale := 0; ; {
 		n, err := d.f.Read(resp[:])
+		if isWouldBlock(err) && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if isWouldBlock(err) {
+			return resp, ErrCommandTimeout
+		}
 		if err != nil {
 			return resp, fmt.Errorf("mcp2210: read report: %w", err)
 		}
@@ -100,11 +148,16 @@ func (d *Device) command(req [reportLen]byte) ([reportLen]byte, error) {
 		if resp[0] == req[0] {
 			return resp, nil
 		}
-		if attempts >= maxStaleDrain {
+		stale++
+		if stale > maxStaleDrain {
 			return resp, fmt.Errorf("mcp2210: response opcode 0x%02X for command 0x%02X", resp[0], req[0])
 		}
 		// Stale response from an earlier aborted command; drop it and read on.
 	}
+}
+
+func isWouldBlock(err error) bool {
+	return errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK)
 }
 
 // resolve maps a selector to a /dev/hidraw* device node.

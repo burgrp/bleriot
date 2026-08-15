@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -148,6 +149,23 @@ func (stubDongle) Send([4]byte, []byte) error { return nil }
 func (stubDongle) Receive([]byte) (int, bool) { return 0, false }
 func (stubDongle) ReplyGuard() time.Duration  { return time.Millisecond }
 func (stubDongle) Close() error               { return nil }
+
+type errorReceivingStub struct {
+	stubDongle
+	err error
+}
+
+func (d errorReceivingStub) ReceiveWithError([]byte) (int, bool, error) {
+	return 0, false, d.err
+}
+
+func TestClaimedDonglePreservesReceiveError(t *testing.T) {
+	want := errors.New("USB stopped responding")
+	d := &claimedDongle{Dongle: errorReceivingStub{err: want}}
+	if _, _, err := d.ReceiveWithError(nil); !errors.Is(err, want) {
+		t.Fatalf("ReceiveWithError = %v, want %v", err, want)
+	}
+}
 
 // withFakeDongleType swaps dongleTypes for a single fake type whose discover
 // returns the given selectors, restoring the original afterwards.

@@ -2,23 +2,42 @@ package mcpdongle
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
 // fakeTransport records transmitted buffers and returns canned receive data.
 type fakeTransport struct {
 	sent [][]byte
+	err  error
 	// rx maps the access byte to the bytes returned for that transaction.
 	rx map[byte][]byte
 }
 
 func (f *fakeTransport) Transfer(tx []byte) ([]byte, error) {
 	f.sent = append(f.sent, append([]byte(nil), tx...))
+	if f.err != nil {
+		return nil, f.err
+	}
 	out := make([]byte, len(tx)) // echo length: one rx byte per tx byte
 	if canned, ok := f.rx[tx[0]]; ok {
 		copy(out, canned)
 	}
 	return out, nil
+}
+
+func TestRegistersPreserveTransportError(t *testing.T) {
+	want := errors.New("USB disconnected")
+	r := newRegisters(&fakeTransport{err: want})
+	if _, err := r.Read(0x01); !errors.Is(err, want) {
+		t.Fatalf("Read error = %v, want %v", err, want)
+	}
+	if err := r.takeError(); !errors.Is(err, want) {
+		t.Fatalf("takeError = %v, want %v", err, want)
+	}
+	if err := r.takeError(); err != nil {
+		t.Fatalf("second takeError = %v, want nil", err)
+	}
 }
 
 func TestRegistersRead(t *testing.T) {

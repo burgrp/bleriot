@@ -39,6 +39,15 @@ type Dongle interface {
 	Close() error
 }
 
+// ReceiveErrorDongle optionally extends Dongle with receive-side transport
+// errors. Reconnecting uses it to replace a failed physical device while
+// retaining source compatibility with Dongle implementations that can only
+// report packets or no packet.
+type ReceiveErrorDongle interface {
+	Dongle
+	ReceiveWithError(buf []byte) (n int, ok bool, err error)
+}
+
 // Radio adapts a Dongle to the hub engine's Radio interface (Send / Received):
 // it runs a receive loop that polls the dongle and forwards each complete packet
 // on a channel.

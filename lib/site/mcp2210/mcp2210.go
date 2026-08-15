@@ -29,9 +29,18 @@ const gpDesignationChipSelect = 0x01
 // smaller, so a single report per transaction is always sufficient.
 const maxTransfer = 60
 
+// maxNoProgressPolls bounds consecutive SPI responses that return no data. A
+// normal 60-byte transaction at 1 MHz completes within one USB HID interval;
+// repeated in-progress or empty responses indicate a wedged bridge.
+const maxNoProgressPolls = 16
+
 // ErrBusBusy is returned when the MCP2210 reports the SPI bus is owned by
 // another master and the transfer cannot proceed.
 var ErrBusBusy = errors.New("mcp2210: SPI bus busy")
+
+// ErrTransferStalled is returned when the MCP2210 repeatedly reports an SPI
+// transfer in progress without returning any data.
+var ErrTransferStalled = errors.New("mcp2210: SPI transfer stalled")
 
 // SPIConfig holds the static SPI master parameters programmed once at startup.
 type SPIConfig struct {
@@ -61,12 +70,12 @@ func (d *Device) Configure(cfg SPIConfig, gpioOutputs ...uint8) error {
 		}
 		outMask |= 1 << p
 	}
-	if _, err := d.command(buildChipSettings(outMask)); err != nil {
+	if _, err := d.issue(buildChipSettings(outMask)); err != nil {
 		return err
 	}
 	// Program SPI settings with a placeholder transaction size; Transfer
 	// re-programs the size whenever it changes.
-	if _, err := d.command(buildSPISettings(cfg, 1)); err != nil {
+	if _, err := d.issue(buildSPISettings(cfg, 1)); err != nil {
 		return err
 	}
 	d.cfg = cfg
@@ -86,7 +95,7 @@ func (d *Device) SetGPIO(pin uint8, high bool) error {
 	} else {
 		d.gpioValues &^= 1 << pin
 	}
-	_, err := d.command(buildGPIOValues(d.gpioValues))
+	_, err := d.issue(buildGPIOValues(d.gpioValues))
 	return err
 }
 
@@ -98,7 +107,7 @@ func (d *Device) Transfer(tx []byte) ([]byte, error) {
 		return nil, fmt.Errorf("mcp2210: transfer length %d out of range 1-%d", len(tx), maxTransfer)
 	}
 	if len(tx) != d.lastTxBytes {
-		if _, err := d.command(buildSPISettings(d.spiConfig(), len(tx))); err != nil {
+		if _, err := d.issue(buildSPISettings(d.spiConfig(), len(tx))); err != nil {
 			return nil, err
 		}
 		d.lastTxBytes = len(tx)
@@ -106,6 +115,7 @@ func (d *Device) Transfer(tx []byte) ([]byte, error) {
 
 	rx := make([]byte, 0, len(tx))
 	first := true
+	noProgress := 0
 	for len(rx) < len(tx) {
 		var req [reportLen]byte
 		if first {
@@ -114,18 +124,30 @@ func (d *Device) Transfer(tx []byte) ([]byte, error) {
 		} else {
 			req = buildSPITransfer(nil) // drain remaining RX bytes
 		}
-		resp, err := d.command(req)
+		resp, err := d.issue(req)
 		if err != nil {
 			return nil, err
 		}
 		got, err := parseSPITransfer(resp)
 		if errors.Is(err, errSPIInProgress) {
+			noProgress++
+			if noProgress >= maxNoProgressPolls {
+				return nil, ErrTransferStalled
+			}
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
+		if len(got) == 0 {
+			noProgress++
+			if noProgress >= maxNoProgressPolls {
+				return nil, ErrTransferStalled
+			}
+			continue
+		}
 		rx = append(rx, got...)
+		noProgress = 0
 	}
 	return rx, nil
 }

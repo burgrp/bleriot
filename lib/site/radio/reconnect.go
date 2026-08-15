@@ -30,12 +30,11 @@ const DefaultReconnectBackoff = 2 * time.Second
 // and use it before any device is present. This lets the hub start with every
 // dongle disconnected.
 //
-// A disconnect is detected from a Send failure: the hub is the master and sends
-// at least once per watch-refresh interval, so a vanished device surfaces
-// quickly. The failed device is closed and the supervisor reopens it; Receive
-// simply yields no packets while offline. A selector that re-resolves the device
-// each open (e.g. a USB serial rather than a fixed /dev/hidraw path) reconnects
-// even when the device returns on a different node.
+// A disconnect is detected from a Send or Receive failure. The failed device is
+// closed and the supervisor reopens it; Receive simply yields no packets while
+// offline. A selector that re-resolves the device each open (e.g. a USB serial
+// rather than a fixed /dev/hidraw path) reconnects even when the device returns
+// on a different node.
 type Reconnecting struct {
 	open    func() (Dongle, error)
 	guard   time.Duration
@@ -141,7 +140,8 @@ func (r *Reconnecting) Send(dst [4]byte, payload []byte) error {
 	return nil
 }
 
-// Receive polls the live device, or reports no packet while offline.
+// Receive polls the live device, or reports no packet while offline. A receive
+// failure drops the device so the supervisor reopens it.
 func (r *Reconnecting) Receive(buf []byte) (int, bool) {
 	r.mu.Lock()
 	d := r.cur
@@ -149,7 +149,18 @@ func (r *Reconnecting) Receive(buf []byte) (int, bool) {
 	if d == nil {
 		return 0, false
 	}
-	n, ok := d.Receive(buf)
+	var n int
+	var ok bool
+	if errorDongle, supportsErrors := d.(ReceiveErrorDongle); supportsErrors {
+		var err error
+		n, ok, err = errorDongle.ReceiveWithError(buf)
+		if err != nil {
+			r.drop(d, err)
+			return 0, false
+		}
+	} else {
+		n, ok = d.Receive(buf)
+	}
 	if ok {
 		r.rxAll.Add(1)
 	}
