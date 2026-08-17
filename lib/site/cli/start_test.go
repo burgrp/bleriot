@@ -75,8 +75,10 @@ func TestBuildNode(t *testing.T) {
 
 func TestDescriptorForPreservesConversion(t *testing.T) {
 	dt := sampleType()
-	dt.Registers[0].ToValue = func(wire int32) any { return int64(wire) + 10 }
-	dt.Registers[0].FromValue = func(value any) (int32, error) { return int32(value.(int64)) - 10, nil }
+	dt.Registers[0].Conversion = inventory.Conversion{
+		Decode: func(raw int32) (any, error) { return int64(raw) + 10, nil },
+		Encode: func(value any) (int32, error) { return int32(value.(int64)) - 10, nil },
+	}
 
 	desc, err := descriptorFor(dt)
 	if err != nil {
@@ -86,11 +88,34 @@ func TestDescriptorForPreservesConversion(t *testing.T) {
 	if !ok {
 		t.Fatal("missing register 1")
 	}
-	if got := r.ToValue(5); got != int64(15) {
-		t.Fatalf("ToValue(5) = %v, want 15", got)
+	if got, err := r.Conversion.Decode(5); err != nil || got != int64(15) {
+		t.Fatalf("Decode(5) = %v, %v; want 15, nil", got, err)
 	}
-	if got, err := r.FromValue(int64(15)); err != nil || got != 5 {
-		t.Fatalf("FromValue(15) = %d, %v; want 5, nil", got, err)
+	if got, err := r.Conversion.Encode(int64(15)); err != nil || got != 5 {
+		t.Fatalf("Encode(15) = %d, %v; want 5, nil", got, err)
+	}
+}
+
+func TestDescriptorForPreservesReadOnly(t *testing.T) {
+	dt := sampleType()
+	dt.Registers[0].ReadOnly = true
+	dt.Registers[0].Conversion = inventory.Conversion{
+		Decode: func(raw int32) (any, error) { return int64(raw) + 10, nil },
+	}
+
+	desc, err := descriptorFor(dt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := desc.ByID(1)
+	if !ok {
+		t.Fatal("missing register 1")
+	}
+	if !r.ReadOnly {
+		t.Fatal("register is writable, want read-only")
+	}
+	if r.Conversion.Encode != nil {
+		t.Fatal("read-only register has an encoder")
 	}
 }
 

@@ -146,9 +146,13 @@ deployment. It is part of [`lib/shared`](../shared) — shared with the firmware
 both sides agree on register tags and the identity format — not host-only
 code.
 
-- **`Register`** — one register of a device type. Its `Tag` (a `uint8`, like a
+- **`Register`** — one register of a device type. Its `Tag` (a `uint16`, like a
   protobuf field number) is its permanent wire identity: unique and non-zero
   within the device type, never reused once retired. Slice order is irrelevant.
+  `Type` selects the default Registry value conversion; an optional
+  `Conversion` supplies fallible `Decode` and `Encode` functions. `ReadOnly`
+  registers may define `Decode` alone, and the bridge ignores all consumer
+  writes to them.
 - **`DeviceType`** — a shared, per-type register table (`Name` + `Registers`),
   authored once in the device-type module and returned by its `Type()` function.
 - **`Instance`** — one physical device: its `Name`, random RF `Address`, XTEA `Key`, RF
@@ -176,7 +180,8 @@ dual-target Go module:
 - `Type() inventory.DeviceType` describes the register table. It is compiled into
   both targets, but the firmware never calls it, so TinyGo's dead-code
   elimination strips it (and the `inventory` package it references) from the
-  image.
+  image. Register conversion functions therefore execute on the hub only, even
+  when they use floating-point sensor mathematics such as an NTC beta equation.
 - One flat `package main` holds both entry points, selected by build tag: the
   firmware (`//go:build tinygo`) drives the shared [`lib/node`](../node) runtime
   over the radio, and the example host hub (`//go:build !tinygo`) declares the
@@ -219,14 +224,16 @@ both.
 |------|----------------|
 | [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `gen`, `make` and offline `new` subcommands. |
 | [`../shared/inventory`](../shared/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. Shared with the firmware. |
+| [`../shared/conversion`](../shared/conversion) | Hub-side `Scale` and `Linear` factories for writable register conversions. The code is referenced by shared device specs but stripped from firmware as unreachable. |
+| [`../shared/conversion/ntc`](../shared/conversion/ntc) | Read-only raw-ADC to Celsius conversion using an NTC thermistor's beta model. |
 | [`../shared/puya`](../shared/puya) | Puya PY32 chip profiles and per-family memory-map constants. Shared with the firmware. |
 | [`../shared/config`](../shared/config) | Identity primitives and constants (address/key lengths, spread factor), shared verbatim with the firmware. |
 | [`engine`](engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
 | [`radio`](radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |
 | [`radio/mcpdongle`](radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |
 | [`mcp2210`](mcp2210) | Low-level MCP2210 USB-HID-to-SPI driver (open by `/dev/hidraw*` path or USB serial, chip/GPIO/SPI config, SPI transfers), self-healing against stale/desynced HID responses. |
-| [`node`](node) | Host-side node model: a register descriptor (wire ID → name/type/scaling) built from a device type, plus the provisioned identity (address + key). Bridges values to/from the Registry. |
-| [`bridge`](bridge) | Connects the engine to the Registry: each register becomes a provider (seeded by `GET`, kept current by `WATCH`), and consumer writes become `SET`. Generic — no per-register knowledge beyond the descriptor. |
+| [`node`](node) | Host-side node model: a register descriptor (wire ID → name/type/access/conversion) built from a device type, plus the provisioned identity (address + key). |
+| [`bridge`](bridge) | Connects the engine to the Registry: each register becomes a provider (seeded by `GET`, kept current by `WATCH`), and writable consumer requests become `SET`. Decode failures publish `nil`; read-only writes are ignored. Generic — no per-register knowledge beyond the descriptor. |
 
 ---
 

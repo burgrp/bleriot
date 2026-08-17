@@ -22,17 +22,24 @@ const (
 	TypeBool  RegType = "bool"
 )
 
+// Conversion translates between a raw BleRiot wire value and the typed value
+// exposed through the Registry. Decode is always populated by NewDescriptor.
+// Encode is nil exactly when the register is read-only.
+type Conversion struct {
+	Decode func(raw int32) (any, error)
+	Encode func(value any) (int32, error)
+}
+
 // Register is one resolved register from a node descriptor.
 type Register struct {
-	ID   uint16
-	Name string
-	Type RegType
-	// ToValue and FromValue convert between raw int32 wire values and
-	// Registry-facing values. NewDescriptor installs Type-based defaults when
-	// both are nil; custom functions must be supplied as a pair.
-	ToValue   func(wire int32) any
-	FromValue func(value any) (int32, error)
-	Metadata  map[string]string
+	ID       uint16
+	Name     string
+	Type     RegType
+	ReadOnly bool
+	// Conversion translates raw wire values to and from Registry-facing values.
+	// NewDescriptor installs Type-based defaults for omitted functions.
+	Conversion Conversion
+	Metadata   map[string]string
 }
 
 // Descriptor is a node's register table, plus indexes for lookup by wire ID and
@@ -72,11 +79,20 @@ func (d *Descriptor) index() error {
 		if _, dup := d.byName[r.Name]; dup {
 			return fmt.Errorf("duplicate register name %q", r.Name)
 		}
-		if (r.ToValue == nil) != (r.FromValue == nil) {
-			return fmt.Errorf("register %q must define both ToValue and FromValue", r.Name)
-		}
-		if r.ToValue == nil {
-			r.ToValue, r.FromValue = defaultConversion(r.Name, r.Type)
+		if r.ReadOnly {
+			if r.Conversion.Encode != nil {
+				return fmt.Errorf("read-only register %q must not define Conversion.Encode", r.Name)
+			}
+			if r.Conversion.Decode == nil {
+				r.Conversion.Decode = defaultConversion(r.Name, r.Type).Decode
+			}
+		} else {
+			if (r.Conversion.Decode == nil) != (r.Conversion.Encode == nil) {
+				return fmt.Errorf("writable register %q must define both Conversion.Decode and Conversion.Encode", r.Name)
+			}
+			if r.Conversion.Decode == nil {
+				r.Conversion = defaultConversion(r.Name, r.Type)
+			}
 		}
 		d.byID[r.ID] = r
 		d.byName[r.Name] = r
@@ -98,27 +114,36 @@ func (d *Descriptor) ByName(name string) (*Register, bool) {
 
 // defaultConversion returns the Registry conversion implied by a register's
 // Type. Numeric Registry values are accepted in Go's common int/float forms.
-func defaultConversion(name string, typ RegType) (func(int32) any, func(any) (int32, error)) {
+func defaultConversion(name string, typ RegType) Conversion {
 	switch typ {
 	case TypeBool:
-		return func(wire int32) any { return wire != 0 }, func(value any) (int32, error) {
-			b, ok := value.(bool)
-			if !ok {
-				return 0, fmt.Errorf("register %q expects bool, got %T", name, value)
-			}
-			if b {
-				return 1, nil
-			}
-			return 0, nil
+		return Conversion{
+			Decode: func(raw int32) (any, error) { return raw != 0, nil },
+			Encode: func(value any) (int32, error) {
+				b, ok := value.(bool)
+				if !ok {
+					return 0, fmt.Errorf("register %q expects bool, got %T", name, value)
+				}
+				if b {
+					return 1, nil
+				}
+				return 0, nil
+			},
 		}
 	case TypeFloat:
-		return func(wire int32) any { return float64(wire) }, numericFromValue(name)
+		return Conversion{
+			Decode: func(raw int32) (any, error) { return float64(raw), nil },
+			Encode: numericEncode(name),
+		}
 	default: // int
-		return func(wire int32) any { return int64(wire) }, numericFromValue(name)
+		return Conversion{
+			Decode: func(raw int32) (any, error) { return int64(raw), nil },
+			Encode: numericEncode(name),
+		}
 	}
 }
 
-func numericFromValue(name string) func(any) (int32, error) {
+func numericEncode(name string) func(any) (int32, error) {
 	return func(value any) (int32, error) {
 		f, err := toFloat(value)
 		if err != nil {

@@ -41,6 +41,13 @@ func TestRing_TrimsToWindow(t *testing.T) {
 	}
 }
 
+func TestDiagMetaMarksRegisterReadOnly(t *testing.T) {
+	metadata := diagMeta("float")
+	if metadata["type"] != "float" || metadata["diagnostic"] != true || metadata["readOnly"] != true {
+		t.Fatalf("diagnostic metadata = %v", metadata)
+	}
+}
+
 // multiReg is a fake Registry that captures every Provide call by name so a test
 // can read the values pushed for any diagnostic register.
 type multiReg struct {

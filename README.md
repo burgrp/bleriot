@@ -72,7 +72,7 @@ hardware designs.
 | Path | What it is | Docs |
 |------|------------|------|
 | [`lib/`](lib) | The BleRiot library module. Its top-level README is the full **protocol specification**. | [lib/README.md](lib/README.md) |
-| [`lib/shared/`](lib/shared) | Neutral, dependency-free, build-tag-free packages shared by firmware and host: [`protocol`](lib/shared/protocol) (packet codec + XTEA), [`config`](lib/shared/config) (identity primitives and constants), [`inventory`](lib/shared/inventory) (inventory-as-code model), [`puya`](lib/shared/puya) (PY32 chip profiles and memory maps). Compile for host and TinyGo alike. | [lib/README.md](lib/README.md) |
+| [`lib/shared/`](lib/shared) | Neutral, dependency-free, build-tag-free packages shared by firmware and host: [`protocol`](lib/shared/protocol) (packet codec + XTEA), [`config`](lib/shared/config) (identity primitives and constants), [`inventory`](lib/shared/inventory) (inventory-as-code model), [`conversion`](lib/shared/conversion) (hub-side value conversions, including NTC thermistors), and [`puya`](lib/shared/puya) (PY32 chip profiles and memory maps). Compile for host and TinyGo alike; conversion code referenced only by `Type()` is dead-stripped from firmware. | [lib/README.md](lib/README.md) |
 | [`lib/node/`](lib/node) | The firmware-side BleRiot runtime: the receive/dispatch loop, XTEA codec and `GET`/`SET`/`WATCH` handling. Imported by node firmware; allocation-free in steady state. | — |
 | [`lib/site/`](lib/site) | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, firmware provisioning generator, Registry bridge. | [lib/site/README.md](lib/site/README.md) |
 | [`usb/`](usb) | KiCad design for the USB radio dongle (MCP2210 USB-to-SPI bridge + PAN211x). | — |
@@ -144,8 +144,8 @@ injects the chip's build/flash targets, and runs make. See
 ```
 lib/shared  ──────┬─► lib/site   (also: github.com/burgrp/reg, cobra)
  (codec, config,  ├─► lib/node   (the firmware runtime)
-  inventory)      │
-                  └─► example/bob ─┬─ firmware  (//go:build tinygo:  lib/node + pan211x, TinyGo)
+  inventory,      │
+  conversion)     └─► example/bob ─┬─ firmware  (//go:build tinygo:  lib/node + pan211x, TinyGo)
                                    └─ host hub  (//go:build !tinygo: lib/site)
 ```
 

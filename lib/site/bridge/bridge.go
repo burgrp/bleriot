@@ -232,7 +232,11 @@ func (b *Bridge) reseedLoop(ctx context.Context, addr [node.AddrLen]byte, r *nod
 			}
 			seeded.Store(true)
 			backoff = b.seedRetry
-			v := regValue(r, u)
+			v, err := regValue(r, u)
+			if err != nil {
+				log.Warn("failed to decode node value", "raw", u.Value, "err", err)
+				v = nil
+			}
 			select {
 			case updates <- v:
 				log.Debug("seeded value from node GET", "value", v)
@@ -270,9 +274,14 @@ func (b *Bridge) serveRegister(ctx context.Context, nodeName string, addr [node.
 	// GET (here or in the retry loop) or by any push the callback routes in.
 	var initial any
 	if u, err := b.tx.Get(ctx, addr, r.ID); err == nil {
-		initial = regValue(r, u)
+		initial, err = regValue(r, u)
 		seeded.Store(true)
-		log.Debug("seeded initial value from node GET", "value", initial)
+		if err != nil {
+			log.Warn("failed to decode initial node value", "raw", u.Value, "err", err)
+			initial = nil
+		} else {
+			log.Debug("seeded initial value from node GET", "value", initial)
+		}
 	} else {
 		log.Debug("initial GET failed; will retry seeding", "err", err)
 	}
@@ -306,7 +315,11 @@ func (b *Bridge) serveRegister(ctx context.Context, nodeName string, addr [node.
 			case <-ctx.Done():
 				return
 			case u := <-pushes:
-				v := regValue(r, u)
+				v, err := regValue(r, u)
+				if err != nil {
+					log.Warn("failed to decode pushed node value", "raw", u.Value, "err", err)
+					v = nil
+				}
 				select {
 				case updates <- v:
 					log.Debug("pushed value to registry", "value", v)
@@ -326,8 +339,12 @@ func (b *Bridge) serveRegister(ctx context.Context, nodeName string, addr [node.
 				return
 			}
 			log.Debug("registry change request", "value", req)
+			if r.ReadOnly {
+				log.Warn("ignoring change request for read-only register", "value", req)
+				continue
+			}
 			// A nil request clears the register: send a SET with the NULL flag
-			// (§8.2) rather than coercing nil through FromValue.
+			// (§8.2) rather than coercing nil through Conversion.Encode.
 			if req == nil {
 				if err := b.tx.SetNull(ctx, addr, r.ID); err != nil {
 					log.Warn("SET NULL failed", "err", err)
@@ -336,7 +353,7 @@ func (b *Bridge) serveRegister(ctx context.Context, nodeName string, addr [node.
 				}
 				continue
 			}
-			wire, err := r.FromValue(req)
+			wire, err := r.Conversion.Encode(req)
 			if err != nil {
 				log.Warn("ignoring malformed change request", "value", req, "err", err)
 				continue // ignore malformed change requests
@@ -352,24 +369,26 @@ func (b *Bridge) serveRegister(ctx context.Context, nodeName string, addr [node.
 	}
 }
 
-// regValue converts an engine Update into the Registry-facing value, mapping a
-// NULL register to nil.
-func regValue(r *node.Register, u engine.Update) any {
+// regValue converts an engine Update into the Registry-facing value. A NULL
+// register maps directly to nil without invoking the conversion. Decode errors
+// are returned to the caller, which publishes nil and logs the bad raw value.
+func regValue(r *node.Register, u engine.Update) (any, error) {
 	if u.Null {
-		return nil
+		return nil, nil
 	}
-	return r.ToValue(u.Value)
+	return r.Conversion.Decode(u.Value)
 }
 
 // metadata builds the Registry metadata for a register: its descriptor metadata
 // plus the structural fields useful to consumers (the value type and the device
 // instance name).
 func metadata(r *node.Register, deviceName string) map[string]any {
-	m := make(map[string]any, len(r.Metadata)+2)
+	m := make(map[string]any, len(r.Metadata)+3)
 	for k, v := range r.Metadata {
 		m[k] = v
 	}
 	m["type"] = string(r.Type)
 	m["device"] = deviceName
+	m["readOnly"] = r.ReadOnly
 	return m
 }

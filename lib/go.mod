@@ -3,9 +3,9 @@
 //
 //   - lib/shared — neutral, dependency-free, build-tag-free packages shared by
 //     firmware and host (protocol codec + XTEA, identity primitives, the
-//     inventory-as-code model). The on-wire formats are single-sourced here and
-//     compile for the host and under TinyGo alike (see lib/README.md, the
-//     protocol specification).
+//     inventory-as-code model, and host-executed conversion factories). The
+//     on-wire formats are single-sourced here and compile for the host and under
+//     TinyGo alike (see lib/README.md, the protocol specification).
 //   - lib/node — the firmware-side BleRiot runtime (receive/dispatch loop, XTEA
 //     codec, GET/SET/WATCH), imported by node firmware.
 //   - lib/site — the host (Linux-SBC) hub library: engine, radio dongle drivers,

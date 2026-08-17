@@ -21,6 +21,21 @@ func TestDeviceTypeValidate_OK(t *testing.T) {
 	if err := bobType().Validate(); err != nil {
 		t.Fatalf("expected valid, got %v", err)
 	}
+	readOnly := DeviceType{
+		Name: "sensor",
+		Registers: []Register{{
+			Tag:      1,
+			Name:     "temperature",
+			Type:     TypeFloat,
+			ReadOnly: true,
+			Conversion: Conversion{Decode: func(raw int32) (any, error) {
+				return float64(raw) / 100, nil
+			}},
+		}},
+	}
+	if err := readOnly.Validate(); err != nil {
+		t.Fatalf("expected valid read-only conversion, got %v", err)
+	}
 }
 
 func TestDeviceTypeValidate_Errors(t *testing.T) {
@@ -39,8 +54,11 @@ func TestDeviceTypeValidate_Errors(t *testing.T) {
 			{Tag: 1, Name: "a", Type: TypeBool},
 			{Tag: 2, Name: "a", Type: TypeBool},
 		}}},
-		{"incomplete conversion", DeviceType{Name: "t", Registers: []Register{
-			{Tag: 1, Name: "a", Type: TypeFloat, ToValue: func(wire int32) any { return wire }},
+		{"incomplete writable conversion", DeviceType{Name: "t", Registers: []Register{
+			{Tag: 1, Name: "a", Type: TypeFloat, Conversion: Conversion{Decode: func(raw int32) (any, error) { return raw, nil }}},
+		}}},
+		{"encoder on read-only register", DeviceType{Name: "t", Registers: []Register{
+			{Tag: 1, Name: "a", Type: TypeFloat, ReadOnly: true, Conversion: Conversion{Encode: func(value any) (int32, error) { return 0, nil }}},
 		}}},
 	}
 	for _, c := range cases {

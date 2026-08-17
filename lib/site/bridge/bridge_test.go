@@ -142,16 +142,29 @@ func (r *fakeReg) provided() (name string, initial any, metadata map[string]any)
 func floatReg() *node.Register {
 	return &node.Register{
 		ID: testRegID, Name: "outdoor.temperature",
-		Type:    node.TypeFloat,
-		ToValue: func(wire int32) any { return float64(wire) / 100 },
-		FromValue: func(value any) (int32, error) {
-			f, ok := value.(float64)
-			if !ok {
-				return 0, fmt.Errorf("expected float64, got %T", value)
-			}
-			return int32(f * 100), nil
+		Type: node.TypeFloat,
+		Conversion: node.Conversion{
+			Decode: func(raw int32) (any, error) { return float64(raw) / 100, nil },
+			Encode: func(value any) (int32, error) {
+				f, ok := value.(float64)
+				if !ok {
+					return 0, fmt.Errorf("expected float64, got %T", value)
+				}
+				return int32(f * 100), nil
+			},
 		},
 		Metadata: map[string]string{"unit": "celsius"},
+	}
+}
+
+func readOnlyReg(decode func(raw int32) (any, error)) *node.Register {
+	return &node.Register{
+		ID:         testRegID,
+		Name:       "outdoor.temperature",
+		Type:       node.TypeFloat,
+		ReadOnly:   true,
+		Conversion: node.Conversion{Decode: decode},
+		Metadata:   map[string]string{"unit": "celsius"},
 	}
 }
 
@@ -215,8 +228,48 @@ func TestBridge_SeedsInitialValue(t *testing.T) {
 	if initial != 12.34 {
 		t.Errorf("initial value = %v, want 12.34", initial)
 	}
-	if md["unit"] != "celsius" || md["type"] != "float" || md["device"] != "test" {
+	if md["unit"] != "celsius" || md["type"] != "float" || md["device"] != "test" || md["readOnly"] != false {
 		t.Errorf("metadata = %v", md)
+	}
+}
+
+func TestBridge_DecodeErrorPublishesNil(t *testing.T) {
+	tx := &fakeTx{getU: engine.Update{Value: 0}}
+	reg := newFakeReg()
+	r := readOnlyReg(func(raw int32) (any, error) {
+		return nil, fmt.Errorf("raw value %d is outside the sensor range", raw)
+	})
+	cancel := serve(t, tx, reg, r)
+	defer cancel()
+
+	deadline := time.After(time.Second)
+	for {
+		_, initial, md := reg.provided()
+		if md != nil {
+			if initial != nil {
+				t.Fatalf("initial value = %v, want nil", initial)
+			}
+			if md["readOnly"] != true {
+				t.Fatalf("readOnly metadata = %v, want true", md["readOnly"])
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("Provide was not called")
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+	initialGets := tx.gets()
+	time.Sleep(20 * time.Millisecond)
+	if got := tx.gets(); got != initialGets {
+		t.Fatalf("decode error triggered seeding GETs: got %d calls after initial %d", got, initialGets)
+	}
+
+	waitReady(t, tx)
+	tx.push(engine.Update{Value: 4095})
+	if got := recvWithin(t, reg.updates, time.Second); got != nil {
+		t.Fatalf("decoded invalid push = %v, want nil", got)
 	}
 }
 
@@ -279,6 +332,29 @@ func TestBridge_NilChangeRequestTriggersSetNull(t *testing.T) {
 	}
 	if len(tx.sets) != 0 {
 		t.Errorf("sets = %v, want none", tx.sets)
+	}
+}
+
+func TestBridge_ReadOnlyIgnoresChangeRequests(t *testing.T) {
+	tx := &fakeTx{getU: engine.Update{Value: 2500}}
+	reg := newFakeReg()
+	reg.requests = make(chan any)
+	r := readOnlyReg(func(raw int32) (any, error) { return float64(raw) / 100, nil })
+	cancel := serve(t, tx, reg, r)
+	defer cancel()
+
+	waitReady(t, tx)
+	// Each unbuffered send can be received only after the preceding request's
+	// loop iteration has finished. The third send therefore proves that both the
+	// ordinary and NULL requests were fully processed before inspecting tx.
+	reg.requests <- 18.0
+	reg.requests <- nil
+	reg.requests <- 19.0
+
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	if len(tx.sets) != 0 || tx.setNulls != 0 {
+		t.Fatalf("read-only requests produced sets %v and %d null sets", tx.sets, tx.setNulls)
 	}
 }
 

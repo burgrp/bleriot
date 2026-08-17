@@ -322,9 +322,9 @@ func ts(unix int64) any {
 }
 
 // diagMeta builds the registry metadata for a diagnostic register: its hub-side
-// value type and a flag marking it as a hub-synthesised diagnostic.
+// value type, read-only access, and a flag marking it as hub-synthesised.
 func diagMeta(typ string) map[string]any {
-	return map[string]any{"type": typ, "diagnostic": true}
+	return map[string]any{"type": typ, "readOnly": true, "diagnostic": true}
 }
 
 // diagForward relays the latest value from a per-register inbox to its registry

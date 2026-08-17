@@ -35,7 +35,8 @@ func TestNewDescriptorRejectsBadTable(t *testing.T) {
 			{ID: 1, Name: "a", Type: TypeBool},
 			{ID: 2, Name: "a", Type: TypeBool},
 		}},
-		{"incomplete conversion", []Register{{ID: 1, Name: "a", Type: TypeFloat, ToValue: func(wire int32) any { return wire }}}},
+		{"incomplete writable conversion", []Register{{ID: 1, Name: "a", Type: TypeFloat, Conversion: Conversion{Decode: func(raw int32) (any, error) { return raw, nil }}}}},
+		{"encoder on read-only register", []Register{{ID: 1, Name: "a", Type: TypeFloat, ReadOnly: true, Conversion: Conversion{Encode: func(value any) (int32, error) { return 0, nil }}}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

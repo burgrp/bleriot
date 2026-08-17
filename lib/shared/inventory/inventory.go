@@ -28,6 +28,18 @@ const (
 	TypeBool  RegType = "bool"
 )
 
+// Conversion translates between the raw int32 carried by the BleRiot wire
+// protocol and the typed value exposed through the Registry. Decode runs for
+// values received from a node; Encode runs for consumer writes sent to a node.
+//
+// The zero value selects the natural conversion for Register.Type. A custom
+// conversion on a writable register must define both functions. A read-only
+// register may define Decode alone and must leave Encode nil.
+type Conversion struct {
+	Decode func(raw int32) (any, error)
+	Encode func(value any) (int32, error)
+}
+
 // Register describes one register of a device type.
 type Register struct {
 	// Tag is the permanent wire identity of this register: unique and non-zero
@@ -39,11 +51,12 @@ type Register struct {
 	Name string
 	// Type interprets the int32 wire value (int/float/bool).
 	Type RegType
-	// ToValue and FromValue optionally convert between the raw int32 wire value
-	// and the value exposed through the Registry. They must either both be nil,
-	// which selects the default conversion for Type, or both be set.
-	ToValue   func(wire int32) any
-	FromValue func(value any) (int32, error)
+	// ReadOnly prevents Registry consumer writes from being sent to the node.
+	// Read-only registers may use a one-way Conversion with Decode only.
+	ReadOnly bool
+	// Conversion optionally translates between raw wire values and values exposed
+	// through the Registry. Its zero value selects the default for Type.
+	Conversion Conversion
 	// Metadata is arbitrary descriptive data forwarded to the Registry.
 	Metadata map[string]string
 }
@@ -127,7 +140,7 @@ type Inventory []Instance
 
 // Validate checks the device type's register table: Tags must be non-zero and
 // unique, register names must be non-empty and unique, and custom value
-// conversion functions must be supplied as a pair.
+// conversions must agree with the register's access mode.
 func (dt DeviceType) Validate() error {
 	if dt.Name == "" {
 		return fmt.Errorf("device type: name is required")
@@ -149,8 +162,12 @@ func (dt DeviceType) Validate() error {
 			return fmt.Errorf("device type %q: duplicate register name %q", dt.Name, r.Name)
 		}
 		seenName[r.Name] = true
-		if (r.ToValue == nil) != (r.FromValue == nil) {
-			return fmt.Errorf("device type %q: register %q must define both ToValue and FromValue", dt.Name, r.Name)
+		if r.ReadOnly {
+			if r.Conversion.Encode != nil {
+				return fmt.Errorf("device type %q: read-only register %q must not define Conversion.Encode", dt.Name, r.Name)
+			}
+		} else if (r.Conversion.Decode == nil) != (r.Conversion.Encode == nil) {
+			return fmt.Errorf("device type %q: writable register %q must define both Conversion.Decode and Conversion.Encode", dt.Name, r.Name)
 		}
 	}
 	return nil
