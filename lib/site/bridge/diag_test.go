@@ -107,7 +107,7 @@ func TestDiagnosticsPublishesCompactSchema(t *testing.T) {
 		"diag.node.basement_fan.packet.push_ack.failure":               uint64(3),
 		"diag.node.basement_fan.transaction.all.outcome.success_first": uint64(7),
 		"diag.node.basement_fan.transaction.all.outcome.timeout":       uint64(2),
-		"diag.node.basement_fan.transaction.get.invocation.total":      uint64(9),
+		"diag.node.basement_fan.transaction.get":                       uint64(9),
 		"diag.node.basement_fan.transaction.all.attempt.retry":         uint64(3),
 		"diag.node.basement_fan.latency.success.microseconds":          uint64(140000),
 		"diag.channel.far.connection.open.attempt":                     uint64(3),
@@ -141,6 +141,9 @@ func TestDiagnosticsPublishesCompactSchema(t *testing.T) {
 	}
 	if _, detailed := batch["diag.node.basement_fan.transaction.get.outcome.timeout"]; detailed {
 		t.Error("operation-specific outcome leaked into compact schema")
+	}
+	if _, verbose := batch["diag.node.basement_fan.transaction.get.invocation.total"]; verbose {
+		t.Error("verbose operation-total suffix leaked into compact schema")
 	}
 	if _, bucket := batch["diag.node.basement_fan.latency.success.bucket.le_plus_Inf"]; bucket {
 		t.Error("per-node latency bucket leaked into compact schema")

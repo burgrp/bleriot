@@ -273,7 +273,7 @@ refreshed within half of its TTL.
 
 | Register | Meaning |
 |----------|---------|
-| `schema.version` | Diagnostics schema version (`3`). |
+| `schema.version` | Diagnostics schema version (`4`). |
 | `process.started` / `process.heartbeat` | Hub start and latest snapshot Unix times. |
 | `publisher.batch.success` / `publisher.batch.error` | Successful and failed Registry batches. |
 | `publisher.values.sent` / `publisher.values.coalesced` | Values sent and unchanged values omitted. |
@@ -306,8 +306,8 @@ Liveness state codes are `0` unknown, `1` online, `2` suspect, and `3` offline.
 Every known-node invocation increments exactly one aggregate
 `transaction.all.outcome.<outcome>` counter: `success_first`, `success_retry`,
 `timeout`, `send_error`, `canceled`, `busy`, or `no_radio`. These provide exact
-reliability denominators. `transaction.<operation>.invocation.total` preserves
-the traffic mix for `get`, `set`, `watch`, `unwatch`, and `refresh`, while
+reliability denominators. `transaction.<operation>` preserves the traffic mix
+for `get`, `set`, `watch`, `unwatch`, and `refresh`, while
 `transaction.all.attempt.retry` counts retransmissions. Detailed combinations
 of operation and outcome remain available inside the process but are not
 published for every node.

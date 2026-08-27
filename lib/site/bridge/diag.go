@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultDiagnosticInterval = time.Second
-	diagnosticSchemaVersion   = 3
+	diagnosticSchemaVersion   = 4
 )
 
 // DiagnosticBatchRegistry is the Registry wire operation needed by the
@@ -250,7 +250,7 @@ func addNodeValues(values map[string]diagnosticValue, prefix, name string, stats
 		for outcome := engine.TransactionOutcome(0); outcome < engine.TransactionOutcomeCount; outcome++ {
 			aggregateOutcomes[outcome] += transaction.Outcomes[outcome]
 		}
-		values[base+"transaction."+operation.String()+".invocation.total"] = integer(outcomeSum(transaction.Outcomes))
+		values[base+"transaction."+operation.String()] = integer(outcomeSum(transaction.Outcomes))
 		retries += transaction.AttemptRetry
 	}
 	for outcome := engine.TransactionOutcome(0); outcome < engine.TransactionOutcomeCount; outcome++ {
