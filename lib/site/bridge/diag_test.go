@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -68,14 +69,21 @@ type fakeSnap struct{ stats engine.NodeStats }
 
 func (source *fakeSnap) SnapshotNode([4]byte) engine.NodeStats { return source.stats }
 
-func TestDiagnosticsPublishesOneBatchWithDeepSchema(t *testing.T) {
+func TestDiagnosticsPublishesCompactSchema(t *testing.T) {
 	source := &fakeSnap{}
 	source.stats.Liveness = engine.LivenessStats{State: engine.LivenessOnline, Since: 1700000000, Misses: 1, TransitionsOnline: 2}
 	source.stats.Packet = engine.PacketStats{RxTotal: 12, RxValid: 11, TxSuccess: 20, TxError: 1, LastValid: 1700000001}
 	source.stats.Transactions[engine.TransactionGet].Outcomes[engine.TransactionSuccessFirst] = 7
 	source.stats.Transactions[engine.TransactionGet].Outcomes[engine.TransactionTimeout] = 2
 	source.stats.Transactions[engine.TransactionGet].AttemptRetry = 3
-	source.stats.Latency = engine.LatencyStats{Count: 7, SumMicros: 140000}
+	source.stats.Packet.RxOrphanIS = 2
+	source.stats.Packet.RxOrphanACK = 3
+	source.stats.Packet.RxInvalidDecode = 1
+	source.stats.Packet.RxInvalidType = 2
+	source.stats.Packet.RxUnknownRegister = 4
+	source.stats.Packet.PushACKError = 1
+	source.stats.Packet.PushACKNoRadio = 2
+	source.stats.Latency = engine.LatencyStats{Count: 7, SumMicros: 140000, Buckets: [engine.LatencyBucketCount]uint64{1, 2, 3, 4, 5, 6, 7, 7}}
 	registry := newFakeBatchRegistry()
 	diagnostics := NewDiagnostics(source, registry, "diag", time.Hour, 30*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,11 +98,17 @@ func TestDiagnosticsPublishesOneBatchWithDeepSchema(t *testing.T) {
 	batch := registry.waitBatch(t)
 	wants := map[string]any{
 		"diag.hub.main.schema.version":                                 diagnosticSchemaVersion,
+		"diag.hub.main.latency.success.bucket.le_plus_Inf":             uint64(7),
 		"diag.node.basement_fan.liveness.state":                        engine.LivenessOnline,
 		"diag.node.basement_fan.packet.rx.valid":                       uint64(11),
-		"diag.node.basement_fan.transaction.get.outcome.success_first": uint64(7),
-		"diag.node.basement_fan.transaction.get.outcome.timeout":       uint64(2),
-		"diag.node.basement_fan.transaction.get.attempt.retry":         uint64(3),
+		"diag.node.basement_fan.packet.rx.orphan":                      uint64(5),
+		"diag.node.basement_fan.packet.rx.invalid":                     uint64(3),
+		"diag.node.basement_fan.packet.rx.unknown_register":            uint64(4),
+		"diag.node.basement_fan.packet.push_ack.failure":               uint64(3),
+		"diag.node.basement_fan.transaction.all.outcome.success_first": uint64(7),
+		"diag.node.basement_fan.transaction.all.outcome.timeout":       uint64(2),
+		"diag.node.basement_fan.transaction.get.invocation.total":      uint64(9),
+		"diag.node.basement_fan.transaction.all.attempt.retry":         uint64(3),
 		"diag.node.basement_fan.latency.success.microseconds":          uint64(140000),
 		"diag.channel.far.connection.open.attempt":                     uint64(3),
 		"diag.channel.far.packet.tx.error":                             uint64(1),
@@ -114,6 +128,28 @@ func TestDiagnosticsPublishesOneBatchWithDeepSchema(t *testing.T) {
 	}
 	if _, old := batch["diag.node.basement_fan.rate.tx.all"]; old {
 		t.Error("legacy rate register was published")
+	}
+	nodePrefix := "diag.node.basement_fan."
+	nodeRegisters := 0
+	for name := range batch {
+		if strings.HasPrefix(name, nodePrefix) {
+			nodeRegisters++
+		}
+	}
+	if nodeRegisters != 29 {
+		t.Errorf("node register count = %d, want 29", nodeRegisters)
+	}
+	if _, detailed := batch["diag.node.basement_fan.transaction.get.outcome.timeout"]; detailed {
+		t.Error("operation-specific outcome leaked into compact schema")
+	}
+	if _, bucket := batch["diag.node.basement_fan.latency.success.bucket.le_plus_Inf"]; bucket {
+		t.Error("per-node latency bucket leaked into compact schema")
+	}
+}
+
+func TestPathComponentAvoidsDotUnderscoreCollisions(t *testing.T) {
+	if pathComponent("a.b") == pathComponent("a_b") {
+		t.Fatal("dotted and underscored names collapse to the same path")
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultDiagnosticInterval = time.Second
-	diagnosticSchemaVersion   = 2
+	diagnosticSchemaVersion   = 3
 )
 
 // DiagnosticBatchRegistry is the Registry wire operation needed by the
@@ -202,9 +202,17 @@ func (d *Diagnostics) publisherValues() map[string]diagnosticValue {
 func (d *Diagnostics) snapshot(nodes []DiagNode, dongles []DiagDongle, now time.Time) map[string]diagnosticValue {
 	values := d.publisherValues()
 	values[d.prefix+".hub.main.process.heartbeat"] = integer(now.Unix())
+	var fleetLatency engine.LatencyStats
 	for _, diagNode := range nodes {
-		addNodeValues(values, d.prefix, diagNode.Name, d.src.SnapshotNode(diagNode.Addr))
+		stats := d.src.SnapshotNode(diagNode.Addr)
+		addNodeValues(values, d.prefix, diagNode.Name, stats)
+		fleetLatency.Count += stats.Latency.Count
+		fleetLatency.SumMicros += stats.Latency.SumMicros
+		for index, count := range stats.Latency.Buckets {
+			fleetLatency.Buckets[index] += count
+		}
 	}
+	addLatencyValues(values, d.prefix+".hub.main.", fleetLatency, true)
 	for _, dongle := range dongles {
 		addDongleValues(values, d.prefix, dongle.Name, dongle.Stats())
 	}
@@ -215,47 +223,58 @@ func addNodeValues(values map[string]diagnosticValue, prefix, name string, stats
 	base := prefix + ".node." + pathComponent(name) + "."
 	values[base+"liveness.state"] = integer(stats.Liveness.State)
 	values[base+"liveness.since"] = integer(stats.Liveness.Since)
-	values[base+"liveness.last.success"] = integer(stats.Liveness.LastSuccess)
-	values[base+"liveness.last.failure"] = integer(stats.Liveness.LastFailure)
 	values[base+"liveness.probe.misses"] = integer(stats.Liveness.Misses)
-	values[base+"liveness.transition.online"] = integer(stats.Liveness.TransitionsOnline)
-	values[base+"liveness.transition.suspect"] = integer(stats.Liveness.TransitionsSuspect)
 	values[base+"liveness.transition.offline"] = integer(stats.Liveness.TransitionsOffline)
 
 	packet := stats.Packet
 	packetValues := map[string]uint64{
-		"packet.rx.total": packet.RxTotal, "packet.rx.valid": packet.RxValid,
-		"packet.rx.push_is": packet.RxPushIS, "packet.rx.solicited_is": packet.RxSolicitedIS,
-		"packet.rx.orphan_is": packet.RxOrphanIS, "packet.rx.matched_ack": packet.RxMatchedACK,
-		"packet.rx.orphan_ack": packet.RxOrphanACK, "packet.rx.null_is": packet.RxNullIS,
-		"packet.rx.invalid.decode": packet.RxInvalidDecode, "packet.rx.invalid.source": packet.RxInvalidSource,
-		"packet.rx.invalid.type": packet.RxInvalidType, "packet.rx.invalid.register": packet.RxUnknownRegister,
-		"packet.tx.success": packet.TxSuccess, "packet.tx.error": packet.TxError,
-		"packet.push_ack.success": packet.PushACKSuccess, "packet.push_ack.error": packet.PushACKError,
-		"packet.push_ack.no_radio": packet.PushACKNoRadio,
+		"packet.rx.total":            packet.RxTotal,
+		"packet.rx.valid":            packet.RxValid,
+		"packet.rx.push":             packet.RxPushIS,
+		"packet.rx.orphan":           packet.RxOrphanIS + packet.RxOrphanACK,
+		"packet.rx.invalid":          packet.RxInvalidDecode + packet.RxInvalidSource + packet.RxInvalidType,
+		"packet.rx.unknown_register": packet.RxUnknownRegister,
+		"packet.tx.success":          packet.TxSuccess,
+		"packet.tx.error":            packet.TxError,
+		"packet.push_ack.failure":    packet.PushACKError + packet.PushACKNoRadio,
 	}
 	for suffix, value := range packetValues {
 		values[base+suffix] = integer(value)
 	}
-	values[base+"packet.last.received"] = integer(packet.LastReceived)
 	values[base+"packet.last.valid"] = integer(packet.LastValid)
 
+	var aggregateOutcomes [engine.TransactionOutcomeCount]uint64
+	var retries uint64
 	for operation := engine.TransactionOperation(0); operation < engine.TransactionOperationCount; operation++ {
 		transaction := stats.Transactions[operation]
-		transactionBase := base + "transaction." + operation.String() + "."
 		for outcome := engine.TransactionOutcome(0); outcome < engine.TransactionOutcomeCount; outcome++ {
-			values[transactionBase+"outcome."+outcome.String()] = integer(transaction.Outcomes[outcome])
+			aggregateOutcomes[outcome] += transaction.Outcomes[outcome]
 		}
-		values[transactionBase+"attempt.initial"] = integer(transaction.AttemptInitial)
-		values[transactionBase+"attempt.retry"] = integer(transaction.AttemptRetry)
-		values[transactionBase+"attempt.send_error"] = integer(transaction.AttemptSendError)
-		values[transactionBase+"attempt.response_timeout"] = integer(transaction.ResponseTimeout)
-		values[transactionBase+"latency.success.count"] = integer(transaction.LatencyCount)
-		values[transactionBase+"latency.success.microseconds"] = integer(transaction.LatencySumMicros)
+		values[base+"transaction."+operation.String()+".invocation.total"] = integer(outcomeSum(transaction.Outcomes))
+		retries += transaction.AttemptRetry
 	}
-	values[base+"latency.success.count"] = integer(stats.Latency.Count)
-	values[base+"latency.success.microseconds"] = integer(stats.Latency.SumMicros)
-	for index, count := range stats.Latency.Buckets {
+	for outcome := engine.TransactionOutcome(0); outcome < engine.TransactionOutcomeCount; outcome++ {
+		values[base+"transaction.all.outcome."+outcome.String()] = integer(aggregateOutcomes[outcome])
+	}
+	values[base+"transaction.all.attempt.retry"] = integer(retries)
+	addLatencyValues(values, base, stats.Latency, false)
+}
+
+func outcomeSum(outcomes [engine.TransactionOutcomeCount]uint64) uint64 {
+	var total uint64
+	for _, count := range outcomes {
+		total += count
+	}
+	return total
+}
+
+func addLatencyValues(values map[string]diagnosticValue, base string, latency engine.LatencyStats, buckets bool) {
+	values[base+"latency.success.count"] = integer(latency.Count)
+	values[base+"latency.success.microseconds"] = integer(latency.SumMicros)
+	if !buckets {
+		return
+	}
+	for index, count := range latency.Buckets {
 		label := strings.NewReplacer("+", "plus_", ".", "_").Replace(engine.LatencyBucketLabel(index))
 		values[base+"latency.success.bucket.le_"+label] = integer(count)
 	}
@@ -285,7 +304,9 @@ func addDongleValues(values map[string]diagnosticValue, prefix, name string, sta
 
 func integer(value any) diagnosticValue { return diagnosticValue{value: value, typ: "int"} }
 
-func pathComponent(name string) string { return strings.ReplaceAll(name, ".", "_") }
+func pathComponent(name string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(name, "_", "__"), ".", "_")
+}
 
 func diagMeta(valueType string) map[string]any {
 	return map[string]any{"type": valueType, "readOnly": true, "diagnostic": true, "schema": diagnosticSchemaVersion}

@@ -256,9 +256,11 @@ both.
 
 With `--diagnostics <prefix>` the hub publishes a set of synthetic, **read-only**
 Registry registers describing its own RF health, in addition to the device
-registers. They are off by default. Schema version 2 exposes cumulative counters
+registers. They are off by default. Schema version 3 exposes cumulative counters
 only; Prometheus/Grafana derives rates and increases over any requested time
-range instead of consuming fixed-window gauges.
+range instead of consuming fixed-window gauges. The engine keeps detailed
+per-operation accounting internally, while the Registry exports a compact
+29-register summary per node suitable for larger fleets.
 
 Hot paths update atomics without Registry I/O. Every `--diag-interval` (default
 1 s), one publisher snapshots the complete catalog and sends at most one batch
@@ -271,47 +273,44 @@ refreshed within half of its TTL.
 
 | Register | Meaning |
 |----------|---------|
-| `schema.version` | Diagnostics schema version (`2`). |
+| `schema.version` | Diagnostics schema version (`3`). |
 | `process.started` / `process.heartbeat` | Hub start and latest snapshot Unix times. |
 | `publisher.batch.success` / `publisher.batch.error` | Successful and failed Registry batches. |
 | `publisher.values.sent` / `publisher.values.coalesced` | Values sent and unchanged values omitted. |
 | `publisher.last.success` / `publisher.last.error` | Last successful and failed publish Unix times. |
+| `latency.success.count` / `.microseconds` | Fleet-wide successful transaction count and summed latency. |
+| `latency.success.bucket.le_<bound>` | Fleet-wide cumulative latency histogram (`0.025`, `0.05`, `0.1`, `0.2`, `0.5`, `1`, `2`, `+Inf` seconds). |
 
 **Per node** — `<prefix>.node.<node>.<reg>`:
 
-The `<node>` segment is always one path component: `.` in the instance name is
-replaced by `_`, so the node name stays at a fixed selector position.
+The `<node>` segment is always one path component: `_` is escaped as `__`, then
+`.` is replaced by `_`, so the node name stays at a fixed selector position
+without collisions between names such as `a.b` and `a_b`.
 
 Liveness state codes are `0` unknown, `1` online, `2` suspect, and `3` offline.
 
 | Register | Type | Meaning |
 |----------|------|---------|
 | `liveness.state` / `liveness.since` | int | Current state code and transition Unix time. |
-| `liveness.last.success` / `liveness.last.failure` | int | Latest successful or failed liveness evidence. |
 | `liveness.probe.misses` | int | Current consecutive unanswered refresh probes. |
-| `liveness.transition.<state>` | int | Cumulative transitions into online, suspect, or offline. |
+| `liveness.transition.offline` | int | Cumulative transitions into offline. |
+| `packet.last.valid` | int | Latest authenticated, semantically valid packet Unix time. |
 | `packet.rx.total` / `packet.rx.valid` | int | Raw packets attributed by cleartext source and packets passing validation. |
-| `packet.rx.push_is` / `packet.rx.solicited_is` / `packet.rx.orphan_is` | int | Valid `IS` packets by correlation class. |
-| `packet.rx.matched_ack` / `packet.rx.orphan_ack` / `packet.rx.null_is` | int | Valid `ACK` correlation and null reports. |
-| `packet.rx.invalid.<reason>` | int | Decode, source, or type validation failures. |
-| `packet.rx.invalid.register` | int | Valid packets carrying a register absent from the provisioned descriptor. They are still acknowledged and correlated. |
+| `packet.rx.push` / `packet.rx.orphan` | int | Valid spontaneous pushes and unmatched `IS`/`ACK` packets. |
+| `packet.rx.invalid` | int | Decode, source, or type validation failures. |
+| `packet.rx.unknown_register` | int | Valid packets carrying a register absent from the provisioned descriptor. |
 | `packet.tx.success` / `packet.tx.error` | int | Actual radio send outcomes. |
-| `packet.push_ack.<outcome>` | int | Push acknowledgement success, error, or missing radio. |
-| `packet.last.received` / `packet.last.valid` | int | Latest raw and validated packet Unix times. |
+| `packet.push_ack.failure` | int | Push acknowledgements that failed to send or had no radio. |
+| `latency.success.count` / `.microseconds` | int | Successful transaction count and summed latency for per-node mean latency. |
 
-Transactions use
-`transaction.<operation>.outcome.<outcome>`, where operation is `get`, `set`,
-`watch`, `unwatch`, or `refresh`. Every known-node invocation increments exactly
-one terminal outcome: `success_first`, `success_retry`, `timeout`, `send_error`,
-`canceled`, `busy`, or `no_radio`. This is the denominator for reliability
-ratios; packet sends and retries are not transactions.
-
-Attempt counters are `transaction.<operation>.attempt.initial`, `.retry`,
-`.send_error`, and `.response_timeout`. Successful latency has per-operation
-`.latency.success.count` and `.microseconds` totals. Node-wide latency also has
-fixed cumulative `latency.success.bucket.le_<bound>` counters (`0.025`, `0.05`,
-`0.1`, `0.2`, `0.5`, `1`, `2`, `+Inf` seconds), plus count and summed
-microseconds.
+Every known-node invocation increments exactly one aggregate
+`transaction.all.outcome.<outcome>` counter: `success_first`, `success_retry`,
+`timeout`, `send_error`, `canceled`, `busy`, or `no_radio`. These provide exact
+reliability denominators. `transaction.<operation>.invocation.total` preserves
+the traffic mix for `get`, `set`, `watch`, `unwatch`, and `refresh`, while
+`transaction.all.attempt.retry` counts retransmissions. Detailed combinations
+of operation and outcome remain available inside the process but are not
+published for every node.
 
 **Per channel** — `<prefix>.channel.<channel-name>.<reg>`:
 
