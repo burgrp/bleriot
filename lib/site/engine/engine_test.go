@@ -23,13 +23,23 @@ var (
 	nodeAddr = [4]byte{0xCC, 0xA0, 0x00, 0x02}
 )
 
+func testDescriptor(t *testing.T) *node.Descriptor {
+	t.Helper()
+	descriptor, err := node.NewDescriptor(nil, []node.Register{{ID: regTemp, Name: "test", Type: node.TypeInt}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return descriptor
+}
+
 // fakeRadio captures sent packets and lets a simulated node inject replies.
 type fakeRadio struct {
-	sent  chan [PacketLen]byte
-	recv  chan [PacketLen]byte
-	drop  int           // drop the first n Send calls (to exercise retries)
-	guard time.Duration // reply turnaround guard reported to the engine
-	mu    sync.Mutex
+	sent    chan [PacketLen]byte
+	recv    chan [PacketLen]byte
+	drop    int           // drop the first n Send calls (to exercise retries)
+	sendErr error         // returned instead of sending when non-nil
+	guard   time.Duration // reply turnaround guard reported to the engine
+	mu      sync.Mutex
 }
 
 func newFakeRadio() *fakeRadio {
@@ -42,10 +52,14 @@ func newFakeRadio() *fakeRadio {
 func (f *fakeRadio) Send(dst [4]byte, payload []byte) error {
 	f.mu.Lock()
 	drop := f.drop > 0
+	err := f.sendErr
 	if drop {
 		f.drop--
 	}
 	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	var p [PacketLen]byte
 	copy(p[:], payload)
 	if !drop {
@@ -109,7 +123,7 @@ func newEngine(t *testing.T) (*Engine, *fakeRadio, protocol.Codec, context.Cance
 	n := node.NewNode(
 		"t",
 		testChannel,
-		&node.Descriptor{},
+		testDescriptor(t),
 		node.Identity{Address: nodeAddr, Key: testKey},
 	)
 	if err := e.AddNode(n); err != nil {
@@ -149,7 +163,7 @@ func TestEngine_RequestCarriesGuard(t *testing.T) {
 	if err := e.AddRadio(ctx, testChannel, f); err != nil {
 		t.Fatal(err)
 	}
-	n := node.NewNode("t", testChannel, &node.Descriptor{}, node.Identity{Address: nodeAddr, Key: testKey})
+	n := node.NewNode("t", testChannel, testDescriptor(t), node.Identity{Address: nodeAddr, Key: testKey})
 	if err := e.AddNode(n); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +363,7 @@ func TestEngine_RefreshReWatches(t *testing.T) {
 	n := node.NewNode(
 		"t",
 		testChannel,
-		&node.Descriptor{},
+		testDescriptor(t),
 		node.Identity{Address: nodeAddr, Key: testKey},
 	)
 	if err := e.AddNode(n); err != nil {
@@ -428,7 +442,7 @@ func TestEngine_OfflineNodeReportsNull(t *testing.T) {
 	if err := e.AddRadio(ctx, testChannel, f); err != nil {
 		t.Fatal(err)
 	}
-	n := node.NewNode("t", testChannel, &node.Descriptor{},
+	n := node.NewNode("t", testChannel, testDescriptor(t),
 		node.Identity{Address: nodeAddr, Key: testKey})
 	if err := e.AddNode(n); err != nil {
 		t.Fatal(err)
@@ -628,7 +642,7 @@ func TestEngine_WatchAllOfflineReportsNull(t *testing.T) {
 	if err := e.AddRadio(ctx, testChannel, f); err != nil {
 		t.Fatal(err)
 	}
-	n := node.NewNode("t", testChannel, &node.Descriptor{},
+	n := node.NewNode("t", testChannel, testDescriptor(t),
 		node.Identity{Address: nodeAddr, Key: testKey})
 	if err := e.AddNode(n); err != nil {
 		t.Fatal(err)

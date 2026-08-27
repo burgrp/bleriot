@@ -242,7 +242,7 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 		if !live {
 			continue
 		}
-		_, err := e.transact(ctx, k.addr, protocol.TypeWATCH, 0, k.reg, 1)
+		_, err := e.transact(ctx, TransactionRefresh, k.addr, protocol.TypeWATCH, 0, k.reg, 1)
 		e.noteLiveness(k, err)
 	}
 
@@ -259,7 +259,7 @@ func (e *Engine) refreshSubscriptions(ctx context.Context) {
 		if !live {
 			continue
 		}
-		u, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
+		u, err := e.transact(ctx, TransactionRefresh, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
 		e.noteLivenessAll(addr, err)
 		// A non-zero ACK value means the node registered this as a fresh
 		// subscription (§8.3) — it lost its table, e.g. across a reboot. Signal the
@@ -290,12 +290,22 @@ func (e *Engine) noteLiveness(k key, err error) {
 	}
 	if err == nil {
 		e.misses[k] = 0
+		nm := e.metricsFor(k.addr)
 		e.mu.Unlock()
+		if nm != nil {
+			nm.livenessSuccess(time.Now())
+		}
 		return
 	}
 	e.misses[k]++
-	cross := e.misses[k] == e.liveness
+	misses := e.misses[k]
+	threshold := e.liveness
+	nm := e.metricsFor(k.addr)
+	cross := misses == threshold
 	e.mu.Unlock()
+	if nm != nil {
+		nm.livenessFailure(misses, threshold, time.Now())
+	}
 	if cross {
 		cb(Update{Null: true})
 	}
@@ -319,12 +329,22 @@ func (e *Engine) noteLivenessAll(addr [node.AddrLen]byte, err error) {
 	}
 	if err == nil {
 		e.allMisses[addr] = 0
+		nm := e.metricsFor(addr)
 		e.mu.Unlock()
+		if nm != nil {
+			nm.livenessSuccess(time.Now())
+		}
 		return
 	}
 	e.allMisses[addr]++
-	cross := e.allMisses[addr] == e.liveness
+	misses := e.allMisses[addr]
+	threshold := e.liveness
+	nm := e.metricsFor(addr)
+	cross := misses == threshold
 	e.mu.Unlock()
+	if nm != nil {
+		nm.livenessFailure(misses, threshold, time.Now())
+	}
 	if cross {
 		cb(RegAll, Update{Null: true})
 	}
@@ -365,7 +385,7 @@ func (e *Engine) AddNode(n *node.Node) error {
 
 // Get reads a register's current value (§8.1).
 func (e *Engine) Get(ctx context.Context, addr [node.AddrLen]byte, reg uint16) (Update, error) {
-	return e.transact(ctx, addr, protocol.TypeGET, 0, reg, 0)
+	return e.transact(ctx, TransactionGet, addr, protocol.TypeGET, 0, reg, 0)
 }
 
 // Set writes a register (§8.2). The node replies with an ACK that confirms
@@ -373,14 +393,14 @@ func (e *Engine) Get(ctx context.Context, addr [node.AddrLen]byte, reg uint16) (
 // subscription (or a subsequent Get). Set returns once the ACK arrives, or
 // ErrTimeout after exhausting retries.
 func (e *Engine) Set(ctx context.Context, addr [node.AddrLen]byte, reg uint16, value int32) error {
-	_, err := e.transact(ctx, addr, protocol.TypeSET, 0, reg, value)
+	_, err := e.transact(ctx, TransactionSet, addr, protocol.TypeSET, 0, reg, value)
 	return err
 }
 
 // SetNull clears a register (§8.2): it sends a SET with FLAGS.NULL=1, asking the
 // node to unset the register. Like Set it returns once the ACK arrives.
 func (e *Engine) SetNull(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error {
-	_, err := e.transact(ctx, addr, protocol.TypeSET, protocol.FlagNULL, reg, 0)
+	_, err := e.transact(ctx, TransactionSet, addr, protocol.TypeSET, protocol.FlagNULL, reg, 0)
 	return err
 }
 
@@ -402,14 +422,14 @@ func (e *Engine) Watch(ctx context.Context, addr [node.AddrLen]byte, reg uint16,
 	e.subs[k] = cb
 	e.mu.Unlock()
 
-	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, reg, 1)
+	_, err := e.transact(ctx, TransactionWatch, addr, protocol.TypeWATCH, 0, reg, 1)
 	return err
 }
 
 // Unwatch cancels a subscription (§8.4).
 func (e *Engine) Unwatch(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error {
 	k := key{addr, reg}
-	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, reg, 0)
+	_, err := e.transact(ctx, TransactionUnwatch, addr, protocol.TypeWATCH, 0, reg, 0)
 	e.mu.Lock()
 	delete(e.subs, k)
 	delete(e.misses, k)
@@ -436,7 +456,7 @@ func (e *Engine) WatchAll(ctx context.Context, addr [node.AddrLen]byte, cb AllCa
 	e.watchAll[addr] = cb
 	e.mu.Unlock()
 
-	u, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
+	u, err := e.transact(ctx, TransactionWatch, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
 	// A fresh subscription (non-zero ACK value, §8.3) tells the caller to seed
 	// every register; on the very first subscribe the registers have no value yet,
 	// so this simply confirms the seeding the caller already performs.
@@ -448,7 +468,7 @@ func (e *Engine) WatchAll(ctx context.Context, addr [node.AddrLen]byte, cb AllCa
 
 // UnwatchAll cancels a watch-all subscription (§8.4).
 func (e *Engine) UnwatchAll(ctx context.Context, addr [node.AddrLen]byte) error {
-	_, err := e.transact(ctx, addr, protocol.TypeWATCH, 0, protocol.RegAll, 0)
+	_, err := e.transact(ctx, TransactionUnwatch, addr, protocol.TypeWATCH, 0, protocol.RegAll, 0)
 	e.mu.Lock()
 	delete(e.watchAll, addr)
 	delete(e.allMisses, addr)
@@ -456,7 +476,8 @@ func (e *Engine) UnwatchAll(ctx context.Context, addr [node.AddrLen]byte) error 
 	return err
 }
 
-func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, flags byte, reg uint16, value int32) (Update, error) {
+func (e *Engine) transact(ctx context.Context, operation TransactionOperation, addr [node.AddrLen]byte, typ, flags byte, reg uint16, value int32) (Update, error) {
+	started := time.Now()
 	e.mu.Lock()
 	ns, ok := e.nodes[addr]
 	if !ok {
@@ -464,14 +485,16 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 		return Update{}, ErrUnknownNode
 	}
 	r, ok := e.radios[ns.n.Channel]
+	nm := e.metricsFor(addr)
 	if !ok {
 		e.mu.Unlock()
+		nm.recordOutcome(operation, TransactionNoRadio)
 		return Update{}, ErrNoRadio
 	}
-	nm := e.metricsFor(addr)
 	k := key{addr, reg}
 	if _, busy := e.pending[k]; busy {
 		e.mu.Unlock()
+		nm.recordOutcome(operation, TransactionBusy)
 		return Update{}, ErrBusy
 	}
 	ch := make(chan Update, 1)
@@ -500,30 +523,39 @@ func (e *Engine) transact(ctx context.Context, addr [node.AddrLen]byte, typ, fla
 	ns.codec.Encode(pkt[:], e.hubAddr, typ, flags, reg, value)
 
 	for attempt := 0; attempt <= e.retries; attempt++ {
-		if nm != nil {
-			nm.txAll.Add(1)
-			if attempt > 0 {
-				nm.txRetries.Add(1)
-			}
+		if attempt == 0 {
+			nm.transactions[operation].attemptInitial.Add(1)
+		} else {
+			nm.transactions[operation].attemptRetry.Add(1)
 		}
 		if err := r.Send(addr, pkt[:]); err != nil {
+			nm.transactions[operation].attemptSendError.Add(1)
+			nm.recordOutcome(operation, TransactionSendError)
+			nm.packet.txError.Add(1)
 			return Update{}, fmt.Errorf("engine: send: %w", err)
 		}
+		nm.packet.txSuccess.Add(1)
 		timer := time.NewTimer(e.timeout)
 		select {
 		case u := <-ch:
 			timer.Stop()
+			outcome := TransactionSuccessFirst
+			if attempt > 0 {
+				outcome = TransactionSuccessRetry
+			}
+			nm.recordOutcome(operation, outcome)
+			nm.recordSuccessLatency(operation, time.Since(started))
 			return u, nil
 		case <-timer.C:
+			nm.transactions[operation].responseTimeout.Add(1)
 			// retransmit
 		case <-ctx.Done():
 			timer.Stop()
+			nm.recordOutcome(operation, TransactionCanceled)
 			return Update{}, ctx.Err()
 		}
 	}
-	if nm != nil {
-		nm.timeouts.Add(1)
-	}
+	nm.recordOutcome(operation, TransactionTimeout)
 	return Update{}, ErrTimeout
 }
 
@@ -567,28 +599,31 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 		return // unknown source: silently discard (§5)
 	}
 
-	// The packet is attributed to a known node from its cleartext source address:
-	// count it and stamp the last-seen time before attempting to decode, so a
-	// corrupt packet still registers as activity from this node.
+	// Attribute raw reception from the cleartext source separately from packets
+	// that pass authenticated decoding and semantic validation.
 	if nm != nil {
-		nm.rxAll.Add(1)
-		nm.lastRx.Store(time.Now().Unix())
+		nm.packet.rxTotal.Add(1)
+		nm.packet.lastReceived.Store(time.Now().Unix())
 	}
 
 	srcDec, typ, flags, reg, value, err := ns.codec.Decode(pkt[:])
-	if err != nil || srcDec != src {
+	if err != nil {
 		if nm != nil {
-			nm.rxCorrupt.Add(1)
+			nm.packet.rxInvalidDecode.Add(1)
 		}
 		return
 	}
+	if srcDec != src {
+		if nm != nil {
+			nm.packet.rxInvalidSource.Add(1)
+		}
+		return
+	}
+	isPush := typ == protocol.TypeIS && flags&protocol.FlagPush != 0
 
 	switch typ {
 	case protocol.TypeIS:
 		// A value report: resolves a pending GET/WATCH and feeds subscribers.
-		if nm != nil {
-			nm.rxIS.Add(1)
-		}
 	case protocol.TypeACK:
 		// A SET acknowledgement carries no value; a watch-all WATCH ACK (§8.3)
 		// carries a fresh-subscription flag in VALUE (1 = newly created, e.g. after
@@ -596,14 +631,23 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 		// bit cannot leak into the Update, but preserve VALUE so that flag reaches
 		// the watch-all refresh logic.
 		flags = 0
-		if nm != nil {
-			nm.rxACK.Add(1)
-		}
 	default:
 		if nm != nil {
-			nm.rxCorrupt.Add(1)
+			nm.packet.rxInvalidType.Add(1)
 		}
 		return // nodes send only IS and ACK
+	}
+	if _, known := ns.n.ByID(reg); !known && !(typ == protocol.TypeACK && reg == protocol.RegAll) && nm != nil {
+		nm.packet.rxUnknownRegister.Add(1)
+	}
+	if nm != nil {
+		now := time.Now()
+		nm.packet.rxValid.Add(1)
+		nm.packet.lastValid.Store(now.Unix())
+		nm.livenessSuccess(now)
+		if typ == protocol.TypeIS && flags&protocol.FlagNULL != 0 {
+			nm.packet.rxNullIS.Add(1)
+		}
 	}
 
 	u := Update{Value: value, Null: flags&protocol.FlagNULL != 0}
@@ -613,7 +657,7 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	// request behind it, so the node retransmits it until acknowledged: ACK it
 	// back so the node stops. Solicited IS replies (PUSH clear) are recovered by
 	// request retransmission and must not be ACKed.
-	if typ == protocol.TypeIS && flags&protocol.FlagPush != 0 {
+	if isPush {
 		e.ackPush(ns, src, reg)
 	}
 
@@ -633,6 +677,26 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	}
 	e.mu.Unlock()
 
+	matched := pr.ch != nil && pr.want == typ && !isPush
+	if nm != nil {
+		switch typ {
+		case protocol.TypeIS:
+			if isPush {
+				nm.packet.rxPushIS.Add(1)
+			} else if matched {
+				nm.packet.rxSolicitedIS.Add(1)
+			} else {
+				nm.packet.rxOrphanIS.Add(1)
+			}
+		case protocol.TypeACK:
+			if matched {
+				nm.packet.rxMatchedACK.Add(1)
+			} else {
+				nm.packet.rxOrphanACK.Add(1)
+			}
+		}
+	}
+
 	// ACKs are not value reports; they must not be delivered to a watcher.
 	if typ == protocol.TypeIS {
 		if cb != nil {
@@ -647,7 +711,7 @@ func (e *Engine) handle(pkt [PacketLen]byte) {
 	}
 	// Resolve a pending transaction only with the reply type it is waiting for,
 	// so a WATCH push (IS) cannot complete a pending SET (ACK) and vice versa.
-	if pr.ch != nil && pr.want == typ {
+	if matched {
 		select {
 		case pr.ch <- u:
 		default:
@@ -665,15 +729,23 @@ func (e *Engine) ackPush(ns *nodeState, dst [node.AddrLen]byte, reg uint16) {
 	nm := e.metricsFor(dst)
 	e.mu.Unlock()
 	if !ok {
+		if nm != nil {
+			nm.packet.pushACKNoRadio.Add(1)
+		}
 		return
 	}
 	var pkt [PacketLen]byte
 	flags := protocol.FlagsWithGuard(0, guardMillis(r.ReplyGuard()))
 	ns.codec.Encode(pkt[:], e.hubAddr, protocol.TypeACK, flags, reg, 0)
 	if err := r.Send(dst, pkt[:]); err != nil {
+		if nm != nil {
+			nm.packet.txError.Add(1)
+			nm.packet.pushACKError.Add(1)
+		}
 		return
 	}
 	if nm != nil {
-		nm.txAll.Add(1)
+		nm.packet.txSuccess.Add(1)
+		nm.packet.pushACKSuccess.Add(1)
 	}
 }

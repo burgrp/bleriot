@@ -3,376 +3,301 @@ package bridge
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/burgrp/bleriot/lib/site/engine"
 	"github.com/burgrp/bleriot/lib/site/node"
 	"github.com/burgrp/bleriot/lib/site/radio"
+	wirerest "github.com/burgrp/reg/pkg/wire/rest"
 )
 
-// diagFlush is how often diagnostic registers are sampled and republished. It is
-// a fixed implementation detail (the meaningful tuning dial is the rate window),
-// chosen well below the registry TTL so values never lapse.
-const diagFlush = 5 * time.Second
+const (
+	DefaultDiagnosticInterval = time.Second
+	diagnosticSchemaVersion   = 2
+)
 
-// DiagNodeSource provides per-node diagnostic counters. *engine.Engine satisfies
-// it via SnapshotNode.
+// DiagnosticBatchRegistry is the Registry wire operation needed by the
+// diagnostics publisher. *rest.ProviderClient satisfies it.
+type DiagnosticBatchRegistry interface {
+	SetRegisters(context.Context, map[string]wirerest.RegisterUpdate) error
+}
+
+// DiagNodeSource provides per-node diagnostic counters. *engine.Engine satisfies it.
 type DiagNodeSource interface {
 	SnapshotNode(addr [node.AddrLen]byte) engine.NodeStats
 }
 
-// DiagNode names one node whose diagnostics are published.
 type DiagNode struct {
 	Name string
 	Addr [node.AddrLen]byte
 }
 
-// DiagDongle names one dongle (by its channel name) whose diagnostics are
-// published, with a function returning its current stats. *radio.Reconnecting
-// satisfies the stats source via Stats.
 type DiagDongle struct {
 	Name  string
 	Stats func() radio.DongleStats
 }
 
-// Diagnostics publishes hub-side synthetic diagnostic registers — per-node RF
-// traffic and liveness, and per-dongle connection state and traffic — to the
-// Registry. Every register is read-only: consumer change requests are drained
-// and ignored. Counters are cumulative since hub start; their rate.* siblings are
-// per-second averages over a trailing window.
 type Diagnostics struct {
-	src    DiagNodeSource
-	reg    Registry
-	prefix string
-	window time.Duration
-	flush  time.Duration
-	ttl    time.Duration
-	log    *slog.Logger
+	src      DiagNodeSource
+	reg      DiagnosticBatchRegistry
+	prefix   string
+	interval time.Duration
+	ttl      time.Duration
+	started  int64
+	log      *slog.Logger
+
+	mu                 sync.Mutex
+	batchSuccess       uint64
+	batchError         uint64
+	valuesSent         uint64
+	valuesCoalesced    uint64
+	lastPublishSuccess int64
+	lastPublishError   int64
 }
 
-// DiagOption configures a Diagnostics in NewDiagnostics.
 type DiagOption func(*Diagnostics)
 
-// WithDiagLogger attaches an slog.Logger. A nil logger is ignored.
-func WithDiagLogger(l *slog.Logger) DiagOption {
-	return func(d *Diagnostics) {
-		if l != nil {
-			d.log = l
+func WithDiagLogger(logger *slog.Logger) DiagOption {
+	return func(diagnostics *Diagnostics) {
+		if logger != nil {
+			diagnostics.log = logger
 		}
 	}
 }
 
-// NewDiagnostics creates a Diagnostics publisher. prefix namespaces every
-// register (e.g. "diag" yields "diag.<node>.online"); window is the rate
-// averaging span (default 30s); ttl is the registry provider TTL for each
-// register.
-func NewDiagnostics(src DiagNodeSource, reg Registry, prefix string, window, ttl time.Duration, opts ...DiagOption) *Diagnostics {
-	if window <= 0 {
-		window = 30 * time.Second
+// NewDiagnostics creates a cumulative diagnostics publisher. interval controls
+// snapshot and batch publication cadence; ttl controls Registry expiry.
+func NewDiagnostics(src DiagNodeSource, reg DiagnosticBatchRegistry, prefix string, interval, ttl time.Duration, opts ...DiagOption) *Diagnostics {
+	if interval <= 0 {
+		interval = DefaultDiagnosticInterval
 	}
 	if ttl <= 0 {
 		ttl = 30 * time.Second
 	}
-	d := &Diagnostics{
-		src:    src,
-		reg:    reg,
-		prefix: prefix,
-		window: window,
-		flush:  diagFlush,
-		ttl:    ttl,
-		log:    slog.New(discardHandler{}),
+	diagnostics := &Diagnostics{
+		src: src, reg: reg, prefix: strings.TrimSuffix(prefix, "."), interval: interval,
+		ttl: ttl, started: time.Now().Unix(), log: slog.New(discardHandler{}),
 	}
-	for _, o := range opts {
-		o(d)
+	for _, option := range opts {
+		option(diagnostics)
 	}
-	return d
+	return diagnostics
 }
 
-// Serve publishes diagnostics for the given nodes and dongles until ctx is
-// cancelled. It returns immediately; sampling and publishing run in background
-// goroutines.
+// Serve starts one publisher goroutine for the complete diagnostics catalog.
 func (d *Diagnostics) Serve(ctx context.Context, nodes []DiagNode, dongles []DiagDongle) {
-	nodeSets := make([]*nodeMetricSet, len(nodes))
-	for i, n := range nodes {
-		nodeSets[i] = &nodeMetricSet{prefix: d.prefix, name: n.Name, addr: n.Addr, ring: ring{window: d.window}}
-	}
-	dongleSets := make([]*dongleMetricSet, len(dongles))
-	for i, dg := range dongles {
-		dongleSets[i] = &dongleMetricSet{prefix: d.prefix, name: dg.Name, stats: dg.Stats, ring: ring{window: d.window}}
-	}
+	nodes = append([]DiagNode(nil), nodes...)
+	dongles = append([]DiagDongle(nil), dongles...)
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
+	sort.Slice(dongles, func(i, j int) bool { return dongles[i].Name < dongles[j].Name })
+	d.log.Info("serving batched diagnostics", "prefix", d.prefix, "nodes", len(nodes), "dongles", len(dongles), "interval", d.interval)
+	go d.run(ctx, nodes, dongles)
+}
 
-	inboxes := make(map[string]chan any)
-	provide := func(nt namedType) {
-		updates, requests, err := d.reg.Provide(ctx, nt.name, nil, diagMeta(nt.typ), d.ttl)
-		if err != nil {
-			d.log.Error("diagnostics provide failed", "register", nt.name, "err", err)
+type diagnosticValue struct {
+	value any
+	typ   string
+}
+
+func (d *Diagnostics) run(ctx context.Context, nodes []DiagNode, dongles []DiagDongle) {
+	lastSent := make(map[string]any)
+	pending := make(map[string]bool)
+	tick := uint64(0)
+	publish := func(now time.Time) {
+		values := d.snapshot(nodes, dongles, now)
+		names := sortedValueNames(values)
+		cohortCount := d.refreshCohortCount()
+		updates := make(map[string]wirerest.RegisterUpdate)
+		for index, name := range names {
+			value := values[name]
+			previous, sent := lastSent[name]
+			changed := !sent || !valuesEqual(previous, value.value)
+			refresh := sent && uint64(index%cohortCount) == tick%uint64(cohortCount)
+			if !changed && !refresh && !pending[name] {
+				continue
+			}
+			metadata := map[string]any(nil)
+			if !sent {
+				metadata = diagMeta(value.typ)
+			}
+			updates[name] = wirerest.RegisterUpdate{Value: value.value, Metadata: metadata, TTL: d.ttl}
+		}
+		if len(updates) == 0 {
+			tick++
 			return
 		}
-		in := make(chan any, 1)
-		inboxes[nt.name] = in
-		go diagForward(ctx, in, updates)
-		go diagDrain(ctx, requests) // read-only: discard change requests
-	}
-	for _, s := range nodeSets {
-		for _, nt := range s.names() {
-			provide(nt)
-		}
-	}
-	for _, s := range dongleSets {
-		for _, nt := range s.names() {
-			provide(nt)
-		}
-	}
-	d.log.Info("serving diagnostics", "prefix", d.prefix, "nodes", len(nodes), "dongles", len(dongles), "window", d.window)
-
-	go d.run(ctx, nodeSets, dongleSets, inboxes)
-}
-
-// run samples every set on each flush tick and pushes the latest values to the
-// registry. It seeds an immediate publish so values appear without waiting a
-// full flush interval.
-func (d *Diagnostics) run(ctx context.Context, nodeSets []*nodeMetricSet, dongleSets []*dongleMetricSet, inboxes map[string]chan any) {
-	publish := func() {
-		now := time.Now()
-		for _, s := range nodeSets {
-			for name, v := range s.values(d.src, now) {
-				if in, ok := inboxes[name]; ok {
-					latestPush(in, v)
-				}
+		if err := d.reg.SetRegisters(ctx, updates); err != nil {
+			for name := range updates {
+				pending[name] = true
 			}
+			d.recordBatchError(now)
+			d.log.Error("diagnostics batch publish failed", "values", len(updates), "err", err)
+			tick++
+			return
 		}
-		for _, s := range dongleSets {
-			for name, v := range s.values(now) {
-				if in, ok := inboxes[name]; ok {
-					latestPush(in, v)
-				}
-			}
+		for name, update := range updates {
+			lastSent[name] = update.Value
+			delete(pending, name)
 		}
+		d.recordBatchSuccess(now, uint64(len(updates)), uint64(len(values)-len(updates)))
+		tick++
 	}
-	publish()
-	t := time.NewTicker(d.flush)
-	defer t.Stop()
+
+	publish(time.Now())
+	ticker := time.NewTicker(d.interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
-			publish()
+		case now := <-ticker.C:
+			publish(now)
 		}
 	}
 }
 
-// namedType is a register name paired with its hub-side value type.
-type namedType struct {
-	name string
-	typ  string
+func (d *Diagnostics) refreshCohortCount() int {
+	count := int(d.ttl / (2 * d.interval))
+	if count < 1 {
+		return 1
+	}
+	return count
 }
 
-// nodeCounters and dongleCounters fix the order of the cumulative counter
-// vectors used for rate computation; the same order maps NodeStats/DongleStats
-// fields to register name suffixes.
-var (
-	nodeCounters   = []string{"rx.all", "rx.is", "rx.acks", "rx.corrupt", "tx.all", "tx.retries", "timeouts"}
-	dongleCounters = []string{"tx.all", "tx.err", "rx.all"}
-)
-
-func nodeVector(s engine.NodeStats) []uint64 {
-	return []uint64{s.RxAll, s.RxIS, s.RxACK, s.RxCorrupt, s.TxAll, s.TxRetries, s.Timeouts}
+func (d *Diagnostics) recordBatchSuccess(now time.Time, sent, coalesced uint64) {
+	d.mu.Lock()
+	d.batchSuccess++
+	d.valuesSent += sent
+	d.valuesCoalesced += coalesced
+	d.lastPublishSuccess = now.Unix()
+	d.mu.Unlock()
 }
 
-func dongleVector(s radio.DongleStats) []uint64 {
-	return []uint64{s.TxAll, s.TxErr, s.RxAll}
+func (d *Diagnostics) recordBatchError(now time.Time) {
+	d.mu.Lock()
+	d.batchError++
+	d.lastPublishError = now.Unix()
+	d.mu.Unlock()
 }
 
-// nodeMetricSet publishes one node's diagnostic registers and tracks its counter
-// history for rate computation.
-type nodeMetricSet struct {
-	prefix string
-	name   string
-	addr   [node.AddrLen]byte
-	ring   ring
+func (d *Diagnostics) publisherValues() map[string]diagnosticValue {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	prefix := d.prefix + ".hub.main."
+	return map[string]diagnosticValue{
+		prefix + "schema.version":             integer(diagnosticSchemaVersion),
+		prefix + "process.started":            integer(d.started),
+		prefix + "publisher.batch.success":    integer(d.batchSuccess),
+		prefix + "publisher.batch.error":      integer(d.batchError),
+		prefix + "publisher.values.sent":      integer(d.valuesSent),
+		prefix + "publisher.values.coalesced": integer(d.valuesCoalesced),
+		prefix + "publisher.last.success":     integer(d.lastPublishSuccess),
+		prefix + "publisher.last.error":       integer(d.lastPublishError),
+	}
 }
 
-// pathComponent collapses a name into a single registry path component by
-// replacing the path separator (".") with "_". Unlike a device register, which
-// uses the dotted node name as a hierarchical prefix (node "basement.fan" +
-// register "duty" → "basement.fan.duty"), a diagnostic register must keep the
-// node name in one fixed position (node "basement.fan" →
-// "<prefix>.node.basement_fan.rate.rx.all") so downstream selectors such as
-// Grafana can pick the node by a fixed path-component index.
+func (d *Diagnostics) snapshot(nodes []DiagNode, dongles []DiagDongle, now time.Time) map[string]diagnosticValue {
+	values := d.publisherValues()
+	values[d.prefix+".hub.main.process.heartbeat"] = integer(now.Unix())
+	for _, diagNode := range nodes {
+		addNodeValues(values, d.prefix, diagNode.Name, d.src.SnapshotNode(diagNode.Addr))
+	}
+	for _, dongle := range dongles {
+		addDongleValues(values, d.prefix, dongle.Name, dongle.Stats())
+	}
+	return values
+}
+
+func addNodeValues(values map[string]diagnosticValue, prefix, name string, stats engine.NodeStats) {
+	base := prefix + ".node." + pathComponent(name) + "."
+	values[base+"liveness.state"] = integer(stats.Liveness.State)
+	values[base+"liveness.since"] = integer(stats.Liveness.Since)
+	values[base+"liveness.last.success"] = integer(stats.Liveness.LastSuccess)
+	values[base+"liveness.last.failure"] = integer(stats.Liveness.LastFailure)
+	values[base+"liveness.probe.misses"] = integer(stats.Liveness.Misses)
+	values[base+"liveness.transition.online"] = integer(stats.Liveness.TransitionsOnline)
+	values[base+"liveness.transition.suspect"] = integer(stats.Liveness.TransitionsSuspect)
+	values[base+"liveness.transition.offline"] = integer(stats.Liveness.TransitionsOffline)
+
+	packet := stats.Packet
+	packetValues := map[string]uint64{
+		"packet.rx.total": packet.RxTotal, "packet.rx.valid": packet.RxValid,
+		"packet.rx.push_is": packet.RxPushIS, "packet.rx.solicited_is": packet.RxSolicitedIS,
+		"packet.rx.orphan_is": packet.RxOrphanIS, "packet.rx.matched_ack": packet.RxMatchedACK,
+		"packet.rx.orphan_ack": packet.RxOrphanACK, "packet.rx.null_is": packet.RxNullIS,
+		"packet.rx.invalid.decode": packet.RxInvalidDecode, "packet.rx.invalid.source": packet.RxInvalidSource,
+		"packet.rx.invalid.type": packet.RxInvalidType, "packet.rx.invalid.register": packet.RxUnknownRegister,
+		"packet.tx.success": packet.TxSuccess, "packet.tx.error": packet.TxError,
+		"packet.push_ack.success": packet.PushACKSuccess, "packet.push_ack.error": packet.PushACKError,
+		"packet.push_ack.no_radio": packet.PushACKNoRadio,
+	}
+	for suffix, value := range packetValues {
+		values[base+suffix] = integer(value)
+	}
+	values[base+"packet.last.received"] = integer(packet.LastReceived)
+	values[base+"packet.last.valid"] = integer(packet.LastValid)
+
+	for operation := engine.TransactionOperation(0); operation < engine.TransactionOperationCount; operation++ {
+		transaction := stats.Transactions[operation]
+		transactionBase := base + "transaction." + operation.String() + "."
+		for outcome := engine.TransactionOutcome(0); outcome < engine.TransactionOutcomeCount; outcome++ {
+			values[transactionBase+"outcome."+outcome.String()] = integer(transaction.Outcomes[outcome])
+		}
+		values[transactionBase+"attempt.initial"] = integer(transaction.AttemptInitial)
+		values[transactionBase+"attempt.retry"] = integer(transaction.AttemptRetry)
+		values[transactionBase+"attempt.send_error"] = integer(transaction.AttemptSendError)
+		values[transactionBase+"attempt.response_timeout"] = integer(transaction.ResponseTimeout)
+		values[transactionBase+"latency.success.count"] = integer(transaction.LatencyCount)
+		values[transactionBase+"latency.success.microseconds"] = integer(transaction.LatencySumMicros)
+	}
+	values[base+"latency.success.count"] = integer(stats.Latency.Count)
+	values[base+"latency.success.microseconds"] = integer(stats.Latency.SumMicros)
+	for index, count := range stats.Latency.Buckets {
+		label := strings.NewReplacer("+", "plus_", ".", "_").Replace(engine.LatencyBucketLabel(index))
+		values[base+"latency.success.bucket.le_"+label] = integer(count)
+	}
+}
+
+func addDongleValues(values map[string]diagnosticValue, prefix, name string, stats radio.DongleStats) {
+	base := prefix + ".channel." + pathComponent(name) + "."
+	values[base+"state"] = integer(stats.State)
+	values[base+"state.since"] = integer(stats.StateSince)
+	values[base+"connection.open.attempt"] = integer(stats.OpenAttempts)
+	values[base+"connection.open.success"] = integer(stats.OpenSuccesses)
+	values[base+"connection.open.error"] = integer(stats.OpenFailures)
+	values[base+"connection.open.last_attempt"] = integer(stats.LastOpenAttempt)
+	values[base+"connection.open.last_error"] = integer(stats.LastOpenFailure)
+	values[base+"connection.connected_at"] = integer(stats.LastConnected)
+	values[base+"connection.disconnected_at"] = integer(stats.LastDisconnected)
+	values[base+"connection.disconnect.total"] = integer(stats.Disconnects)
+	values[base+"connection.disconnect.send_error"] = integer(stats.DisconnectSendErrors)
+	values[base+"connection.disconnect.receive_error"] = integer(stats.DisconnectReceiveErrors)
+	values[base+"packet.tx.attempt"] = integer(stats.TxAttempts)
+	values[base+"packet.tx.success"] = integer(stats.TxSuccess)
+	values[base+"packet.tx.offline"] = integer(stats.TxOffline)
+	values[base+"packet.tx.error"] = integer(stats.TxErrors)
+	values[base+"packet.rx.success"] = integer(stats.RxSuccess)
+	values[base+"packet.rx.error"] = integer(stats.RxErrors)
+}
+
+func integer(value any) diagnosticValue { return diagnosticValue{value: value, typ: "int"} }
+
 func pathComponent(name string) string { return strings.ReplaceAll(name, ".", "_") }
 
-func (m *nodeMetricSet) prefixDot() string {
-	return m.prefix + ".node." + pathComponent(m.name) + "."
+func diagMeta(valueType string) map[string]any {
+	return map[string]any{"type": valueType, "readOnly": true, "diagnostic": true, "schema": diagnosticSchemaVersion}
 }
 
-func (m *nodeMetricSet) names() []namedType {
-	p := m.prefixDot()
-	out := []namedType{
-		{p + "online", "bool"},
-		{p + "seen", "int"},
-		{p + "misses", "int"},
+func sortedValueNames(values map[string]diagnosticValue) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
 	}
-	for _, c := range nodeCounters {
-		out = append(out, namedType{p + "count." + c, "int"}, namedType{p + "rate." + c, "float"})
-	}
-	return out
+	sort.Strings(names)
+	return names
 }
 
-func (m *nodeMetricSet) values(src DiagNodeSource, now time.Time) map[string]any {
-	s := src.SnapshotNode(m.addr)
-	vec := nodeVector(s)
-	rates := m.ring.sample(now, vec)
-	p := m.prefixDot()
-	out := map[string]any{
-		p + "online": s.Online,
-		p + "seen":   ts(s.LastRx),
-		p + "misses": int64(s.Misses),
-	}
-	for i, c := range nodeCounters {
-		out[p+"count."+c] = int64(vec[i])
-		out[p+"rate."+c] = rates[i]
-	}
-	return out
-}
-
-// dongleMetricSet publishes one dongle's diagnostic registers and tracks its
-// counter history for rate computation.
-type dongleMetricSet struct {
-	prefix string
-	name   string
-	stats  func() radio.DongleStats
-	ring   ring
-}
-
-func (m *dongleMetricSet) prefixDot() string { return m.prefix + ".dongle." + m.name + "." }
-
-func (m *dongleMetricSet) names() []namedType {
-	p := m.prefixDot()
-	out := []namedType{
-		{p + "connected", "bool"},
-		{p + "reconnects", "int"},
-		{p + "up", "int"},
-		{p + "down", "int"},
-	}
-	for _, c := range dongleCounters {
-		out = append(out, namedType{p + "count." + c, "int"}, namedType{p + "rate." + c, "float"})
-	}
-	return out
-}
-
-func (m *dongleMetricSet) values(now time.Time) map[string]any {
-	s := m.stats()
-	vec := dongleVector(s)
-	rates := m.ring.sample(now, vec)
-	p := m.prefixDot()
-	out := map[string]any{
-		p + "connected":  s.Connected,
-		p + "reconnects": int64(s.Reconnects),
-		p + "up":         ts(s.Up),
-		p + "down":       ts(s.Down),
-	}
-	for i, c := range dongleCounters {
-		out[p+"count."+c] = int64(vec[i])
-		out[p+"rate."+c] = rates[i]
-	}
-	return out
-}
-
-// ring keeps a trailing window of cumulative counter samples and derives a
-// per-second rate from the oldest sample still inside the window: rate =
-// (newest - oldest) / elapsed. Before the window has filled, elapsed is the time
-// actually spanned, so the rate is a correct average over the available history.
-type ring struct {
-	window time.Duration
-	ts     []time.Time
-	vs     [][]uint64
-}
-
-func (r *ring) sample(now time.Time, v []uint64) []float64 {
-	r.ts = append(r.ts, now)
-	r.vs = append(r.vs, v)
-	cutoff := now.Add(-r.window)
-	// Drop samples older than the window, keeping the first one that straddles
-	// the cutoff as the rate baseline (and always at least two samples).
-	for len(r.ts) > 2 && r.ts[1].Before(cutoff) {
-		r.ts = r.ts[1:]
-		r.vs = r.vs[1:]
-	}
-	rates := make([]float64, len(v))
-	elapsed := now.Sub(r.ts[0]).Seconds()
-	if elapsed > 0 {
-		old := r.vs[0]
-		for i := range v {
-			rates[i] = float64(v[i]-old[i]) / elapsed
-		}
-	}
-	return rates
-}
-
-// ts renders a unix-seconds timestamp register value: the raw seconds, or nil
-// when no event has occurred yet (a zero timestamp), so consumers see null
-// rather than the epoch.
-func ts(unix int64) any {
-	if unix == 0 {
-		return nil
-	}
-	return unix
-}
-
-// diagMeta builds the registry metadata for a diagnostic register: its hub-side
-// value type, read-only access, and a flag marking it as hub-synthesised.
-func diagMeta(typ string) map[string]any {
-	return map[string]any{"type": typ, "readOnly": true, "diagnostic": true}
-}
-
-// diagForward relays the latest value from a per-register inbox to its registry
-// updates channel, decoupling the slow registry from the sampling loop.
-func diagForward(ctx context.Context, in <-chan any, updates chan<- any) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case v := <-in:
-			select {
-			case updates <- v:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-}
-
-// diagDrain discards consumer change requests for a read-only diagnostic
-// register until ctx is cancelled or the channel closes.
-func diagDrain(ctx context.Context, requests <-chan any) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case _, ok := <-requests:
-			if !ok {
-				return
-			}
-		}
-	}
-}
-
-// latestPush stores v in a buffer-of-one inbox with latest-wins semantics: if a
-// value is already pending it is replaced, so a stalled registry never makes the
-// sampler block or queue stale values.
-func latestPush(in chan any, v any) {
-	select {
-	case in <- v:
-	default:
-		select {
-		case <-in:
-		default:
-		}
-		select {
-		case in <- v:
-		default:
-		}
-	}
-}
+func valuesEqual(left, right any) bool { return left == right }

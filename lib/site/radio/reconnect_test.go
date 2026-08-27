@@ -112,6 +112,10 @@ func TestReconnecting_OfflineUntilOpened(t *testing.T) {
 	if _, ok := r.Receive(make([]byte, 4)); ok {
 		t.Fatal("Receive while offline returned a packet")
 	}
+	waitFor(t, func() bool { return r.Stats().OpenFailures > 0 })
+	if stats := r.Stats(); stats.TxOffline != 1 || stats.OpenAttempts == 0 || stats.OpenFailures == 0 {
+		t.Fatalf("offline stats = %+v, want offline TX and failed open attempts", stats)
+	}
 
 	// The device appears; the supervisor connects within a couple of backoffs.
 	mu.Lock()
@@ -121,6 +125,9 @@ func TestReconnecting_OfflineUntilOpened(t *testing.T) {
 	waitFor(t, func() bool {
 		return r.Send([4]byte{}, nil) == nil
 	})
+	if stats := r.Stats(); stats.State != DongleConnected || stats.OpenSuccesses != 1 || stats.TxSuccess == 0 {
+		t.Fatalf("connected stats = %+v, want one successful open and TX", stats)
+	}
 }
 
 func TestReconnecting_ReopensAfterSendFailure(t *testing.T) {
@@ -156,6 +163,9 @@ func TestReconnecting_ReopensAfterSendFailure(t *testing.T) {
 		t.Fatal("Send to failing device returned nil")
 	}
 	waitFor(t, func() bool { return first.isClosed() })
+	if stats := r.Stats(); stats.DisconnectSendErrors != 1 || stats.Disconnects != 1 {
+		t.Fatalf("send failure stats = %+v, want one send disconnect", stats)
+	}
 
 	// The supervisor reopens a fresh device and Send succeeds again.
 	waitFor(t, func() bool {
@@ -193,6 +203,9 @@ func TestReconnecting_ReopensAfterReceiveFailure(t *testing.T) {
 
 	r.Receive(make([]byte, 4))
 	waitFor(t, func() bool { return first.isClosed() })
+	if stats := r.Stats(); stats.RxErrors != 1 || stats.DisconnectReceiveErrors != 1 {
+		t.Fatalf("receive failure stats = %+v, want one receive disconnect", stats)
+	}
 	waitFor(t, func() bool {
 		mu.Lock()
 		n := len(devs)
@@ -222,5 +235,8 @@ func TestReconnecting_CloseStopsSupervisor(t *testing.T) {
 	// After Close the dongle stays offline.
 	if err := r.Send([4]byte{}, nil); !errors.Is(err, ErrOffline) {
 		t.Fatalf("Send after Close = %v, want ErrOffline", err)
+	}
+	if stats := r.Stats(); stats.State != DongleClosed {
+		t.Fatalf("state after Close = %v, want closed", stats.State)
 	}
 }

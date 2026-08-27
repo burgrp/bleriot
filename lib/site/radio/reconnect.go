@@ -47,51 +47,95 @@ type Reconnecting struct {
 	cur    Dongle // the live device, or nil while offline
 	closed bool
 
-	// Diagnostic counters, updated lock-free. connected mirrors cur!=nil for
-	// snapshotting without taking mu; reconnects counts reopens after the first
-	// connect; lastConnect/lastDisconnect are the unix-seconds times of the most
-	// recent open and the most recent disconnect.
-	connected      atomic.Bool
-	reconnects     atomic.Uint64
-	lastConnect    atomic.Int64
-	lastDisconnect atomic.Int64
-	txAll          atomic.Uint64 // Send calls
-	txErr          atomic.Uint64 // Send calls that failed (including while offline)
-	rxAll          atomic.Uint64 // packets actually received
+	// Diagnostic counters are updated lock-free; connected mirrors cur != nil.
+	connected               atomic.Bool
+	lastConnect             atomic.Int64
+	lastDisconnect          atomic.Int64
+	txAll                   atomic.Uint64 // Send calls
+	txErr                   atomic.Uint64 // Send calls that failed (including while offline)
+	rxAll                   atomic.Uint64 // packets actually received
+	stateSince              atomic.Int64
+	openAttempts            atomic.Uint64
+	openSuccesses           atomic.Uint64
+	openFailures            atomic.Uint64
+	lastOpenAttempt         atomic.Int64
+	lastOpenFailure         atomic.Int64
+	disconnects             atomic.Uint64
+	disconnectSendErrors    atomic.Uint64
+	disconnectReceiveErrors atomic.Uint64
+	txSuccess               atomic.Uint64
+	txOffline               atomic.Uint64
+	rxErrors                atomic.Uint64
 }
+
+// DongleState is the lifecycle state of a reconnecting channel endpoint.
+type DongleState uint32
+
+const (
+	DongleOffline DongleState = iota
+	DongleConnected
+	DongleClosed
+)
 
 // DongleStats is a point-in-time snapshot of a Reconnecting dongle's connection
 // state and cumulative traffic counters, as published by the diagnostics bridge.
 type DongleStats struct {
-	// Connected reports whether a physical device is currently open.
-	Connected bool
-	// Reconnects counts how many times the device has been reopened after the
-	// first successful connect (a measure of link instability).
-	Reconnects uint64
-	// Up is the unix-seconds time of the most recent successful open, or 0 if the
-	// device has never connected. While Connected it marks the start of the
-	// current uptime.
-	Up int64
-	// Down is the unix-seconds time of the most recent disconnect, or 0 if the
-	// device has never dropped. While offline it marks the start of the current
-	// outage; together with Up it bounds the last completed session.
-	Down  int64
-	TxAll uint64 // transmit attempts
-	TxErr uint64 // failed transmit attempts (including those made while offline)
-	RxAll uint64 // packets received
+	State                   DongleState
+	StateSince              int64
+	OpenAttempts            uint64
+	OpenSuccesses           uint64
+	OpenFailures            uint64
+	LastOpenAttempt         int64
+	LastOpenFailure         int64
+	Disconnects             uint64
+	DisconnectSendErrors    uint64
+	DisconnectReceiveErrors uint64
+	LastConnected           int64
+	LastDisconnected        int64
+	TxAttempts              uint64
+	TxSuccess               uint64
+	TxOffline               uint64
+	TxErrors                uint64
+	RxSuccess               uint64
+	RxErrors                uint64
 }
 
 // Stats returns a snapshot of the dongle's connection state and traffic counters.
 func (r *Reconnecting) Stats() DongleStats {
-	return DongleStats{
-		Connected:  r.connected.Load(),
-		Reconnects: r.reconnects.Load(),
-		Up:         r.lastConnect.Load(),
-		Down:       r.lastDisconnect.Load(),
-		TxAll:      r.txAll.Load(),
-		TxErr:      r.txErr.Load(),
-		RxAll:      r.rxAll.Load(),
+	state := DongleOffline
+	if r.closedState() {
+		state = DongleClosed
+	} else if r.connected.Load() {
+		state = DongleConnected
 	}
+	offline := r.txOffline.Load()
+	txErrors := r.txErr.Load() - offline
+	return DongleStats{
+		State:                   state,
+		StateSince:              r.stateSince.Load(),
+		OpenAttempts:            r.openAttempts.Load(),
+		OpenSuccesses:           r.openSuccesses.Load(),
+		OpenFailures:            r.openFailures.Load(),
+		LastOpenAttempt:         r.lastOpenAttempt.Load(),
+		LastOpenFailure:         r.lastOpenFailure.Load(),
+		Disconnects:             r.disconnects.Load(),
+		DisconnectSendErrors:    r.disconnectSendErrors.Load(),
+		DisconnectReceiveErrors: r.disconnectReceiveErrors.Load(),
+		LastConnected:           r.lastConnect.Load(),
+		LastDisconnected:        r.lastDisconnect.Load(),
+		TxAttempts:              r.txAll.Load(),
+		TxSuccess:               r.txSuccess.Load(),
+		TxOffline:               offline,
+		TxErrors:                txErrors,
+		RxSuccess:               r.rxAll.Load(),
+		RxErrors:                r.rxErrors.Load(),
+	}
+}
+
+func (r *Reconnecting) closedState() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
 }
 
 // NewReconnecting creates a Reconnecting dongle and starts its supervisor, which
@@ -113,6 +157,7 @@ func NewReconnecting(ctx context.Context, open func() (Dongle, error), guard, ba
 		log:     log,
 		wake:    make(chan struct{}, 1),
 	}
+	r.stateSince.Store(time.Now().Unix())
 	go r.supervise(ctx)
 	return r
 }
@@ -130,13 +175,15 @@ func (r *Reconnecting) Send(dst [4]byte, payload []byte) error {
 	r.txAll.Add(1)
 	if d == nil {
 		r.txErr.Add(1)
+		r.txOffline.Add(1)
 		return ErrOffline
 	}
 	if err := d.Send(dst, payload); err != nil {
 		r.txErr.Add(1)
-		r.drop(d, err)
+		r.drop(d, disconnectSend, err)
 		return err
 	}
+	r.txSuccess.Add(1)
 	return nil
 }
 
@@ -155,7 +202,8 @@ func (r *Reconnecting) Receive(buf []byte) (int, bool) {
 		var err error
 		n, ok, err = errorDongle.ReceiveWithError(buf)
 		if err != nil {
-			r.drop(d, err)
+			r.rxErrors.Add(1)
+			r.drop(d, disconnectReceive, err)
 			return 0, false
 		}
 	} else {
@@ -176,6 +224,7 @@ func (r *Reconnecting) Close() error {
 	r.cur = nil
 	r.mu.Unlock()
 	r.connected.Store(false)
+	r.stateSince.Store(time.Now().Unix())
 	r.nudge()
 	if d != nil {
 		return d.Close()
@@ -185,7 +234,14 @@ func (r *Reconnecting) Close() error {
 
 // drop closes a failed device and clears it so the supervisor reopens it. It is
 // a no-op if the current device has already been replaced by another goroutine.
-func (r *Reconnecting) drop(d Dongle, err error) {
+type disconnectCause uint8
+
+const (
+	disconnectSend disconnectCause = iota
+	disconnectReceive
+)
+
+func (r *Reconnecting) drop(d Dongle, cause disconnectCause, err error) {
 	r.mu.Lock()
 	if r.cur != d {
 		r.mu.Unlock()
@@ -194,7 +250,15 @@ func (r *Reconnecting) drop(d Dongle, err error) {
 	r.cur = nil
 	r.mu.Unlock()
 	r.connected.Store(false)
-	r.lastDisconnect.Store(time.Now().Unix())
+	now := time.Now().Unix()
+	r.lastDisconnect.Store(now)
+	r.stateSince.Store(now)
+	r.disconnects.Add(1)
+	if cause == disconnectSend {
+		r.disconnectSendErrors.Add(1)
+	} else {
+		r.disconnectReceiveErrors.Add(1)
+	}
 	d.Close()
 	r.log.Warn("radio dongle disconnected; reconnecting", "err", err)
 	r.nudge()
@@ -213,7 +277,6 @@ func (r *Reconnecting) nudge() {
 // retries every backoff. It exits when ctx is cancelled or Close is called.
 func (r *Reconnecting) supervise(ctx context.Context) {
 	var loggedFail bool
-	var opened bool // whether the device has ever connected (to count reopens)
 	for {
 		r.mu.Lock()
 		closed := r.closed
@@ -232,8 +295,13 @@ func (r *Reconnecting) supervise(ctx context.Context) {
 			continue
 		}
 
+		now := time.Now().Unix()
+		r.openAttempts.Add(1)
+		r.lastOpenAttempt.Store(now)
 		d, err := r.open()
 		if err != nil {
+			r.openFailures.Add(1)
+			r.lastOpenFailure.Store(time.Now().Unix())
 			if !loggedFail {
 				// Log the first failure of an outage at warn (a typo'd selector or
 				// a genuinely absent device), then stay quiet until it recovers.
@@ -257,11 +325,10 @@ func (r *Reconnecting) supervise(ctx context.Context) {
 		}
 		r.cur = d
 		r.mu.Unlock()
-		if opened {
-			r.reconnects.Add(1)
-		}
-		opened = true
-		r.lastConnect.Store(time.Now().Unix())
+		now = time.Now().Unix()
+		r.openSuccesses.Add(1)
+		r.lastConnect.Store(now)
+		r.stateSince.Store(now)
 		r.connected.Store(true)
 		r.log.Info("radio dongle connected")
 		loggedFail = false

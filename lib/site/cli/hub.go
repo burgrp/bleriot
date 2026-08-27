@@ -14,6 +14,7 @@ import (
 
 	"github.com/burgrp/reg/pkg/client"
 	clientfactory "github.com/burgrp/reg/pkg/client/factory"
+	wirerest "github.com/burgrp/reg/pkg/wire/rest"
 	"github.com/spf13/cobra"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
@@ -31,14 +32,14 @@ import (
 // hubOptions holds the runtime/deploy settings for the hub, all sourced from
 // command-line flags (not the inventory).
 type hubOptions struct {
-	registry    string
-	hubAddress  string
-	timeout     time.Duration
-	retries     int
-	refresh     time.Duration
-	ttl         time.Duration
-	diagnostics string // registry namespace prefix for diagnostic registers; empty disables them
-	diagWindow  time.Duration
+	registry     string
+	hubAddress   string
+	timeout      time.Duration
+	retries      int
+	refresh      time.Duration
+	ttl          time.Duration
+	diagnostics  string // registry namespace prefix for diagnostic registers; empty disables them
+	diagInterval time.Duration
 }
 
 // newHubCmd builds the "hub" subcommand: bridge the inventory's nodes to the
@@ -66,7 +67,7 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	f.DurationVar(&o.ttl, "ttl", 30*time.Second, "Registry provider TTL for each register")
 	f.StringVar(&o.diagnostics, "diagnostics", "", "publish hub-synthesised diagnostic registers under this "+
 		"registry namespace prefix (e.g. \"diag\"); empty disables them")
-	f.DurationVar(&o.diagWindow, "diag-window", 30*time.Second, "averaging window for diagnostic rate.* registers")
+	f.DurationVar(&o.diagInterval, "diag-interval", bridge.DefaultDiagnosticInterval, "diagnostic Registry batch publication interval")
 	return cmd
 }
 
@@ -121,7 +122,8 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 	}
 
 	if o.diagnostics != "" {
-		diag := bridge.NewDiagnostics(eng, regClient, o.diagnostics, o.diagWindow, o.ttl, bridge.WithDiagLogger(logger))
+		diagRegistry := wirerest.NewProviderClient(regURL)
+		diag := bridge.NewDiagnostics(eng, diagRegistry, o.diagnostics, o.diagInterval, o.ttl, bridge.WithDiagLogger(logger))
 		diagNodes := make([]bridge.DiagNode, len(nodes))
 		for i, n := range nodes {
 			diagNodes[i] = bridge.DiagNode{Name: n.Name, Addr: n.Address}

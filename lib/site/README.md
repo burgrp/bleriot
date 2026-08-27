@@ -92,7 +92,7 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
 | `--ttl` | `30s` | Registry provider TTL. |
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
-| `--diag-window` | `30s` | Averaging window for the diagnostic `rate.*` registers. |
+| `--diag-interval` | `1s` | How often changed diagnostics are coalesced into one Registry batch. |
 
 A `Chip` bundles the build and flash targets — `TinygoTarget` (tinygo
 `--target`), `PyocdTarget` (pyocd target name), and `CmsisPack` (pyocd CMSIS
@@ -256,45 +256,75 @@ both.
 
 With `--diagnostics <prefix>` the hub publishes a set of synthetic, **read-only**
 Registry registers describing its own RF health, in addition to the device
-registers. They are off by default; the prefix namespaces every register (e.g.
-`--diagnostics diag` yields `diag.node.kitchen.online`). Change requests to these
-registers are ignored.
+registers. They are off by default. Schema version 2 exposes cumulative counters
+only; Prometheus/Grafana derives rates and increases over any requested time
+range instead of consuming fixed-window gauges.
 
-Each per-node and per-dongle traffic counter is exposed twice: a cumulative
-`count.*` integer (since hub start) and a `rate.*` float (per second, averaged
-over the trailing `--diag-window`, default `30s`). Values are sampled and
-republished every 5 s.
+Hot paths update atomics without Registry I/O. Every `--diag-interval` (default
+1 s), one publisher snapshots the complete catalog and sends at most one batch
+containing changed values plus a distributed TTL-refresh cohort. A failed batch
+remains unsent and is retried on the next interval. This bounds publication
+latency without issuing one request per counter; every unchanged value is
+refreshed within half of its TTL.
+
+**Hub publisher** — `<prefix>.hub.main.<reg>`:
+
+| Register | Meaning |
+|----------|---------|
+| `schema.version` | Diagnostics schema version (`2`). |
+| `process.started` / `process.heartbeat` | Hub start and latest snapshot Unix times. |
+| `publisher.batch.success` / `publisher.batch.error` | Successful and failed Registry batches. |
+| `publisher.values.sent` / `publisher.values.coalesced` | Values sent and unchanged values omitted. |
+| `publisher.last.success` / `publisher.last.error` | Last successful and failed publish Unix times. |
 
 **Per node** — `<prefix>.node.<node>.<reg>`:
 
-The `<node>` segment is always a single path component: any `.` in the instance
-name is replaced by `_` (e.g. instance `basement.fan` →
-`<prefix>.node.basement_fan.rate.rx.all`, never `…node.basement.fan.rate.rx.all`),
-so the node name stays at a fixed position for selectors like Grafana.
+The `<node>` segment is always one path component: `.` in the instance name is
+replaced by `_`, so the node name stays at a fixed selector position.
+
+Liveness state codes are `0` unknown, `1` online, `2` suspect, and `3` offline.
 
 | Register | Type | Meaning |
 |----------|------|---------|
-| `online` | bool | Node is answering (watch-refresh misses below the liveness threshold). |
-| `seen` | int | Unix time (s) of the most recent packet received from the node. |
-| `misses` | int | Current consecutive unanswered watch refreshes. |
-| `count.rx.all` / `rate.rx.all` | int / float | Packets received from the node. |
-| `count.rx.is` / `rate.rx.is` | int / float | `IS` value reports received. |
-| `count.rx.acks` / `rate.rx.acks` | int / float | `ACK`s received. |
-| `count.rx.corrupt` / `rate.rx.corrupt` | int / float | Packets attributed to the node that failed to decode. |
-| `count.tx.all` / `rate.tx.all` | int / float | Packets sent (initial sends and retries). |
-| `count.tx.retries` / `rate.tx.retries` | int / float | Retransmissions only. |
-| `count.timeouts` / `rate.timeouts` | int / float | Transactions that exhausted all retries with no reply. |
+| `liveness.state` / `liveness.since` | int | Current state code and transition Unix time. |
+| `liveness.last.success` / `liveness.last.failure` | int | Latest successful or failed liveness evidence. |
+| `liveness.probe.misses` | int | Current consecutive unanswered refresh probes. |
+| `liveness.transition.<state>` | int | Cumulative transitions into online, suspect, or offline. |
+| `packet.rx.total` / `packet.rx.valid` | int | Raw packets attributed by cleartext source and packets passing validation. |
+| `packet.rx.push_is` / `packet.rx.solicited_is` / `packet.rx.orphan_is` | int | Valid `IS` packets by correlation class. |
+| `packet.rx.matched_ack` / `packet.rx.orphan_ack` / `packet.rx.null_is` | int | Valid `ACK` correlation and null reports. |
+| `packet.rx.invalid.<reason>` | int | Decode, source, or type validation failures. |
+| `packet.rx.invalid.register` | int | Valid packets carrying a register absent from the provisioned descriptor. They are still acknowledged and correlated. |
+| `packet.tx.success` / `packet.tx.error` | int | Actual radio send outcomes. |
+| `packet.push_ack.<outcome>` | int | Push acknowledgement success, error, or missing radio. |
+| `packet.last.received` / `packet.last.valid` | int | Latest raw and validated packet Unix times. |
 
-**Per dongle** — `<prefix>.dongle.<channel-name>.<reg>` (labelled by the
-channel's `Name`):
+Transactions use
+`transaction.<operation>.outcome.<outcome>`, where operation is `get`, `set`,
+`watch`, `unwatch`, or `refresh`. Every known-node invocation increments exactly
+one terminal outcome: `success_first`, `success_retry`, `timeout`, `send_error`,
+`canceled`, `busy`, or `no_radio`. This is the denominator for reliability
+ratios; packet sends and retries are not transactions.
+
+Attempt counters are `transaction.<operation>.attempt.initial`, `.retry`,
+`.send_error`, and `.response_timeout`. Successful latency has per-operation
+`.latency.success.count` and `.microseconds` totals. Node-wide latency also has
+fixed cumulative `latency.success.bucket.le_<bound>` counters (`0.025`, `0.05`,
+`0.1`, `0.2`, `0.5`, `1`, `2`, `+Inf` seconds), plus count and summed
+microseconds.
+
+**Per channel** — `<prefix>.channel.<channel-name>.<reg>`:
+
+Channel state codes are `0` offline, `1` connected, and `2` closed.
 
 | Register | Type | Meaning |
 |----------|------|---------|
-| `connected` | bool | A physical device is currently open. |
-| `reconnects` | int | Times the device has been reopened after the first connect. |
-| `up` | int | Unix time (s) of the most recent successful open (start of the current uptime). |
-| `down` | int | Unix time (s) of the most recent disconnect (start of the current outage). |
-| `count.tx.all` / `rate.tx.all` | int / float | Transmit attempts. |
-| `count.tx.err` / `rate.tx.err` | int / float | Failed transmit attempts (including while offline). |
-| `count.rx.all` / `rate.rx.all` | int / float | Packets received. |
+| `state` / `state.since` | int | Current channel state and transition Unix time. |
+| `connection.open.attempt` / `.success` / `.error` | int | Physical-device open outcomes. |
+| `connection.open.last_attempt` / `.last_error` | int | Latest open attempt and failure Unix times. |
+| `connection.connected_at` / `.disconnected_at` | int | Latest connection transition Unix times. |
+| `connection.disconnect.total` | int | Disconnects after an established connection. |
+| `connection.disconnect.send_error` / `.receive_error` | int | Disconnect cause counters. |
+| `packet.tx.attempt` / `.success` / `.offline` / `.error` | int | Channel transmit outcomes, separating no device from connected-device failure. |
+| `packet.rx.success` / `.error` | int | Received packets and receive transport failures. |
 

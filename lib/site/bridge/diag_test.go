@@ -2,176 +2,183 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/burgrp/bleriot/lib/site/engine"
 	"github.com/burgrp/bleriot/lib/site/radio"
+	wirerest "github.com/burgrp/reg/pkg/wire/rest"
 )
 
-// TestRing_Rate checks the per-second rate is the counter delta over the elapsed
-// span before the window has filled.
-func TestRing_Rate(t *testing.T) {
-	r := ring{window: 30 * time.Second}
-	base := time.Now()
-	r.sample(base, []uint64{0})
-	rates := r.sample(base.Add(10*time.Second), []uint64{100})
-	if rates[0] != 10 {
-		t.Fatalf("rate = %v, want 10/s", rates[0])
+type fakeBatchRegistry struct {
+	mu            sync.Mutex
+	batches       []map[string]wirerest.RegisterUpdate
+	failed        []map[string]wirerest.RegisterUpdate
+	failNext      bool
+	notify        chan struct{}
+	failureNotify chan struct{}
+}
+
+func newFakeBatchRegistry() *fakeBatchRegistry {
+	return &fakeBatchRegistry{notify: make(chan struct{}, 16), failureNotify: make(chan struct{}, 16)}
+}
+
+func (registry *fakeBatchRegistry) SetRegisters(_ context.Context, updates map[string]wirerest.RegisterUpdate) error {
+	registry.mu.Lock()
+	if registry.failNext {
+		registry.failNext = false
+		registry.failed = append(registry.failed, cloneBatch(updates))
+		registry.mu.Unlock()
+		registry.failureNotify <- struct{}{}
+		return errors.New("unavailable")
 	}
-}
-
-// TestRing_TrimsToWindow checks samples older than the window are dropped so the
-// rate baseline stays inside it, keeping a steady rate steady.
-func TestRing_TrimsToWindow(t *testing.T) {
-	r := ring{window: 10 * time.Second}
-	base := time.Now()
-	r.sample(base, []uint64{0})
-	r.sample(base.Add(5*time.Second), []uint64{50})
-	r.sample(base.Add(10*time.Second), []uint64{100})
-	r.sample(base.Add(15*time.Second), []uint64{150})
-	rates := r.sample(base.Add(16*time.Second), []uint64{160})
-	if rates[0] != 10 {
-		t.Fatalf("rate = %v, want 10/s after trim", rates[0])
-	}
-	// The oldest out-of-window sample (t=0) must have been dropped.
-	if len(r.ts) > 4 {
-		t.Fatalf("ring kept %d samples, expected trimming to <= 4", len(r.ts))
-	}
-}
-
-func TestDiagMetaMarksRegisterReadOnly(t *testing.T) {
-	metadata := diagMeta("float")
-	if metadata["type"] != "float" || metadata["diagnostic"] != true || metadata["readOnly"] != true {
-		t.Fatalf("diagnostic metadata = %v", metadata)
-	}
-}
-
-// multiReg is a fake Registry that captures every Provide call by name so a test
-// can read the values pushed for any diagnostic register.
-type multiReg struct {
-	mu  sync.Mutex
-	chs map[string]chan any
-}
-
-func newMultiReg() *multiReg { return &multiReg{chs: make(map[string]chan any)} }
-
-func (r *multiReg) Provide(ctx context.Context, name string, value any, metadata map[string]any, ttl time.Duration) (chan<- any, <-chan any, error) {
-	updates := make(chan any, 16)
-	requests := make(chan any)
-	r.mu.Lock()
-	r.chs[name] = updates
-	r.mu.Unlock()
-	return updates, requests, nil
-}
-
-func (r *multiReg) channel(name string) chan any {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.chs[name]
-}
-
-// fakeSnap is a fixed DiagNodeSource.
-type fakeSnap struct{ s engine.NodeStats }
-
-func (f fakeSnap) SnapshotNode(addr [4]byte) engine.NodeStats { return f.s }
-
-func recvWithinDiag(t *testing.T, ch <-chan any, d time.Duration) any {
-	t.Helper()
-	if ch == nil {
-		t.Fatal("register was never provided")
-	}
+	batch := cloneBatch(updates)
+	registry.batches = append(registry.batches, batch)
+	registry.mu.Unlock()
 	select {
-	case v := <-ch:
-		return v
-	case <-time.After(d):
-		t.Fatal("timed out waiting for diagnostic value")
-		return nil
+	case registry.notify <- struct{}{}:
+	default:
 	}
+	return nil
 }
 
-// TestDiagnostics_PublishesNodeAndDongle checks the immediate publish provides
-// and pushes per-node and per-dongle diagnostic registers with the expected
-// values and that read-only change requests are ignored.
-func TestDiagnostics_PublishesNodeAndDongle(t *testing.T) {
-	src := fakeSnap{s: engine.NodeStats{
-		RxAll: 12, RxIS: 7, RxACK: 3, RxCorrupt: 2,
-		TxAll: 20, TxRetries: 4, Timeouts: 1,
-		LastRx: 1700000000, Misses: 0, Online: true,
-	}}
-	reg := newMultiReg()
-	d := NewDiagnostics(src, reg, "diag", 30*time.Second, time.Second)
+func cloneBatch(updates map[string]wirerest.RegisterUpdate) map[string]wirerest.RegisterUpdate {
+	batch := make(map[string]wirerest.RegisterUpdate, len(updates))
+	for name, update := range updates {
+		batch[name] = update
+	}
+	return batch
+}
 
+func (registry *fakeBatchRegistry) waitBatch(t *testing.T) map[string]wirerest.RegisterUpdate {
+	t.Helper()
+	select {
+	case <-registry.notify:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for diagnostics batch")
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	return registry.batches[len(registry.batches)-1]
+}
+
+type fakeSnap struct{ stats engine.NodeStats }
+
+func (source *fakeSnap) SnapshotNode([4]byte) engine.NodeStats { return source.stats }
+
+func TestDiagnosticsPublishesOneBatchWithDeepSchema(t *testing.T) {
+	source := &fakeSnap{}
+	source.stats.Liveness = engine.LivenessStats{State: engine.LivenessOnline, Since: 1700000000, Misses: 1, TransitionsOnline: 2}
+	source.stats.Packet = engine.PacketStats{RxTotal: 12, RxValid: 11, TxSuccess: 20, TxError: 1, LastValid: 1700000001}
+	source.stats.Transactions[engine.TransactionGet].Outcomes[engine.TransactionSuccessFirst] = 7
+	source.stats.Transactions[engine.TransactionGet].Outcomes[engine.TransactionTimeout] = 2
+	source.stats.Transactions[engine.TransactionGet].AttemptRetry = 3
+	source.stats.Latency = engine.LatencyStats{Count: 7, SumMicros: 140000}
+	registry := newFakeBatchRegistry()
+	diagnostics := NewDiagnostics(source, registry, "diag", time.Hour, 30*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	dongleStats := radio.DongleStats{
-		Connected: true, Reconnects: 2, Up: 1700000001, Down: 1700000000,
-		TxAll: 30, TxErr: 1, RxAll: 9,
-	}
-	d.Serve(ctx,
-		[]DiagNode{{Name: "lab", Addr: [4]byte{1, 2, 3, 4}}},
-		[]DiagDongle{{Name: "far", Stats: func() radio.DongleStats { return dongleStats }}},
+	diagnostics.Serve(ctx,
+		[]DiagNode{{Name: "basement.fan", Addr: [4]byte{1, 2, 3, 4}}},
+		[]DiagDongle{{Name: "far", Stats: func() radio.DongleStats {
+			return radio.DongleStats{State: radio.DongleConnected, OpenAttempts: 3, OpenSuccesses: 2, TxAttempts: 10, TxSuccess: 8, TxOffline: 1, TxErrors: 1}
+		}}},
 	)
 
-	cases := []struct {
-		name string
-		want any
-	}{
-		{"diag.node.lab.online", true},
-		{"diag.node.lab.seen", int64(1700000000)},
-		{"diag.node.lab.misses", int64(0)},
-		{"diag.node.lab.count.rx.all", int64(12)},
-		{"diag.node.lab.count.rx.is", int64(7)},
-		{"diag.node.lab.count.rx.acks", int64(3)},
-		{"diag.node.lab.count.rx.corrupt", int64(2)},
-		{"diag.node.lab.count.tx.all", int64(20)},
-		{"diag.node.lab.count.tx.retries", int64(4)},
-		{"diag.node.lab.count.timeouts", int64(1)},
-		{"diag.node.lab.rate.tx.all", float64(0)}, // first sample: no rate yet
-		{"diag.dongle.far.connected", true},
-		{"diag.dongle.far.reconnects", int64(2)},
-		{"diag.dongle.far.up", int64(1700000001)},
-		{"diag.dongle.far.down", int64(1700000000)},
-		{"diag.dongle.far.count.tx.all", int64(30)},
-		{"diag.dongle.far.count.tx.err", int64(1)},
-		{"diag.dongle.far.count.rx.all", int64(9)},
+	batch := registry.waitBatch(t)
+	wants := map[string]any{
+		"diag.hub.main.schema.version":                                 diagnosticSchemaVersion,
+		"diag.node.basement_fan.liveness.state":                        engine.LivenessOnline,
+		"diag.node.basement_fan.packet.rx.valid":                       uint64(11),
+		"diag.node.basement_fan.transaction.get.outcome.success_first": uint64(7),
+		"diag.node.basement_fan.transaction.get.outcome.timeout":       uint64(2),
+		"diag.node.basement_fan.transaction.get.attempt.retry":         uint64(3),
+		"diag.node.basement_fan.latency.success.microseconds":          uint64(140000),
+		"diag.channel.far.connection.open.attempt":                     uint64(3),
+		"diag.channel.far.packet.tx.error":                             uint64(1),
 	}
-	for _, c := range cases {
-		got := recvWithinDiag(t, reg.channel(c.name), time.Second)
-		if got != c.want {
-			t.Errorf("%s = %v (%T), want %v (%T)", c.name, got, got, c.want, c.want)
+	for name, want := range wants {
+		update, ok := batch[name]
+		if !ok {
+			t.Errorf("missing %s", name)
+			continue
+		}
+		if update.Value != want {
+			t.Errorf("%s = %v (%T), want %v (%T)", name, update.Value, update.Value, want, want)
+		}
+		if update.Metadata["schema"] != diagnosticSchemaVersion || update.TTL != 30*time.Second {
+			t.Errorf("%s metadata/TTL = %v/%v", name, update.Metadata, update.TTL)
+		}
+	}
+	if _, old := batch["diag.node.basement_fan.rate.tx.all"]; old {
+		t.Error("legacy rate register was published")
+	}
+}
+
+func TestDiagnosticsCoalescesUnchangedValuesAndRetriesFailure(t *testing.T) {
+	source := &fakeSnap{}
+	registry := newFakeBatchRegistry()
+	registry.failNext = true
+	diagnostics := NewDiagnostics(source, registry, "diag", 5*time.Millisecond, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	diagnostics.Serve(ctx, []DiagNode{{Name: "lab", Addr: [4]byte{1}}}, nil)
+
+	firstSuccessful := registry.waitBatch(t)
+	if len(firstSuccessful) < 10 {
+		t.Fatalf("retry batch contains %d values, want complete initial catalog", len(firstSuccessful))
+	}
+	for _, update := range firstSuccessful {
+		if update.Metadata == nil {
+			t.Fatal("retry of failed initial batch omitted metadata")
+		}
+	}
+
+	second := registry.waitBatch(t)
+	if len(second) >= len(firstSuccessful) {
+		t.Fatalf("unchanged batch contains %d values, want fewer than initial %d", len(second), len(firstSuccessful))
+	}
+	if _, ok := second["diag.hub.main.publisher.batch.success"]; !ok {
+		t.Error("publisher success counter was not published on the next tick")
+	}
+}
+
+func TestDiagnosticsRetriesFailedRefreshCohort(t *testing.T) {
+	registry := newFakeBatchRegistry()
+	diagnostics := NewDiagnostics(&fakeSnap{}, registry, "diag", 5*time.Millisecond, 20*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	diagnostics.Serve(ctx, []DiagNode{{Name: "lab", Addr: [4]byte{1}}}, nil)
+
+	registry.waitBatch(t)
+	registry.mu.Lock()
+	registry.failNext = true
+	registry.mu.Unlock()
+
+	select {
+	case <-registry.failureNotify:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for failed refresh cohort")
+	}
+	registry.mu.Lock()
+	failed := cloneBatch(registry.failed[len(registry.failed)-1])
+	registry.mu.Unlock()
+
+	// The next successful batch must contain every name from the failed cohort,
+	// even where that unchanged name belongs to the other normal TTL cohort.
+	retried := registry.waitBatch(t)
+	for name := range failed {
+		if _, ok := retried[name]; !ok {
+			t.Errorf("failed refresh value %s was not retried immediately", name)
 		}
 	}
 }
 
-// TestDiagnostics_NodeNameIsSinglePathComponent checks that a dotted node name
-// is collapsed to one registry path component (dots → underscores), so the node
-// name always sits at a fixed position for selectors like Grafana.
-func TestDiagnostics_NodeNameIsSinglePathComponent(t *testing.T) {
-	src := fakeSnap{s: engine.NodeStats{RxAll: 5, LastRx: 1700000000, Online: true}}
-	reg := newMultiReg()
-	d := NewDiagnostics(src, reg, "bleriot", 30*time.Second, time.Second)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	d.Serve(ctx,
-		[]DiagNode{{Name: "basement.fan", Addr: [4]byte{1, 2, 3, 4}}},
-		nil,
-	)
-
-	// The node name "basement.fan" must become the single component "basement_fan"
-	// and never split the path: bleriot.node.basement_fan.rate.rx.all, not
-	// bleriot.node.basement.fan.rate.rx.all.
-	if got := recvWithinDiag(t, reg.channel("bleriot.node.basement_fan.online"), time.Second); got != true {
-		t.Errorf("bleriot.node.basement_fan.online = %v, want true", got)
-	}
-	if got := recvWithinDiag(t, reg.channel("bleriot.node.basement_fan.count.rx.all"), time.Second); got != int64(5) {
-		t.Errorf("bleriot.node.basement_fan.count.rx.all = %v, want 5", got)
-	}
-	if reg.channel("bleriot.node.basement.fan.online") != nil {
-		t.Errorf("dotted node name leaked an extra path component: bleriot.node.basement.fan.online was provided")
+func TestDiagMetaMarksRegisterReadOnly(t *testing.T) {
+	metadata := diagMeta("int")
+	if metadata["type"] != "int" || metadata["diagnostic"] != true || metadata["readOnly"] != true {
+		t.Fatalf("diagnostic metadata = %v", metadata)
 	}
 }
