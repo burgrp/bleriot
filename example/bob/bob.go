@@ -185,3 +185,10 @@ func haltBlink(msg string, period time.Duration) {
 		time.Sleep(period)
 	}
 }
+
+func writePeriod(period *atomic.Int32, value int32, null bool) {
+	if null {
+		value = 0
+	}
+	period.Store(value)
+}
