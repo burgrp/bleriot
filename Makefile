@@ -27,9 +27,10 @@ bench:
 	cd lib/site && BLERIOT_DONGLE_HUB=$(DONGLE_HUB) BLERIOT_DONGLE_NODE=$(DONGLE_NODE) \
 		go test -tags dongles -bench . -benchmem -run '^$$' -benchtime 50x ./functest/
 
-# test runs the regular (non-hardware) unit tests for the host runtime.
+# test runs every regular host-compatible unit test. The PAN211x node adapter is
+# TinyGo-only, so it is intentionally excluded from the standard Go package set.
 test:
-	cd lib/site && go test ./...
+	cd lib && go test ./node ./shared/... ./site/...
 
 .PHONY: functest bench test
 

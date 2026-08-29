@@ -187,9 +187,17 @@ func configImports(cfg any, lit string) map[string]string {
 // package-scoped type reachable from t (through pointers, slices, arrays, maps
 // and struct fields), using the package name reflect reports (the one %#v emits).
 func walkPkgPaths(t reflect.Type, known map[string]string) {
+	walkPkgPathsSeen(t, known, make(map[reflect.Type]bool))
+}
+
+func walkPkgPathsSeen(t reflect.Type, known map[string]string, seen map[reflect.Type]bool) {
 	if t == nil {
 		return
 	}
+	if seen[t] {
+		return
+	}
+	seen[t] = true
 	if t.PkgPath() != "" && t.Name() != "" {
 		s := t.String() // "pkg.Name"
 		if i := strings.LastIndex(s, "."); i >= 0 {
@@ -198,13 +206,13 @@ func walkPkgPaths(t reflect.Type, known map[string]string) {
 	}
 	switch t.Kind() {
 	case reflect.Ptr, reflect.Slice, reflect.Array:
-		walkPkgPaths(t.Elem(), known)
+		walkPkgPathsSeen(t.Elem(), known, seen)
 	case reflect.Map:
-		walkPkgPaths(t.Key(), known)
-		walkPkgPaths(t.Elem(), known)
+		walkPkgPathsSeen(t.Key(), known, seen)
+		walkPkgPathsSeen(t.Elem(), known, seen)
 	case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
-			walkPkgPaths(t.Field(i).Type, known)
+			walkPkgPathsSeen(t.Field(i).Type, known, seen)
 		}
 	}
 }

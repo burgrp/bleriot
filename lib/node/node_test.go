@@ -1,15 +1,17 @@
 package node
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/burgrp/bleriot/lib/shared/protocol"
 )
 
 type fakeRadio struct {
-	rx     [][]byte
-	sent   []sentPacket
-	events *[]string
+	rx      [][]byte
+	sent    []sentPacket
+	events  *[]string
+	sendErr error
 }
 
 type sentPacket struct {
@@ -24,7 +26,7 @@ func (r *fakeRadio) Send(dst [4]byte, packet []byte) error {
 	copyPacket := make([]byte, len(packet))
 	copy(copyPacket, packet)
 	r.sent = append(r.sent, sentPacket{dst: dst, packet: copyPacket})
-	return nil
+	return r.sendErr
 }
 
 func (r *fakeRadio) Receive(buf []byte) (int, bool) {
@@ -201,6 +203,27 @@ func TestDuplicateSetRepeatsIdempotentAssignment(t *testing.T) {
 	}
 }
 
+func TestSetWritesAfterAckSendFailure(t *testing.T) {
+	events := make([]string, 0, 2)
+	dev := &fakeDevice{events: &events}
+	radio := &fakeRadio{events: &events, sendErr: errors.New("radio unavailable")}
+	n, err := New(radio, nodeSelf, testKey, dev)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	radio.rx = append(radio.rx, encodeRequest(t, protocol.TypeSET, 0, 1, 456))
+
+	if !n.Poll() {
+		t.Fatal("Poll did not consume SET")
+	}
+	if len(events) != 2 || events[0] != "send" || events[1] != "write" {
+		t.Fatalf("events = %v, want [send write]", events)
+	}
+	if dev.writes != 1 || dev.written != 456 {
+		t.Fatalf("write count/value = %d/%d, want 1/456", dev.writes, dev.written)
+	}
+}
+
 func TestNodeToHubPacketTypesAreSilent(t *testing.T) {
 	dev := &fakeDevice{}
 	n, radio := newTestNode(t, dev)
@@ -214,6 +237,33 @@ func TestNodeToHubPacketTypesAreSilent(t *testing.T) {
 	}
 	if dev.writes != 0 || len(radio.sent) != 0 {
 		t.Fatalf("writes/responses = %d/%d, want 0/0", dev.writes, len(radio.sent))
+	}
+}
+
+func TestUnknownPacketTypeIsSilent(t *testing.T) {
+	dev := &fakeDevice{}
+	n, radio := newTestNode(t, dev)
+	radio.rx = append(radio.rx, encodeRequest(t, 0xFE, 0, 1, 10))
+
+	if !n.Poll() {
+		t.Fatal("Poll did not consume unknown packet type")
+	}
+	if dev.writes != 0 || len(radio.sent) != 0 {
+		t.Fatalf("writes/responses = %d/%d, want 0/0", dev.writes, len(radio.sent))
+	}
+}
+
+func TestUnsupportedPacketVersionIsSilent(t *testing.T) {
+	n, radio := newTestNode(t, &fakeDevice{})
+	request := encodeRequest(t, protocol.TypeGET, 0, 1, 0)
+	request[4] = protocol.PacketVersion + 1
+	radio.rx = append(radio.rx, request)
+
+	if n.Poll() {
+		t.Fatal("unsupported packet version reported as handled")
+	}
+	if len(radio.sent) != 0 {
+		t.Fatalf("unsupported packet version produced %d responses, want 0", len(radio.sent))
 	}
 }
 

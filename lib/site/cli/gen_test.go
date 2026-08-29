@@ -2,8 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"path"
 	"strings"
 	"testing"
 
@@ -95,6 +99,116 @@ func TestRunGenOutput(t *testing.T) {
 // exercising the import-collection path.
 type bobLikeConfig struct {
 	Period uint32
+}
+
+type recursiveConfig struct {
+	Next *recursiveConfig
+}
+
+type mutualConfigA struct {
+	B *mutualConfigB
+}
+
+type mutualConfigB struct {
+	A *mutualConfigA
+}
+
+func TestRenderProvisioningRecursiveConfig(t *testing.T) {
+	inst := sampleInstance()
+	inst.Config = &recursiveConfig{}
+
+	out, err := renderProvisioning(inst)
+	if err != nil {
+		t.Fatalf("renderProvisioning: %v", err)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main_gen.go", out, parser.AllErrors); err != nil {
+		t.Fatalf("generated source does not parse: %v\n%s", err, out)
+	}
+}
+
+func TestRenderProvisioningMutuallyRecursiveConfig(t *testing.T) {
+	inst := sampleInstance()
+	inst.Config = &mutualConfigA{}
+
+	out, err := renderProvisioning(inst)
+	if err != nil {
+		t.Fatalf("renderProvisioning: %v", err)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main_gen.go", out, parser.AllErrors); err != nil {
+		t.Fatalf("generated source does not parse: %v\n%s", err, out)
+	}
+}
+
+func TestRunGenImportsNestedSliceMapPackage(t *testing.T) {
+	inst := sampleInstance()
+	inst.Config = map[string][]config.SpreadFactor{"factors": {config.SpreadFactorS2}}
+
+	var buf bytes.Buffer
+	if err := runGen(inventory.Inventory{inst}, "", &buf); err != nil {
+		t.Fatalf("runGen: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"github.com/burgrp/bleriot/lib/shared/config"`) {
+		t.Fatalf("generated source missing nested element package import:\n%s", out)
+	}
+	if !strings.Contains(out, "[]config.SpreadFactor") {
+		t.Fatalf("generated source missing nested typed slice:\n%s", out)
+	}
+}
+
+func TestGeneratedSourceTypeChecks(t *testing.T) {
+	inst := sampleInstance()
+	inst.Config = []config.SpreadFactor{config.SpreadFactorS2}
+	out, err := renderProvisioning(inst)
+	if err != nil {
+		t.Fatalf("renderProvisioning: %v", err)
+	}
+	out += "\nfunc bleriotMain(node.Provisioning, []config.SpreadFactor) {}\n"
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main_gen.go", out, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("generated source does not parse: %v\n%s", err, out)
+	}
+	if _, err := (&types.Config{Importer: generatedSourceImporter{}}).Check("generated", fset, []*ast.File{file}, nil); err != nil {
+		t.Fatalf("generated source does not type-check: %v\n%s", err, out)
+	}
+}
+
+type generatedSourceImporter struct{}
+
+func (generatedSourceImporter) Import(importPath string) (*types.Package, error) {
+	pkg := types.NewPackage(importPath, path.Base(importPath))
+	switch importPath {
+	case firmwareNodePkg:
+		fields := []*types.Var{
+			types.NewField(token.NoPos, pkg, "Address", types.NewArray(types.Typ[types.Byte], config.AddrLen), false),
+			types.NewField(token.NoPos, pkg, "Key", types.NewArray(types.Typ[types.Byte], config.KeyLen), false),
+			types.NewField(token.NoPos, pkg, "Channel", types.Typ[types.Uint8], false),
+			types.NewField(token.NoPos, pkg, "SpreadFactor", types.Typ[types.Uint8], false),
+		}
+		name := types.NewTypeName(token.NoPos, pkg, "Provisioning", nil)
+		types.NewNamed(name, types.NewStruct(fields, nil), nil)
+		pkg.Scope().Insert(name)
+	case "github.com/burgrp/bleriot/lib/shared/config":
+		name := types.NewTypeName(token.NoPos, pkg, "SpreadFactor", nil)
+		types.NewNamed(name, types.Typ[types.Uint8], nil)
+		pkg.Scope().Insert(name)
+	default:
+		return nil, errors.New("unexpected generated source import")
+	}
+	pkg.MarkComplete()
+	return pkg, nil
+}
+
+type errorWriter struct{ err error }
+
+func (writer errorWriter) Write([]byte) (int, error) { return 0, writer.err }
+
+func TestRunGenReturnsWriterError(t *testing.T) {
+	want := errors.New("writer failed")
+	if err := runGen(inventory.Inventory{sampleInstance()}, "", errorWriter{err: want}); !errors.Is(err, want) {
+		t.Fatalf("runGen error = %v, want %v", err, want)
+	}
 }
 
 func TestRunGenImportsConfigPackage(t *testing.T) {

@@ -37,6 +37,7 @@ type fakeTx struct {
 	sets     []int32
 	setNulls int
 	setDone  chan struct{}
+	setErr   error
 }
 
 func newFakeTx() *fakeTx {
@@ -61,9 +62,10 @@ func (tx *fakeTx) Get(ctx context.Context, addr [4]byte, reg uint16) (engine.Upd
 func (tx *fakeTx) Set(_ context.Context, _ [4]byte, _ uint16, value int32) error {
 	tx.mu.Lock()
 	tx.sets = append(tx.sets, value)
+	err := tx.setErr
 	tx.mu.Unlock()
 	tx.setDone <- struct{}{}
-	return nil
+	return err
 }
 
 func (tx *fakeTx) SetNull(context.Context, [4]byte, uint16) error {
@@ -97,15 +99,20 @@ type fakeRegistry struct {
 	mu       sync.Mutex
 	provided map[string]*providedRegister
 	notify   chan string
+	fail     map[string]error
 }
 
 func newFakeRegistry() *fakeRegistry {
-	return &fakeRegistry{provided: make(map[string]*providedRegister), notify: make(chan string, 32)}
+	return &fakeRegistry{provided: make(map[string]*providedRegister), notify: make(chan string, 32), fail: make(map[string]error)}
 }
 
 func (registry *fakeRegistry) Provide(_ context.Context, name string, initial any, metadata map[string]any, _ time.Duration) (chan<- any, <-chan any, error) {
 	provided := &providedRegister{initial: initial, metadata: metadata, updates: make(chan any, 32), requests: make(chan any, 32)}
 	registry.mu.Lock()
+	if err := registry.fail[name]; err != nil {
+		registry.mu.Unlock()
+		return nil, nil, err
+	}
 	registry.provided[name] = provided
 	registry.mu.Unlock()
 	registry.notify <- name
@@ -185,6 +192,57 @@ func TestBridgeProvidesNilBeforeFirstGetCompletes(t *testing.T) {
 	answer(call, 1234)
 	if value := receive(t, provided.updates); value != 12.34 {
 		t.Fatalf("GET value = %v, want 12.34", value)
+	}
+}
+
+func TestBridgeProvideFailureDoesNotStopOtherRegistersOrPolling(t *testing.T) {
+	tx := newFakeTx()
+	registry := newFakeRegistry()
+	registry.fail["test.a"] = errors.New("registry unavailable")
+	bridge := newTestBridge(tx, registry, time.Hour, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bridge.ServeNode(ctx, testNode(t, "test", nodeAddr, floatRegister(testRegA, "a"), floatRegister(testRegB, "b")))
+	providedB := registry.waitProvided(t, "test.b")
+
+	first := nextGet(t, tx)
+	if first.reg != testRegA {
+		t.Fatalf("first GET register = %#x, want failed-provider register %#x", first.reg, testRegA)
+	}
+	answer(first, 100)
+	second := nextGet(t, tx)
+	if second.reg != testRegB {
+		t.Fatalf("second GET register = %#x, want working register %#x", second.reg, testRegB)
+	}
+	answer(second, 250)
+	if value := receive(t, providedB.updates); value != 2.5 {
+		t.Fatalf("working register update = %v, want 2.5", value)
+	}
+}
+
+type closedRequestRegistry struct{}
+
+func (closedRequestRegistry) Provide(context.Context, string, any, map[string]any, time.Duration) (chan<- any, <-chan any, error) {
+	updates := make(chan any)
+	requests := make(chan any)
+	close(requests)
+	return updates, requests, nil
+}
+
+func TestServeRegisterExitsWhenRequestStreamCloses(t *testing.T) {
+	bridge := newTestBridge(newFakeTx(), closedRequestRegistry{}, time.Hour, 3)
+	n := testNode(t, "test", nodeAddr, floatRegister(testRegA, "a"))
+	job := &polledNode{ctx: context.Background(), bridge: bridge, node: n}
+	bridged := &bridgedRegister{register: &n.Registers[0], values: make(chan any, 1)}
+	done := make(chan struct{})
+	go func() {
+		bridge.serveRegister(job.ctx, job, bridged)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("serveRegister did not exit after request stream closed")
 	}
 }
 
@@ -389,6 +447,51 @@ func TestBridgeSetNullWaitsForNormalGetConfirmation(t *testing.T) {
 	confirmation.resp <- getResult{update: engine.Update{Null: true}}
 	if value := receive(t, provided.updates); value != nil {
 		t.Fatalf("confirmed NULL value = %v, want nil", value)
+	}
+}
+
+func TestSetLivenessDependsOnAcknowledgement(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		setErr       error
+		wantFailures int
+		wantOffline  bool
+		wantSuccess  uint64
+	}{
+		{name: "acknowledged", wantFailures: 0, wantOffline: false, wantSuccess: 1},
+		{name: "failed", setErr: errors.New("timeout"), wantFailures: 2, wantOffline: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := newFakeTx()
+			tx.setErr = tt.setErr
+			bridge := newTestBridge(tx, newFakeRegistry(), time.Hour, 3)
+			n := testNode(t, "test", nodeAddr, floatRegister(testRegA, "a"))
+			job := &polledNode{ctx: context.Background(), bridge: bridge, node: n, failures: 2, offline: true}
+
+			bridge.applyRequest(job.ctx, job, &n.Registers[0], 12.5, bridge.log)
+
+			job.mu.Lock()
+			failures, offline, successes := job.failures, job.offline, job.successes
+			job.mu.Unlock()
+			if failures != tt.wantFailures || offline != tt.wantOffline || successes != tt.wantSuccess {
+				t.Fatalf("liveness = failures %d offline %v successes %d; want %d/%v/%d", failures, offline, successes, tt.wantFailures, tt.wantOffline, tt.wantSuccess)
+			}
+		})
+	}
+}
+
+func TestDeliverLatestCoalescesWhileConsumerBlocked(t *testing.T) {
+	values := make(chan any, 1)
+	deliverLatest(values, 1)
+	deliverLatest(values, 2)
+	deliverLatest(values, 3)
+	if value := <-values; value != 3 {
+		t.Fatalf("coalesced value = %v, want latest value 3", value)
+	}
+	select {
+	case value := <-values:
+		t.Fatalf("obsolete value remained queued: %v", value)
+	default:
 	}
 }
 

@@ -21,6 +21,49 @@ func mustCodec(t *testing.T) Codec {
 	return c
 }
 
+func TestWireConstants(t *testing.T) {
+	if PacketLen != 13 || PacketVersion != 0x01 || FlagNULL != 0x01 {
+		t.Fatalf("wire constants: PacketLen=%d PacketVersion=%#x FlagNULL=%#x", PacketLen, PacketVersion, FlagNULL)
+	}
+	if TypeGET != 0x00 || TypeVALUE != 0x01 || TypeSET != 0x02 || TypeACK != 0x03 {
+		t.Fatalf("packet types: GET=%#x VALUE=%#x SET=%#x ACK=%#x", TypeGET, TypeVALUE, TypeSET, TypeACK)
+	}
+}
+
+func TestGoldenPackets(t *testing.T) {
+	cases := []struct {
+		name  string
+		wire  [PacketLen]byte
+		typ   byte
+		flags byte
+		reg   uint16
+		value int32
+	}{
+		{"GET", [PacketLen]byte{0xaa, 0xbb, 0xcc, 0xdd, 0x01, 0x12, 0x41, 0x12, 0x3f, 0x43, 0xdc, 0xb4, 0xdf}, TypeGET, 0x28, 0x1234, 0},
+		{"VALUE", [PacketLen]byte{0xaa, 0xbb, 0xcc, 0xdd, 0x01, 0xfc, 0x73, 0xd5, 0x36, 0xbe, 0x07, 0x86, 0x11}, TypeVALUE, 0x29, 0x1234, -123456789},
+		{"SET", [PacketLen]byte{0xaa, 0xbb, 0xcc, 0xdd, 0x01, 0x09, 0x8e, 0xe7, 0xff, 0xff, 0x75, 0x1c, 0xbd}, TypeSET, 0x28, 0xbeef, 0x10203040},
+		{"ACK", [PacketLen]byte{0xaa, 0xbb, 0xcc, 0xdd, 0x01, 0x75, 0x98, 0x1d, 0xd6, 0x39, 0x35, 0xcf, 0x91}, TypeACK, 0x29, 0xbeef, 0},
+	}
+	c := mustCodec(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var encoded [PacketLen]byte
+			c.Encode(encoded[:], testSrc, tc.typ, tc.flags, tc.reg, tc.value)
+			if encoded != tc.wire {
+				t.Fatalf("Encode = % x, want % x", encoded, tc.wire)
+			}
+
+			src, typ, flags, reg, value, err := c.Decode(tc.wire[:])
+			if err != nil {
+				t.Fatalf("Decode literal: %v", err)
+			}
+			if src != testSrc || typ != tc.typ || flags != tc.flags || reg != tc.reg || value != tc.value {
+				t.Fatalf("Decode literal = src %x type %#x flags %#x reg %#x value %d", src, typ, flags, reg, value)
+			}
+		})
+	}
+}
+
 // TestRoundTrip encodes then decodes a packet and checks every field.
 func TestRoundTrip(t *testing.T) {
 	cases := []struct {
@@ -86,6 +129,15 @@ func TestGuardRoundTrip(t *testing.T) {
 	if got := GuardMillis(FlagsWithGuard(0, 200)); got != MaxGuardMillis {
 		t.Errorf("guard clamp: got %d, want %d", got, MaxGuardMillis)
 	}
+	if got := FlagsWithGuard(0xff, 0); got != FlagNULL {
+		t.Errorf("guard replacement: got %#x, want only NULL", got)
+	}
+	if got := FlagsWithGuard(0xfe, 5); got != 0x0a {
+		t.Errorf("guard replacement with NULL clear: got %#x, want 0x0a", got)
+	}
+	if got := FlagsWithGuard(FlagNULL, 255); got != 0xff {
+		t.Errorf("guard clamp preserving NULL: got %#x, want 0xff", got)
+	}
 	flags := FlagsWithGuard(FlagNULL, 20)
 	if got := GuardFlags(flags); got != FlagsWithGuard(0, 20) {
 		t.Errorf("GuardFlags: got %#x, want guard without NULL", got)
@@ -145,8 +197,8 @@ func TestDecodeShortPacket(t *testing.T) {
 	c := mustCodec(t)
 	for n := 0; n < PacketLen; n++ {
 		_, _, _, _, _, err := c.Decode(make([]byte, n))
-		if err == nil {
-			t.Errorf("expected error for %d-byte input, got nil", n)
+		if err != errShortPacket {
+			t.Errorf("%d-byte input error = %v, want errShortPacket", n, err)
 		}
 	}
 }
@@ -158,8 +210,8 @@ func TestDecodeUnsupportedVersion(t *testing.T) {
 	c.Encode(buf, testSrc, TypeGET, 0, 1, 0)
 	buf[4] = 0xff // corrupt version
 	_, _, _, _, _, err := c.Decode(buf)
-	if err == nil {
-		t.Error("expected error for unsupported version, got nil")
+	if err != errUnsupportedPacket {
+		t.Errorf("error = %v, want errUnsupportedPacket", err)
 	}
 }
 

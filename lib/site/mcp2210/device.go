@@ -149,7 +149,7 @@ func (d *Device) command(req [reportLen]byte) ([reportLen]byte, error) {
 			return resp, nil
 		}
 		stale++
-		if stale > maxStaleDrain {
+		if stale >= maxStaleDrain {
 			return resp, fmt.Errorf("mcp2210: response opcode 0x%02X for command 0x%02X", resp[0], req[0])
 		}
 		// Stale response from an earlier aborted command; drop it and read on.

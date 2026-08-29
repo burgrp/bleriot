@@ -240,6 +240,35 @@ func TestRetryDuplicateCannotCompleteNextTransaction(t *testing.T) {
 	}
 }
 
+func TestRetryDuplicateACKCannotCompleteNextSet(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 20*time.Millisecond, 1)
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- engine.Set(context.Background(), nodeAddr, regTemp, 11) }()
+
+	firstRequest := <-radio.sent
+	_, _, flags, reg, _, _ := codec.Decode(firstRequest[:])
+	<-radio.sent
+	injectResponse(radio, codec, nodeAddr, protocol.TypeACK, flags, reg, 0)
+
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- engine.Set(context.Background(), nodeAddr, regTemp, 22) }()
+	injectResponse(radio, codec, nodeAddr, protocol.TypeACK, flags, reg, 0)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first Set: %v", err)
+	}
+
+	request := <-radio.sent
+	_, _, flags, reg, _, _ = codec.Decode(request[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeACK, flags, reg, 0)
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second Set: %v; retry duplicate escaped drain", err)
+	}
+	stats := engine.SnapshotNode(nodeAddr)
+	if stats.Packet.RxMatchedACK != 2 || stats.Packet.RxOrphanACK != 1 {
+		t.Fatalf("ACK stats = %+v", stats.Packet)
+	}
+}
+
 func TestGetIgnoresWrongSourceRegisterAndType(t *testing.T) {
 	engine, radio, codec := newTestEngine(t, 80*time.Millisecond, 1)
 	codec2 := addTestNode(t, engine, "other", testChannel, nodeAddr2, testKey2)
@@ -327,6 +356,71 @@ func TestDistinctChannelsProceedConcurrently(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+type observedContext struct {
+	context.Context
+	once    sync.Once
+	checked chan struct{}
+}
+
+func (ctx *observedContext) Err() error {
+	ctx.once.Do(func() { close(ctx.checked) })
+	return nil
+}
+
+func TestRadioReplacementPreservesChannelGate(t *testing.T) {
+	engine, oldRadio, codec := newTestEngine(t, 20*time.Millisecond, 1)
+	firstDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
+	go func() {
+		update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+		firstDone <- struct {
+			update Update
+			err    error
+		}{update, err}
+	}()
+	<-oldRadio.sent
+	<-oldRadio.receivedCalls
+
+	queuedContext := &observedContext{Context: context.Background(), checked: make(chan struct{})}
+	secondDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
+	go func() {
+		update, err := engine.Get(queuedContext, nodeAddr, regOther)
+		secondDone <- struct {
+			update Update
+			err    error
+		}{update, err}
+	}()
+	<-queuedContext.checked
+
+	newRadio := newFakeRadio()
+	if err := engine.AddRadio(context.Background(), testChannel, newRadio); err != nil {
+		t.Fatalf("replace radio: %v", err)
+	}
+	retry := <-oldRadio.sent
+	_, _, flags, reg, _, _ := codec.Decode(retry[:])
+	injectResponse(oldRadio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 11)
+
+	first := <-firstDone
+	if first.err != nil || first.update.Value != 11 {
+		t.Fatalf("first Get on old radio = %+v, %v", first.update, first.err)
+	}
+	request := <-newRadio.sent
+	_, _, flags, reg, _, _ = codec.Decode(request[:])
+	injectResponse(newRadio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 22)
+	second := <-secondDone
+	if second.err != nil || second.update.Value != 22 {
+		t.Fatalf("queued Get on replacement radio = %+v, %v", second.update, second.err)
+	}
+	if got := len(newRadio.sent); got != 0 {
+		t.Fatalf("replacement radio has %d unexpected extra sends", got)
 	}
 }
 
@@ -528,20 +622,27 @@ func TestZeroRetriesMeansOneAttempt(t *testing.T) {
 	}
 }
 
-func TestClosedReceivedChannelEndsFinalDrain(t *testing.T) {
-	engine, radio, _ := newTestEngine(t, 20*time.Millisecond, 0)
-	close(radio.recv)
+func TestClosedReceivedChannelWhileWaitingEndsTransaction(t *testing.T) {
+	engine, radio, _ := newTestEngine(t, 20*time.Millisecond, 1)
 	done := make(chan error, 1)
 	go func() {
 		_, err := engine.Get(context.Background(), nodeAddr, regTemp)
 		done <- err
 	}()
+	<-radio.sent
+	<-radio.receivedCalls
+	close(radio.recv)
+	<-radio.sent
 	select {
 	case err := <-done:
 		if !errors.Is(err, ErrTimeout) {
 			t.Fatalf("Get error = %v, want timeout", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("closed receive channel left drain spinning")
+		t.Fatal("closed receive channel left transaction spinning")
+	}
+	get := engine.SnapshotNode(nodeAddr).Transactions[TransactionGet]
+	if get.AttemptInitial != 1 || get.AttemptRetry != 1 || get.AttemptTimeout != 2 || get.Outcomes[TransactionTimeout] != 1 {
+		t.Fatalf("closed receive transaction stats = %+v", get)
 	}
 }
