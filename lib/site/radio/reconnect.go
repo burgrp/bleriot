@@ -10,10 +10,9 @@ import (
 )
 
 // ErrOffline is returned by a Reconnecting dongle's Send while no physical device
-// is connected. The engine treats it like any other send failure: the
-// transaction fails and is retried, and a watch refresh that hits it counts
-// toward the node's liveness, so a register served by an offline dongle is
-// reported NULL until the device returns.
+// is connected. The engine treats it like any other send failure, and the
+// bridge's continuing polling sweeps report a node on that channel unavailable
+// until the device returns.
 var ErrOffline = errors.New("radio: dongle offline")
 
 // DefaultReconnectBackoff is the wait between reconnection attempts when no

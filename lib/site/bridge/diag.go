@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultDiagnosticInterval = time.Second
-	diagnosticSchemaVersion   = 4
+	diagnosticSchemaVersion   = 8
 )
 
 // DiagnosticBatchRegistry is the Registry wire operation needed by the
@@ -221,51 +221,34 @@ func (d *Diagnostics) snapshot(nodes []DiagNode, dongles []DiagDongle, now time.
 
 func addNodeValues(values map[string]diagnosticValue, prefix, name string, stats engine.NodeStats) {
 	base := prefix + ".node." + pathComponent(name) + "."
-	values[base+"liveness.state"] = integer(stats.Liveness.State)
-	values[base+"liveness.since"] = integer(stats.Liveness.Since)
-	values[base+"liveness.probe.misses"] = integer(stats.Liveness.Misses)
-	values[base+"liveness.transition.offline"] = integer(stats.Liveness.TransitionsOffline)
-
 	packet := stats.Packet
-	packetValues := map[string]uint64{
-		"packet.rx.total":            packet.RxTotal,
-		"packet.rx.valid":            packet.RxValid,
-		"packet.rx.push":             packet.RxPushIS,
-		"packet.rx.orphan":           packet.RxOrphanIS + packet.RxOrphanACK,
-		"packet.rx.invalid":          packet.RxInvalidDecode + packet.RxInvalidSource + packet.RxInvalidType,
-		"packet.rx.unknown_register": packet.RxUnknownRegister,
-		"packet.tx.success":          packet.TxSuccess,
-		"packet.tx.error":            packet.TxError,
-		"packet.push_ack.failure":    packet.PushACKError + packet.PushACKNoRadio,
+	packetValues := map[string]any{
+		"packet.value.matched":  packet.RxMatchedVALUE,
+		"packet.value.orphan":   packet.RxOrphanVALUE,
+		"packet.value.null":     packet.RxNullVALUE,
+		"packet.ack.matched":    packet.RxMatchedACK,
+		"packet.ack.orphan":     packet.RxOrphanACK,
+		"packet.invalid.decode": packet.RxInvalidDecode,
+		"packet.invalid.type":   packet.RxInvalidType,
+		"packet.last.received":  packet.LastReceived,
+		"packet.last.valid":     packet.LastValid,
 	}
 	for suffix, value := range packetValues {
 		values[base+suffix] = integer(value)
 	}
-	values[base+"packet.last.valid"] = integer(packet.LastValid)
-
-	var aggregateOutcomes [engine.TransactionOutcomeCount]uint64
-	var retries uint64
 	for operation := engine.TransactionOperation(0); operation < engine.TransactionOperationCount; operation++ {
 		transaction := stats.Transactions[operation]
+		transactionBase := base + "transaction." + operation.String() + "."
 		for outcome := engine.TransactionOutcome(0); outcome < engine.TransactionOutcomeCount; outcome++ {
-			aggregateOutcomes[outcome] += transaction.Outcomes[outcome]
+			values[transactionBase+"outcome."+outcome.String()] = integer(transaction.Outcomes[outcome])
 		}
-		values[base+"transaction."+operation.String()] = integer(outcomeSum(transaction.Outcomes))
-		retries += transaction.AttemptRetry
+		values[transactionBase+"attempt.initial"] = integer(transaction.AttemptInitial)
+		values[transactionBase+"attempt.retry"] = integer(transaction.AttemptRetry)
+		values[transactionBase+"attempt.send_error"] = integer(transaction.AttemptSendError)
+		values[transactionBase+"attempt.timeout"] = integer(transaction.AttemptTimeout)
+		values[transactionBase+"latency.success.count"] = integer(transaction.LatencyCount)
+		values[transactionBase+"latency.success.microseconds"] = integer(transaction.LatencySumMicros)
 	}
-	for outcome := engine.TransactionOutcome(0); outcome < engine.TransactionOutcomeCount; outcome++ {
-		values[base+"transaction.all.outcome."+outcome.String()] = integer(aggregateOutcomes[outcome])
-	}
-	values[base+"transaction.all.attempt.retry"] = integer(retries)
-	addLatencyValues(values, base, stats.Latency, false)
-}
-
-func outcomeSum(outcomes [engine.TransactionOutcomeCount]uint64) uint64 {
-	var total uint64
-	for _, count := range outcomes {
-		total += count
-	}
-	return total
 }
 
 func addLatencyValues(values map[string]diagnosticValue, base string, latency engine.LatencyStats, buckets bool) {

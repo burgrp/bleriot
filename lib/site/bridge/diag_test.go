@@ -35,8 +35,7 @@ func (registry *fakeBatchRegistry) SetRegisters(_ context.Context, updates map[s
 		registry.failureNotify <- struct{}{}
 		return errors.New("unavailable")
 	}
-	batch := cloneBatch(updates)
-	registry.batches = append(registry.batches, batch)
+	registry.batches = append(registry.batches, cloneBatch(updates))
 	registry.mu.Unlock()
 	select {
 	case registry.notify <- struct{}{}:
@@ -69,21 +68,26 @@ type fakeSnap struct{ stats engine.NodeStats }
 
 func (source *fakeSnap) SnapshotNode([4]byte) engine.NodeStats { return source.stats }
 
-func TestDiagnosticsPublishesCompactSchema(t *testing.T) {
+func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
+	if diagnosticSchemaVersion != 8 {
+		t.Fatalf("diagnostic schema = %d, want 8", diagnosticSchemaVersion)
+	}
 	source := &fakeSnap{}
-	source.stats.Liveness = engine.LivenessStats{State: engine.LivenessOnline, Since: 1700000000, Misses: 1, TransitionsOnline: 2}
-	source.stats.Packet = engine.PacketStats{RxTotal: 12, RxValid: 11, TxSuccess: 20, TxError: 1, LastValid: 1700000001}
-	source.stats.Transactions[engine.TransactionGet].Outcomes[engine.TransactionSuccessFirst] = 7
-	source.stats.Transactions[engine.TransactionGet].Outcomes[engine.TransactionTimeout] = 2
-	source.stats.Transactions[engine.TransactionGet].AttemptRetry = 3
-	source.stats.Packet.RxOrphanIS = 2
-	source.stats.Packet.RxOrphanACK = 3
-	source.stats.Packet.RxInvalidDecode = 1
-	source.stats.Packet.RxInvalidType = 2
-	source.stats.Packet.RxUnknownRegister = 4
-	source.stats.Packet.PushACKError = 1
-	source.stats.Packet.PushACKNoRadio = 2
-	source.stats.Latency = engine.LatencyStats{Count: 7, SumMicros: 140000, Buckets: [engine.LatencyBucketCount]uint64{1, 2, 3, 4, 5, 6, 7, 7}}
+	get := &source.stats.Transactions[engine.TransactionGet]
+	get.Outcomes[engine.TransactionSuccessFirst] = 7
+	get.Outcomes[engine.TransactionTimeout] = 2
+	get.AttemptInitial, get.AttemptRetry, get.AttemptTimeout = 9, 3, 5
+	get.LatencyCount, get.LatencySumMicros = 7, 140000
+	set := &source.stats.Transactions[engine.TransactionSet]
+	set.Outcomes[engine.TransactionSuccessRetry] = 1
+	set.AttemptInitial, set.AttemptRetry, set.LatencyCount, set.LatencySumMicros = 1, 1, 1, 30000
+	source.stats.Packet = engine.PacketStats{
+		RxMatchedVALUE: 7, RxOrphanVALUE: 2, RxNullVALUE: 1,
+		RxMatchedACK: 1, RxOrphanACK: 3,
+		RxInvalidDecode: 1, RxInvalidType: 3,
+		LastReceived: 1700000000, LastValid: 1700000001,
+	}
+	source.stats.Latency = engine.LatencyStats{Count: 8, SumMicros: 170000, Buckets: [engine.LatencyBucketCount]uint64{1, 2, 3, 4, 5, 6, 7, 8}}
 	registry := newFakeBatchRegistry()
 	diagnostics := NewDiagnostics(source, registry, "diag", time.Hour, 30*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -91,27 +95,26 @@ func TestDiagnosticsPublishesCompactSchema(t *testing.T) {
 	diagnostics.Serve(ctx,
 		[]DiagNode{{Name: "basement.fan", Addr: [4]byte{1, 2, 3, 4}}},
 		[]DiagDongle{{Name: "far", Stats: func() radio.DongleStats {
-			return radio.DongleStats{State: radio.DongleConnected, OpenAttempts: 3, OpenSuccesses: 2, TxAttempts: 10, TxSuccess: 8, TxOffline: 1, TxErrors: 1}
+			return radio.DongleStats{State: radio.DongleConnected, OpenAttempts: 3, TxErrors: 1}
 		}}},
 	)
 
 	batch := registry.waitBatch(t)
 	wants := map[string]any{
-		"diag.hub.main.schema.version":                                 diagnosticSchemaVersion,
-		"diag.hub.main.latency.success.bucket.le_plus_Inf":             uint64(7),
-		"diag.node.basement_fan.liveness.state":                        engine.LivenessOnline,
-		"diag.node.basement_fan.packet.rx.valid":                       uint64(11),
-		"diag.node.basement_fan.packet.rx.orphan":                      uint64(5),
-		"diag.node.basement_fan.packet.rx.invalid":                     uint64(3),
-		"diag.node.basement_fan.packet.rx.unknown_register":            uint64(4),
-		"diag.node.basement_fan.packet.push_ack.failure":               uint64(3),
-		"diag.node.basement_fan.transaction.all.outcome.success_first": uint64(7),
-		"diag.node.basement_fan.transaction.all.outcome.timeout":       uint64(2),
-		"diag.node.basement_fan.transaction.get":                       uint64(9),
-		"diag.node.basement_fan.transaction.all.attempt.retry":         uint64(3),
-		"diag.node.basement_fan.latency.success.microseconds":          uint64(140000),
-		"diag.channel.far.connection.open.attempt":                     uint64(3),
-		"diag.channel.far.packet.tx.error":                             uint64(1),
+		"diag.hub.main.schema.version":                                        8,
+		"diag.hub.main.latency.success.bucket.le_plus_Inf":                    uint64(8),
+		"diag.node.basement_fan.transaction.get.outcome.success_first":        uint64(7),
+		"diag.node.basement_fan.transaction.get.outcome.timeout":              uint64(2),
+		"diag.node.basement_fan.transaction.get.attempt.retry":                uint64(3),
+		"diag.node.basement_fan.transaction.get.latency.success.microseconds": uint64(140000),
+		"diag.node.basement_fan.transaction.set.outcome.success_retry":        uint64(1),
+		"diag.node.basement_fan.packet.value.matched":                         uint64(7),
+		"diag.node.basement_fan.packet.value.orphan":                          uint64(2),
+		"diag.node.basement_fan.packet.value.null":                            uint64(1),
+		"diag.node.basement_fan.packet.ack.matched":                           uint64(1),
+		"diag.node.basement_fan.packet.last.received":                         int64(1700000000),
+		"diag.channel.far.connection.open.attempt":                            uint64(3),
+		"diag.channel.far.packet.tx.error":                                    uint64(1),
 	}
 	for name, want := range wants {
 		update, ok := batch[name]
@@ -122,12 +125,9 @@ func TestDiagnosticsPublishesCompactSchema(t *testing.T) {
 		if update.Value != want {
 			t.Errorf("%s = %v (%T), want %v (%T)", name, update.Value, update.Value, want, want)
 		}
-		if update.Metadata["schema"] != diagnosticSchemaVersion || update.TTL != 30*time.Second {
+		if update.Metadata["schema"] != 8 || update.TTL != 30*time.Second {
 			t.Errorf("%s metadata/TTL = %v/%v", name, update.Metadata, update.TTL)
 		}
-	}
-	if _, old := batch["diag.node.basement_fan.rate.tx.all"]; old {
-		t.Error("legacy rate register was published")
 	}
 	nodePrefix := "diag.node.basement_fan."
 	nodeRegisters := 0
@@ -135,18 +135,14 @@ func TestDiagnosticsPublishesCompactSchema(t *testing.T) {
 		if strings.HasPrefix(name, nodePrefix) {
 			nodeRegisters++
 		}
+		for _, stale := range []string{".liveness.", ".push", ".transaction.poll", ".transaction.watch", ".transaction.all"} {
+			if strings.Contains(name, stale) {
+				t.Errorf("legacy diagnostic path published: %s", name)
+			}
+		}
 	}
-	if nodeRegisters != 29 {
-		t.Errorf("node register count = %d, want 29", nodeRegisters)
-	}
-	if _, detailed := batch["diag.node.basement_fan.transaction.get.outcome.timeout"]; detailed {
-		t.Error("operation-specific outcome leaked into compact schema")
-	}
-	if _, verbose := batch["diag.node.basement_fan.transaction.get.invocation.total"]; verbose {
-		t.Error("verbose operation-total suffix leaked into compact schema")
-	}
-	if _, bucket := batch["diag.node.basement_fan.latency.success.bucket.le_plus_Inf"]; bucket {
-		t.Error("per-node latency bucket leaked into compact schema")
+	if nodeRegisters != 33 {
+		t.Errorf("node register count = %d, want 33", nodeRegisters)
 	}
 }
 
@@ -157,30 +153,27 @@ func TestPathComponentAvoidsDotUnderscoreCollisions(t *testing.T) {
 }
 
 func TestDiagnosticsCoalescesUnchangedValuesAndRetriesFailure(t *testing.T) {
-	source := &fakeSnap{}
 	registry := newFakeBatchRegistry()
 	registry.failNext = true
-	diagnostics := NewDiagnostics(source, registry, "diag", 5*time.Millisecond, time.Hour)
+	diagnostics := NewDiagnostics(&fakeSnap{}, registry, "diag", 5*time.Millisecond, time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	diagnostics.Serve(ctx, []DiagNode{{Name: "lab", Addr: [4]byte{1}}}, nil)
-
-	firstSuccessful := registry.waitBatch(t)
-	if len(firstSuccessful) < 10 {
-		t.Fatalf("retry batch contains %d values, want complete initial catalog", len(firstSuccessful))
+	first := registry.waitBatch(t)
+	if len(first) < 10 {
+		t.Fatalf("retry batch contains %d values", len(first))
 	}
-	for _, update := range firstSuccessful {
+	for _, update := range first {
 		if update.Metadata == nil {
-			t.Fatal("retry of failed initial batch omitted metadata")
+			t.Fatal("retry omitted metadata")
 		}
 	}
-
 	second := registry.waitBatch(t)
-	if len(second) >= len(firstSuccessful) {
-		t.Fatalf("unchanged batch contains %d values, want fewer than initial %d", len(second), len(firstSuccessful))
+	if len(second) >= len(first) {
+		t.Fatalf("unchanged batch contains %d values, initial %d", len(second), len(first))
 	}
 	if _, ok := second["diag.hub.main.publisher.batch.success"]; !ok {
-		t.Error("publisher success counter was not published on the next tick")
+		t.Error("publisher success counter missing")
 	}
 }
 
@@ -190,34 +183,29 @@ func TestDiagnosticsRetriesFailedRefreshCohort(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	diagnostics.Serve(ctx, []DiagNode{{Name: "lab", Addr: [4]byte{1}}}, nil)
-
 	registry.waitBatch(t)
 	registry.mu.Lock()
 	registry.failNext = true
 	registry.mu.Unlock()
-
 	select {
 	case <-registry.failureNotify:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for failed refresh cohort")
+		t.Fatal("timed out waiting for failed refresh")
 	}
 	registry.mu.Lock()
 	failed := cloneBatch(registry.failed[len(registry.failed)-1])
 	registry.mu.Unlock()
-
-	// The next successful batch must contain every name from the failed cohort,
-	// even where that unchanged name belongs to the other normal TTL cohort.
 	retried := registry.waitBatch(t)
 	for name := range failed {
 		if _, ok := retried[name]; !ok {
-			t.Errorf("failed refresh value %s was not retried immediately", name)
+			t.Errorf("failed refresh %s was not retried", name)
 		}
 	}
 }
 
 func TestDiagMetaMarksRegisterReadOnly(t *testing.T) {
 	metadata := diagMeta("int")
-	if metadata["type"] != "int" || metadata["diagnostic"] != true || metadata["readOnly"] != true {
-		t.Fatalf("diagnostic metadata = %v", metadata)
+	if metadata["type"] != "int" || metadata["diagnostic"] != true || metadata["readOnly"] != true || metadata["schema"] != 8 {
+		t.Fatalf("metadata = %v", metadata)
 	}
 }

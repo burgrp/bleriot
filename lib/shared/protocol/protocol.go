@@ -9,46 +9,39 @@ import "errors"
 const PacketLen = 13
 
 // PacketVersion is the current plaintext packet format version.
-const PacketVersion byte = 0x00
+const PacketVersion byte = 0x01
 
-// Packet TYPE values (§7).
+// Packet TYPE values. Each group has one serialized half-duplex transaction at
+// a time, so a request token is unnecessary: GET is answered by VALUE and SET
+// is answered by ACK before another request is sent.
 const (
-	TypeGET   byte = 0x00 // hub → node: read register (one-shot)
-	TypeSET   byte = 0x01 // hub → node: write register
-	TypeIS    byte = 0x02 // node → hub: current register value
-	TypeWATCH byte = 0x03 // hub → node: subscribe (VALUE=1) or unsubscribe (VALUE=0)
-	TypeACK   byte = 0x04 // acknowledges a SET (node→hub) or a push (hub→node); no value
+	TypeGET   byte = 0x00 // hub → node: read the current register value
+	TypeVALUE byte = 0x01 // node → hub: current value in reply to GET
+	TypeSET   byte = 0x02 // hub → node: idempotent absolute register assignment
+	TypeACK   byte = 0x03 // node → hub: SET request received; no value
 )
 
-// RegAll is the reserved register ID 0 used by a WATCH to subscribe to (or
-// unsubscribe from) every register of a node at once (§8.3). Real register tags
-// are non-zero by construction (§11), so 0 is free as this all-registers
-// sentinel. A node answers a watch-all WATCH with a single ACK (no value dump)
-// and thereafter pushes every register it would push for an individual watch.
-const RegAll uint16 = 0
+// FLAGS bits.
+const FlagNULL byte = 0x01 // VALUE is absent, or SET is a clear assignment
 
-// FLAGS bits (§6).
-const FlagNULL byte = 0x01 // VALUE is absent; register has no value
-
-// FlagPush marks a node→hub IS as a spontaneous push (from Notify) that the hub
-// must acknowledge with an ACK, distinguishing it from a solicited IS reply to a
-// GET or WATCH. It occupies FLAGS bit 1. GUARD (below) also spans bits 1–7, but
-// only on hub→node requests; on node→hub IS packets the GUARD field is unused,
-// so bit 1 is free to carry PUSH in that direction. The hub recovers a lost
-// solicited reply by retransmitting its request, but a spontaneous push has no
-// outstanding request behind it, so it carries its own acknowledgement instead.
-const FlagPush byte = 0x02
-
-// Reply turnaround guard (§6, §9). FLAGS bits 1–7 carry GUARD: the number of
+// Reply turnaround guard. FLAGS bits 1–7 carry GUARD: the number of
 // milliseconds a node waits, after receiving a request, before it transmits its
 // reply. It gives a slow half-duplex hub radio time to switch from transmit back
-// to receive so it does not miss the answer. The hub sets GUARD on every request
-// (GET/SET/WATCH); replies (node → hub) leave it zero. 0 means reply immediately.
+// to receive so it does not miss the answer. The hub sets GUARD on every GET
+// and SET; VALUE and ACK echo those bits unchanged so a response retains the
+// transaction's pacing metadata. Echoed GUARD bits do not request another wait.
+// ACK also echoes SET's NULL bit to identify the received request. 0 means reply
+// immediately.
 const (
 	guardShift          = 1
 	guardMask      byte = 0x7F // 7 bits → 0–127 ms, in FLAGS bits 1–7
 	MaxGuardMillis      = guardMask
 )
+
+// GuardFlags returns only the encoded GUARD field, clearing NULL.
+func GuardFlags(flags byte) byte {
+	return flags & (guardMask << guardShift)
+}
 
 // FlagsWithGuard packs guardMillis (clamped to MaxGuardMillis) into the GUARD
 // field of flags, preserving the low NULL bit.

@@ -3,8 +3,8 @@
 `lib/site` is the host (Linux-SBC) half of the BleRiot hub, packaged as a
 **library** that a site repository drives with **inventory-as-code**. It owns all
 protocol intelligence — per-node XTEA keys, register tables, retries/timeouts,
-push subscription bookkeeping, and the Registry client — and drives the radio
-directly over one or more USB dongles (an [MCP2210](../../usb) USB-to-SPI bridge
+channel sweep scheduling, and the Registry client — and drives the radio
+directly over one or more USB dongles (an [MCP2210](../../dongle/mcp2210) USB-to-SPI bridge
 driving a PAN211x; the dongle has no microcontroller and no firmware).
 
 For every BleRiot register the hub acts as a
@@ -89,7 +89,7 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--hub-address` | `FFFFFF01` | 4-byte hub source address (hex), used as SRC in outgoing packets. |
 | `--timeout` | `50ms` | Per-attempt response wait (protocol §9). |
 | `--retries` | `3` | Retransmissions after the first attempt (§9). |
-| `--refresh` | `15s` | How often active `WATCH` subscriptions are refreshed (§10). |
+| `--sweep-interval` | `1s` | Target period for a complete polling round on each RF channel. Slow rounds slip and never overlap. |
 | `--ttl` | `30s` | Registry provider TTL. |
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
 | `--diag-interval` | `1s` | How often changed diagnostics are coalesced into one Registry batch. |
@@ -124,11 +124,11 @@ from a hub checkout.
 
 The MCP2210 dongle appears as a `/dev/hidraw*` node that is root-only by
 default, so the `hub` would otherwise need `sudo`. Install the udev rule shipped
-with the dongle hardware design — [`../../usb/99-bleriot-mcp2210.rules`](../../usb/99-bleriot-mcp2210.rules) —
+with the dongle hardware design — [`../../dongle/mcp2210/99-bleriot-mcp2210.rules`](../../dongle/mcp2210/99-bleriot-mcp2210.rules) —
 to grant access to the local desktop user and the `plugdev` group instead:
 
 ```sh
-sudo cp ../../usb/99-bleriot-mcp2210.rules /etc/udev/rules.d/
+sudo cp ../../dongle/mcp2210/99-bleriot-mcp2210.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=hidraw --action=change
 ```
@@ -228,12 +228,72 @@ both.
 | [`../shared/conversion/ntc`](../shared/conversion/ntc) | Read-only raw-ADC to Celsius conversion using an NTC thermistor's beta model. |
 | [`../shared/puya`](../shared/puya) | Puya PY32 chip profiles and per-family memory-map constants. Shared with the firmware. |
 | [`../shared/config`](../shared/config) | Identity primitives and constants (address/key lengths, spread factor), shared verbatim with the firmware. |
-| [`engine`](engine) | Core protocol logic (§8–§10): XTEA codec per node, `GET`/`SET`/`WATCH`, per-attempt timeout + retransmit, and watch-refresh to keep subscriptions alive within `T_idle`. |
+| [`engine`](engine) | Core protocol logic: XTEA codec per node, serialized `GET`/`VALUE` and `SET`/`ACK` transactions per channel, and per-attempt timeout + retransmit. |
 | [`radio`](radio) | Transport-agnostic radio adapter: the `Dongle` interface (a single-channel RF endpoint that can `Send`/`Receive`), plus the hub-side `Radio` (receive loop) and node-side `NodeRadio`. The MCP2210 dongle is one `Dongle`; a future smart dongle would be another. |
 | [`radio/mcpdongle`](radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |
 | [`mcp2210`](mcp2210) | Low-level MCP2210 USB-HID-to-SPI driver (open by `/dev/hidraw*` path or USB serial, chip/GPIO/SPI config, SPI transfers), self-healing against stale/desynced HID responses. |
 | [`node`](node) | Host-side node model: a register descriptor (wire ID → name/type/access/conversion) built from a device type, plus the provisioned identity (address + key). |
-| [`bridge`](bridge) | Connects the engine to the Registry: each register becomes a provider (seeded by `GET`, kept current by `WATCH`), and writable consumer requests become `SET`. Decode failures publish `nil`; read-only writes are ignored. Generic — no per-register knowledge beyond the descriptor. |
+| [`bridge`](bridge) | Connects the engine to the Registry: each register becomes a provider updated by complete per-channel polling sweeps, and writable consumer requests become `SET`. Decode failures publish `nil`; read-only writes are ignored. Generic — no per-register knowledge beyond the descriptor. |
+
+---
+
+## Runtime behavior
+
+Each inventory RF channel is an independent half-duplex transaction group. The
+engine keeps one persistent lane per channel and permits one in-flight `GET` or
+`SET`, including retries and its reply wait. A physical radio can disconnect and
+be replaced without creating a second lane. Different channels run
+concurrently.
+
+The host accepts a response only while it owns that channel and only when the
+source, register, and response type match the active transaction. No transaction
+token is carried on the wire. The default 50 ms per-attempt timeout and three
+retransmissions allow up to four sends. A first-attempt success releases the
+channel immediately. After a retry succeeds, after a final timeout, or after
+caller cancellation following a successful send, the engine keeps the channel
+for a bounded response drain and consumes late packets before admitting the next
+transaction. Caller cancellation cannot abort that drain. Send errors are not
+retried.
+
+The radio reports the turnaround guard encoded on every request. A node waits
+that guard before every response. Channel setup fails if the guard plus 10 ms of
+reply headroom exceeds `--timeout`. The response drain lasts the larger of 10 ms
+and that guard-plus-headroom window.
+
+### Polling scheduler and fairness
+
+The bridge starts one scheduler worker per channel. A round visits every node
+on that channel and polls all of each node's registers in descriptor order. The
+`--sweep-interval` is the target period for the complete round: a faster round
+waits out the remainder, while an overloaded round makes the next start slip
+and never overlaps itself.
+
+The first node rotates each round. Every snapshotted node completes before any
+is repeated, preventing the same node from always leading an overloaded
+channel. Registry-originated `SET` transactions share the channel lane with
+polls.
+
+### Registry publication and liveness
+
+Every provider starts at `nil`. A successful `GET` publishes the converted
+value; protocol `NULL` publishes `nil` without conversion. Conversion failure
+logs the raw value and also publishes `nil`, but still counts as successful
+node contact. An isolated failed GET leaves that register's last publication
+unchanged.
+
+Liveness is per node. Three consecutive sweeps with no successful transaction
+mark the node offline and publish all of its registers as `nil` once. Any
+successful GET or received SET acknowledgment resets the failure count and clears
+the offline state; current values return through successful GETs.
+
+Writable Registry requests are converted and sent as absolute `SET`
+assignments. A Registry `nil` request becomes a `NULL` assignment. Requests for
+read-only registers, including `nil`, are ignored. An `ACK` never updates the
+provider optimistically: it confirms only that the node received the request.
+Normal polling rounds observe and publish the current value, which may remain
+old or intermediate while an asynchronous action settles. Provider TTL defaults
+to 30 seconds, and pending publications are coalesced so a slow Registry consumer
+receives the latest value.
 
 ---
 
@@ -246,9 +306,8 @@ both.
   bridge that remains in SPI-in-progress state is failed instead of blocking the
   receive loop; receive-side transport failures close and reopen the dongle just
   like send failures.
-- `Watch` subscriptions are persistent intents: they are retained even if the
-  initial attempt times out, and re-`WATCH`ed periodically so a node that comes
-  up later (or reboots) is resubscribed automatically.
+- Polling rounds continue after timeouts, so a node that comes up later or
+  reboots is discovered again and resumes publication.
 
 ---
 
@@ -256,74 +315,16 @@ both.
 
 With `--diagnostics <prefix>` the hub publishes a set of synthetic, **read-only**
 Registry registers describing its own RF health, in addition to the device
-registers. They are off by default. Schema version 3 exposes cumulative counters
-only; Prometheus/Grafana derives rates and increases over any requested time
-range instead of consuming fixed-window gauges. The engine keeps detailed
-per-operation accounting internally, while the Registry exports a compact
-29-register summary per node suitable for larger fleets.
+registers. They are off by default. Schema 8 publishes process-lifetime hub,
+per-node `transaction.get.*`/`transaction.set.*`, packet, and per-channel
+connection metrics. Rates and windowed increases are derived by consumers.
 
 Hot paths update atomics without Registry I/O. Every `--diag-interval` (default
 1 s), one publisher snapshots the complete catalog and sends at most one batch
 containing changed values plus a distributed TTL-refresh cohort. A failed batch
-remains unsent and is retried on the next interval. This bounds publication
-latency without issuing one request per counter; every unchanged value is
-refreshed within half of its TTL.
+is retried on the next interval.
 
-**Hub publisher** — `<prefix>.hub.main.<reg>`:
-
-| Register | Meaning |
-|----------|---------|
-| `schema.version` | Diagnostics schema version (`4`). |
-| `process.started` / `process.heartbeat` | Hub start and latest snapshot Unix times. |
-| `publisher.batch.success` / `publisher.batch.error` | Successful and failed Registry batches. |
-| `publisher.values.sent` / `publisher.values.coalesced` | Values sent and unchanged values omitted. |
-| `publisher.last.success` / `publisher.last.error` | Last successful and failed publish Unix times. |
-| `latency.success.count` / `.microseconds` | Fleet-wide successful transaction count and summed latency. |
-| `latency.success.bucket.le_<bound>` | Fleet-wide cumulative latency histogram (`0.025`, `0.05`, `0.1`, `0.2`, `0.5`, `1`, `2`, `+Inf` seconds). |
-
-**Per node** — `<prefix>.node.<node>.<reg>`:
-
-The `<node>` segment is always one path component: `_` is escaped as `__`, then
-`.` is replaced by `_`, so the node name stays at a fixed selector position
-without collisions between names such as `a.b` and `a_b`.
-
-Liveness state codes are `0` unknown, `1` online, `2` suspect, and `3` offline.
-
-| Register | Type | Meaning |
-|----------|------|---------|
-| `liveness.state` / `liveness.since` | int | Current state code and transition Unix time. |
-| `liveness.probe.misses` | int | Current consecutive unanswered refresh probes. |
-| `liveness.transition.offline` | int | Cumulative transitions into offline. |
-| `packet.last.valid` | int | Latest authenticated, semantically valid packet Unix time. |
-| `packet.rx.total` / `packet.rx.valid` | int | Raw packets attributed by cleartext source and packets passing validation. |
-| `packet.rx.push` / `packet.rx.orphan` | int | Valid spontaneous pushes and unmatched `IS`/`ACK` packets. |
-| `packet.rx.invalid` | int | Decode, source, or type validation failures. |
-| `packet.rx.unknown_register` | int | Valid packets carrying a register absent from the provisioned descriptor. |
-| `packet.tx.success` / `packet.tx.error` | int | Actual radio send outcomes. |
-| `packet.push_ack.failure` | int | Push acknowledgements that failed to send or had no radio. |
-| `latency.success.count` / `.microseconds` | int | Successful transaction count and summed latency for per-node mean latency. |
-
-Every known-node invocation increments exactly one aggregate
-`transaction.all.outcome.<outcome>` counter: `success_first`, `success_retry`,
-`timeout`, `send_error`, `canceled`, `busy`, or `no_radio`. These provide exact
-reliability denominators. `transaction.<operation>` preserves the traffic mix
-for `get`, `set`, `watch`, `unwatch`, and `refresh`, while
-`transaction.all.attempt.retry` counts retransmissions. Detailed combinations
-of operation and outcome remain available inside the process but are not
-published for every node.
-
-**Per channel** — `<prefix>.channel.<channel-name>.<reg>`:
-
-Channel state codes are `0` offline, `1` connected, and `2` closed.
-
-| Register | Type | Meaning |
-|----------|------|---------|
-| `state` / `state.since` | int | Current channel state and transition Unix time. |
-| `connection.open.attempt` / `.success` / `.error` | int | Physical-device open outcomes. |
-| `connection.open.last_attempt` / `.last_error` | int | Latest open attempt and failure Unix times. |
-| `connection.connected_at` / `.disconnected_at` | int | Latest connection transition Unix times. |
-| `connection.disconnect.total` | int | Disconnects after an established connection. |
-| `connection.disconnect.send_error` / `.receive_error` | int | Disconnect cause counters. |
-| `packet.tx.attempt` / `.success` / `.offline` / `.error` | int | Channel transmit outcomes, separating no device from connected-device failure. |
-| `packet.rx.success` / `.error` | int | Received packets and receive transport failures. |
+See [BleRiot Diagnostic Metrics](DIAGNOSTICS.md) for the complete schema 8 path
+catalog, accounting identities and examples, latency formulas, escaping,
+cardinality, Prometheus queries, and restart semantics.
 

@@ -16,9 +16,8 @@
 //   - initialises the PAN211x radio in BLE LongRange mode and applies the
 //     channel and receive address from the provisioning;
 //   - builds the bob device and the node runtime, then loops forever:
-//     it polls the radio for GET/SET/WATCH requests, reads the GPIO input pins
-//     and pushes a register update when they change, and drives the red and
-//     green LEDs from their period registers.
+//     it polls the radio for GET/SET requests and drives the red and green LEDs
+//     from their period registers. GPIO input pins are sampled for each GET.
 //
 // All XTEA crypto and register dispatch live in protocol/node; this file is only
 // hardware wiring. Debug logging uses println() over SEGGER RTT.
@@ -84,7 +83,6 @@ func bleriotMain(prov node.Provisioning, cfg spec.Config) {
 	if err != nil {
 		haltBlink("failed to start node: "+err.Error(), 100*time.Millisecond)
 	}
-	device.node = n
 
 	println("Device config: defaultRedPeriod", cfg.DefaultRedPeriod, "defaultGreenPeriod", cfg.DefaultGreenPeriod)
 
@@ -96,17 +94,9 @@ func bleriotMain(prov node.Provisioning, cfg spec.Config) {
 
 	// go memstat()
 
-	pins := device.readPins()
-	device.pins.Store(pins)
 	for {
 		n.Poll()
 		runtime.Gosched()
-		p := device.readPins()
-		if p != pins {
-			pins = p
-			n.Notify(spec.RegGpio, pins, false)
-			device.pins.Store(pins)
-		}
 	}
 
 }
@@ -123,8 +113,6 @@ func bleriotMain(prov node.Provisioning, cfg spec.Config) {
 type Device struct {
 	redPeriod   atomic.Int32
 	greenPeriod atomic.Int32
-	pins        atomic.Int32
-	node        *node.Node
 }
 
 func (d *Device) readPins() int32 {
@@ -154,14 +142,11 @@ func (d *Device) Read(tag uint16) (value int32, null bool) {
 }
 
 func (d *Device) Write(tag uint16, value int32, null bool) {
-
 	switch tag {
 	case spec.RegLedRed:
-		d.redPeriod.Store(int32(value))
-		d.node.Notify(spec.RegLedRed, value, null)
+		writePeriod(&d.redPeriod, value, null)
 	case spec.RegLedGreen:
-		d.greenPeriod.Store(int32(value))
-		d.node.Notify(spec.RegLedGreen, value, null)
+		writePeriod(&d.greenPeriod, value, null)
 	default:
 		// unknown tag: ignore
 	}

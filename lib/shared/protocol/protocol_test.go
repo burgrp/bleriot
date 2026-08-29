@@ -31,13 +31,13 @@ func TestRoundTrip(t *testing.T) {
 		value int32
 	}{
 		{"GET", TypeGET, 0, 0x0001, 0},
+		{"VALUE", TypeVALUE, 0, 0x0001, 1234},
+		{"VALUE null", TypeVALUE, FlagNULL, 0x0005, 0},
 		{"SET positive", TypeSET, 0, 0x0002, 1234},
 		{"SET negative", TypeSET, 0, 0x0003, -5678},
 		{"SET max", TypeSET, 0, 0xffff, 2147483647},
 		{"SET min", TypeSET, 0, 0x0000, -2147483648},
-		{"IS null flag", TypeIS, FlagNULL, 0x0005, 0},
-		{"WATCH subscribe", TypeWATCH, 0, 0x0010, 1},
-		{"WATCH unsubscribe", TypeWATCH, 0, 0x0010, 0},
+		{"ACK", TypeACK, 0, 0x0002, 0},
 	}
 
 	c := mustCodec(t)
@@ -71,8 +71,8 @@ func TestRoundTrip(t *testing.T) {
 }
 
 // TestGuardRoundTrip checks the GUARD field packs into FLAGS bits 1–7 without
-// disturbing the NULL bit, survives an XTEA round trip, and clamps to the field
-// width.
+// disturbing the NULL bit, can be isolated for a response, survives an XTEA
+// round trip, and clamps to the field width.
 func TestGuardRoundTrip(t *testing.T) {
 	for _, g := range []byte{0, 1, 20, 127} {
 		flags := FlagsWithGuard(FlagNULL, g)
@@ -86,10 +86,14 @@ func TestGuardRoundTrip(t *testing.T) {
 	if got := GuardMillis(FlagsWithGuard(0, 200)); got != MaxGuardMillis {
 		t.Errorf("guard clamp: got %d, want %d", got, MaxGuardMillis)
 	}
+	flags := FlagsWithGuard(FlagNULL, 20)
+	if got := GuardFlags(flags); got != FlagsWithGuard(0, 20) {
+		t.Errorf("GuardFlags: got %#x, want guard without NULL", got)
+	}
 
 	c := mustCodec(t)
 	buf := make([]byte, PacketLen)
-	in := FlagsWithGuard(FlagNULL, 20)
+	in := flags
 	c.Encode(buf, testSrc, TypeSET, in, 0x0007, 42)
 	_, _, flags, _, _, err := c.Decode(buf)
 	if err != nil {
@@ -112,6 +116,12 @@ func TestPacketLength(t *testing.T) {
 
 // TestVersionByte checks that byte [4] is PacketVersion after Encode.
 func TestVersionByte(t *testing.T) {
+	if PacketVersion != 0x01 {
+		t.Fatalf("PacketVersion = %#x, want 0x01 for the GET/VALUE protocol", PacketVersion)
+	}
+	if TypeGET != 0x00 {
+		t.Fatalf("TypeGET = %#x, want wire value 0x00", TypeGET)
+	}
 	c := mustCodec(t)
 	buf := make([]byte, PacketLen)
 	c.Encode(buf, testSrc, TypeGET, 0, 1, 0)

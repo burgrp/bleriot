@@ -16,7 +16,7 @@ import (
 // pollInterval is how often the hub receive loop checks the dongle for an
 // inbound packet. The hub is the master in every transaction, so replies arrive
 // well within the engine's per-attempt timeout; a short interval keeps latency
-// low for dongles without a packet-ready push (e.g. the MCP2210 has no interrupt
+// low for dongles without a packet-ready signal (e.g. the MCP2210 has no interrupt
 // line wired to the host).
 const pollInterval = time.Millisecond
 

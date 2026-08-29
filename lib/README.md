@@ -17,36 +17,53 @@ Hardware-independent specification for the BleRiot IoT register protocol.
 
 ## 1. Overview
 
-BleRiot is a simple request/response protocol for reading and writing named integer registers on IoT nodes. A single hub polls one or more nodes. Nodes send unsolicited IS packets only for registers the hub has subscribed to via WATCH.
+BleRiot is a hub-initiated request/response protocol for reading and writing
+named integer registers on low-power RF nodes.
 
 - **Topology:** star — one hub, many nodes
-- **Initiator:** hub only (except subscribed push packets)
+- **Initiator:** hub only
 - **Register type:** `int32` (signed 32-bit integer)
+- **Transactions:** `GET` → `VALUE` and idempotent absolute `SET` → `ACK`
+
+Nodes are divided into independent groups by RF channel. Each group has one
+half-duplex RX/TX radio and at most one in-flight transaction. Groups on
+different channels transact concurrently.
 
 ---
 
 ## 2. RF Physical Layer
 
-These parameters are mandatory for all BleRiot-compatible radio implementations:
+These parameters define the current BleRiot radio link:
 
-| Parameter        | Value                                                                   |
-|------------------|-------------------------------------------------------------------------|
-| Channel          | Per-node, baked into firmware via §11 (e.g. channel 10 = 2440 MHz)     |
-| Sync word        | Destination device address (4 bytes, little-endian) — see §3           |
-| Data rate        | 250 kbps                                                                |
-| Modulation       | GFSK                                                                    |
-| Packet format    | BLE-compatible (preamble, sync word, PDU, 3-byte CRC, whitening)       |
-| PDU size         | 13 bytes (fixed)                                                        |
+| Parameter | Value |
+|---|---|
+| Channel | One channel number and spread factor per independent node group |
+| Sync word | Four-byte destination address (§3) |
+| Data rate | 250 kbps |
+| Modulation | GFSK |
+| Framing | PAN211x BLE-compatible raw packet format: preamble, sync word, PDU, three-byte CRC, and whitening |
+| PDU size | 13 bytes, fixed |
 
-Each node operates on a single channel baked into its firmware image (§11.5). The hub may have multiple radio interfaces, each assigned to a different channel, allowing nodes to be grouped by channel for spectrum spread or logical partitioning.
+This is not a standard BLE connection. BleRiot selects raw RF channels and uses
+its own packet, addressing, transaction, and encryption rules.
 
-The RF sync word for each transmission is set to the 4-byte destination device address. Radio hardware that supports address/pipe filtering must configure its receive address to the device's own address, so only packets destined for that device are passed to the protocol layer. The 32-bit address space makes accidental collision with foreign RF traffic negligible.
+Each node's channel and spread factor are baked into its firmware (§11.5). All
+nodes in a channel group use the same pair. The hub assigns one half-duplex radio
+to each active group and may operate multiple groups concurrently.
+
+For every transmission, the radio sync word is the destination's four-byte
+address. A node configures its hardware receive address to its own address; hub
+radios configure theirs to the hub address. The destination is therefore
+filtered by the radio and is not repeated in the PDU.
 
 ---
 
 ## 3. Device Addressing
 
-Each device has a random **4-byte address**, generated when its inventory entry is created and baked into its firmware image. Addresses are treated as opaque 32-bit values and must be unique within a deployment.
+Each node has a random **four-byte address**, generated for its inventory entry
+and baked into its firmware image. Addresses are opaque byte arrays and must be
+unique within a deployment. The hub also has a four-byte source/receive address,
+configured at runtime.
 
 Reserved address: `0x00000000` — must not be assigned to any device.
 
@@ -56,23 +73,25 @@ Reserved address: `0x00000000` — must not be assigned to any device.
 
 All packets share the same fixed 13-byte structure:
 
-```
+```text
 Offset  Size  Field
 ──────  ────  ─────────────────────────────────────────────────
 0       4     SRC   — source device address (little-endian, plaintext)
-4       1     VER   — packet format version (plaintext)
+4       1     VER   — packet format version 0x01 (plaintext)
 5       8     BLOCK — XTEA encrypted block (see §5):
                         TYPE  (1 byte)  — packet type (see §6)
-                        FLAGS (1 byte)  — options (see §7)
+                        FLAGS (1 byte)  — NULL and GUARD (see §6)
                         REG   (2 bytes) — register address (uint16, little-endian)
-                        VALUE (4 bytes) — int32, little-endian (zero in GET/WATCH)
+                        VALUE (4 bytes) — int32, little-endian
 ──────  ────
 Total: 13 bytes
 ```
 
 The destination is not carried in the payload. It is encoded as the RF sync word (§2), which the receiver's hardware uses for filtering. A received packet is therefore always addressed to the receiving device.
 
-SRC and VER are plaintext so the receiver can look up the sender's shared key and validate the packet format before decrypting BLOCK.
+`SRC` and `VER` are plaintext. The hub uses `SRC` to select the provisioned node
+and its shared key before decrypting `BLOCK`; unknown source addresses are
+discarded. Version values other than `0x01` are rejected.
 
 All multi-byte fields inside BLOCK are **little-endian**.
 
@@ -80,188 +99,174 @@ All multi-byte fields inside BLOCK are **little-endian**.
 
 ## 5. Security
 
-All packets are encrypted with **XTEA** using the node's shared key (provisioned via §11.5). The 8-byte BLOCK field contains the payload: TYPE, FLAGS, REG, and VALUE. There is no per-packet nonce in this format.
+The eight-byte `BLOCK` is encrypted with 32-round **XTEA** using the node's
+16-byte shared key (§11.5), interpreted as four little-endian `uint32` words.
+The hub and that node use the same key in both directions.
 
-The version byte is used for wire-format compatibility and does not add confidentiality or replay protection.
-
-The hub decrypts each received packet using the shared key associated with the SRC address. Packets from unknown addresses are silently discarded.
-
----
-
-## 6. FLAGS Byte
-
-The FLAGS byte is direction-dependent. Bits 7–1 are GUARD on hub → node
-requests; on node → hub replies that range is unused except for bit 1, which
-carries PUSH.
-
-```
-hub → node:
-  Bit 7–1  — GUARD: reply turnaround guard, 0–127 ms
-  Bit 0    — NULL: VALUE field is absent; register has no value
-
-node → hub:
-  Bit 1    — PUSH: this IS is an unsolicited push and must be ACKed (§8.3)
-  Bit 0    — NULL: VALUE field is absent; register has no value
-```
-
-When NULL=1 the VALUE field is undefined and must be ignored by the receiver.
-
-PUSH=1 marks an IS that a node sent on its own initiative (a WATCH change
-notification, §8.3) rather than as the reply to a request. Because nothing on the
-hub is waiting for it, a lost push would otherwise go unnoticed; PUSH tells the
-hub to acknowledge it so the node can retransmit until it lands (§9). PUSH is
-meaningful only on node → hub IS packets and is clear on every solicited reply.
-
-GUARD is the number of milliseconds a node waits, after receiving a request, before it transmits its reply (§9). A half-duplex hub radio needs time to switch from transmit back to receive after sending a request; a fast node that replied immediately would answer into a window when the hub is not yet listening, and the reply would be lost. The hub sets GUARD on every request from the turnaround time of the radio that carries it (a slower radio asks for a larger guard), and a node honours it before any IS or ACK reply. Replies (node → hub) carry GUARD = 0, and a GUARD of 0 means reply immediately. GUARD must be smaller than the hub's response timeout `T_timeout` (§9).
+There is no nonce, transaction token, message authentication code, or replay
+protection. Plaintext `SRC` and `VER` are routing and format fields, not
+authenticated metadata.
 
 ---
 
-## 7. TYPE Byte
+## 6. TYPE and FLAGS
 
-| Value | Name  | Sender | Description                                        |
-|-------|-------|--------|----------------------------------------------------|
-| 0x00  | GET   | hub    | Read current register value (one-shot)             |
-| 0x01  | SET   | hub    | Write register value                               |
-| 0x02  | IS    | node   | Current register value (reply to GET/WATCH, or push)|
-| 0x03  | WATCH | hub    | Subscribe (VALUE=1) or unsubscribe (VALUE=0)       |
-| 0x04  | ACK   | both   | Acknowledges a SET (node) or a push (hub); no value |
+### 6.1 TYPE
 
-Receivers must ignore packets with unknown TYPE values.
+| Value | Name | Sender | Meaning |
+|---:|---|---|---|
+| `0x00` | `GET` | hub | Read the current register value. |
+| `0x01` | `VALUE` | node | Return a register value in direct response to `GET`. |
+| `0x02` | `SET` | hub | Apply an idempotent absolute register assignment. |
+| `0x03` | `ACK` | node | Confirm receipt of a `SET` request. |
 
-A node sends IS with FLAGS.NULL=1 when a register has no value (e.g. sensor not yet ready, hardware fault, or explicitly unset).
+The node consumes packets with other type values without responding. The host
+accepts only `VALUE` and `ACK` as response types.
 
-ACK is used in two directions and always carries no value (VALUE=0):
+### 6.2 NULL
 
-- **node → hub** confirms a SET was received. A write may be applied
-  asynchronously, so the node does not report a result inline; the hub observes
-  the resulting value through a WATCH subscription or a subsequent GET.
-- **hub → node** confirms a spontaneous push (an IS with FLAGS.PUSH=1, §8.3) was
-  received, so the node can stop retransmitting it (§9).
+`FLAGS` bit 0 is `NULL`; its meaning follows packet direction and type:
 
----
+| Packet | `NULL=0` | `NULL=1` |
+|---|---|---|
+| `GET` | Normal request. | Not used by the host; the node's reply is still determined only by `Device.Read`. |
+| `VALUE` | `VALUE` carries the current raw `int32`. | The register has no value; the receiver ignores `VALUE`, and the node encodes it as zero. |
+| `SET` | `VALUE` is the absolute raw assignment. | Clear assignment; `VALUE` is undefined and the host encodes it as zero. |
+| `ACK` | Ordinary `SET` received. | Clear `SET` received; echoes the request's `NULL` bit. |
 
-## 8. Transactions
+### 6.3 GUARD
 
-### 8.1 Read
+`FLAGS` bits 7–1 encode `GUARD`, an unsigned delay from 0 to 127 ms. The host
+sets it on every `GET` and `SET` from the assigned radio's transmit-to-receive
+turnaround requirement. After receiving a valid request, the node waits this
+guard before **every** `VALUE` or `ACK`, allowing the half-duplex hub radio to
+return to receive mode.
 
-```
-Hub  →  Node    TYPE=GET    REG=R  VALUE=0
-Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
-```
-
-### 8.2 Write
-
-```
-Hub  →  Node    TYPE=SET    REG=R  VALUE=<requested value>
-Node →  Hub     TYPE=ACK    REG=R  VALUE=0
-```
-
-The node replies with an ACK to confirm receipt of the write; the ACK carries no value. A write may be applied asynchronously (it can take time, or be clamped or rejected for a read-only register), so the node does not report the resulting value inline. The hub learns the true state from a WATCH push (§8.3) or a subsequent GET (§8.1).
-
-A SET with FLAGS.NULL=1 clears the register: VALUE is undefined and the hub is asking the node to unset it (the dual of a NULL IS, §7). The node still replies with an ACK. A node that has no notion of an unset register ignores the NULL write.
-
-### 8.3 Subscribe
-
-```
-Hub  →  Node    TYPE=WATCH  REG=R  VALUE=1
-Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>            (immediate reply)
-Node →  Hub     TYPE=IS     REG=R  VALUE=<new value>  FLAGS.PUSH=1  (on each change)
-Hub  →  Node    TYPE=ACK    REG=R  VALUE=0                          (acknowledges the push)
-```
-
-The immediate reply is solicited — it answers the WATCH — so it is a plain IS
-with PUSH clear, recovered by the hub's request retransmission like any other
-reply (§9). Every subsequent change notification is unsolicited: the node sets
-FLAGS.PUSH=1 and the hub returns an ACK for it. Until that ACK arrives the node
-retransmits the push, so a change is not lost when a push collides with hub
-traffic (§9).
-
-#### Watch-all (REG=0)
-
-A WATCH for the reserved register `REG=0` subscribes to (or unsubscribes from)
-**every** register of the node at once. Tags are non-zero by construction (§11),
-so `REG=0` is free as this all-registers sentinel.
-
-```
-Hub  →  Node    TYPE=WATCH  REG=0  VALUE=1                          (watch-all)
-Node →  Hub     TYPE=ACK    REG=0  VALUE=<1 if new, 0 if refresh>   (single reply)
-Node →  Hub     TYPE=IS     REG=R  VALUE=<new value>  FLAGS.PUSH=1  (on each change)
-Hub  →  Node    TYPE=ACK    REG=R  VALUE=0                          (acknowledges the push)
-Hub  →  Node    TYPE=WATCH  REG=0  VALUE=0                          (unwatch-all)
-```
-
-Unlike a single-register WATCH, the node does **not** dump current values: it
-answers a watch-all with one ACK (`REG=0`) and nothing else. The hub seeds the
-initial values it needs with GETs (§8.1), retrying a register's GET until the
-node answers (a watch-all refresh, unlike a single-register one, draws no value
-to seed from). The hub re-seeds the same way whenever a register loses its value
-— in particular after the node is reported `NULL` and later answers again (e.g.
-a radio link that dropped and recovered): a recovered watch-all refresh restores
-only liveness, so the hub re-GETs each register to repopulate it rather than
-waiting for its next change. Thereafter the node pushes each
-changed register exactly as for an individual subscription — a real `REG`, with
-FLAGS.PUSH=1, acknowledged per push. A node sends one push per change even when a
-hub holds both a watch-all and an individual watch for that register.
-
-The watch-all ACK's `VALUE` reports whether the subscription was **newly
-created** (`1`) or a **refresh** of one the node already held (`0`). A node's
-subscription table lives in RAM, so a reboot wipes it: the hub's next watch-all
-refresh is then registered afresh and answered with `VALUE=1`, which the hub
-takes as a cue to re-seed every register (re-GET), picking up values that
-reverted to their power-on defaults while the node was down. Without this, a
-power-cycle shorter than the liveness window (§10) would leave the hub holding
-the pre-reboot value — the node neither dumps values on a watch-all nor pushes a
-change it made before any hub was subscribed.
-
-Watch-all collapses what would otherwise be one WATCH refresh per register into a
-single refresh per node (§10), which both saves airtime and avoids overflowing a
-node's bounded subscription table when a hub watches more registers than the
-table holds. Because the whole node is one subscription, liveness (§10) is
-per-node: when a watch-all node stops answering refreshes, the hub reports all of
-its registers as `NULL` together.
-
-### 8.4 Unsubscribe
-
-```
-Hub  →  Node    TYPE=WATCH  REG=R  VALUE=0
-Node →  Hub     TYPE=IS     REG=R  VALUE=<current value>
-```
+Both response types echo the request's GUARD bits as pacing metadata. Echoed
+bits never request another wait. `VALUE` takes `NULL` only from `Device.Read`;
+`ACK` echoes the `SET` request's `NULL` bit.
 
 ---
 
-## 9. Reliability
+## 7. Transactions
 
-The protocol is **best-effort at the RF layer**. Reliability is the hub's responsibility:
+### 7.1 Get
 
-- After sending a request the hub waits up to `T_timeout` (recommended: 50 ms) for a matching response (`SRC == expected node`, `REG == sent REG`, and the expected reply TYPE: ACK for a SET, IS for a GET/WATCH).
-- The hub asks the node to defer its reply by `GUARD` milliseconds (§6), chosen from the hub radio's transmit-to-receive turnaround time, so the radio is listening again before the reply arrives. `GUARD` is always smaller than `T_timeout` — a hub that cannot honour this (its radio's guard would not leave room for a reply under the timeout) must refuse to start rather than lose every reply.
-- If no response arrives within `T_timeout`, the hub may retransmit the same request up to `N_retry` times (recommended: 3).
+```text
+Hub  -> Node    TYPE=GET    REG=R  VALUE=0
+Node -> Hub     TYPE=VALUE  REG=R  VALUE=<current raw int32>
+```
 
-Solicited replies are made reliable by the hub retransmitting the request, but an
-unsolicited push (§8.3) has no outstanding request to retransmit, and the node is
-half-duplex and blind to the hub's transmit windows — a push can collide with hub
-traffic and be lost with nothing to recover it. Pushes therefore carry their own
-acknowledgement:
+The node calls `Device.Read(R)` and returns its value and absence state. An
+unknown register is a device policy decision; the runtime passes the tag to the
+device unchanged.
 
-- A node marks every spontaneous change notification with FLAGS.PUSH=1 (§6) and
-  keeps retransmitting it until the hub acknowledges it.
-- The hub replies to a received push with an `ACK` for the same `REG` (VALUE=0).
-  The ACK is itself best-effort; a duplicate push (because its ACK was lost)
-  carries the same value and is simply re-acknowledged, so loss of an ACK is
-  harmless.
-- The node retransmits a pending push every `T_push` (the reference firmware
-  uses 60 ms) up to `N_push` times (reference: 16) before giving up. A newer
-  value for the same register supersedes any still-pending push for it.
+### 7.2 Set
+
+```text
+Hub  -> Node    TYPE=SET  REG=R  VALUE=<absolute raw int32>
+Node -> Hub     TYPE=ACK  REG=R  VALUE=0
+```
+
+After receiving `SET`, the node waits GUARD and sends `ACK` before calling
+`Device.Write(R, value, null)`. The ACK confirms packet receipt only. `Write`
+accepts or starts the assignment; the physical action may continue
+asynchronously after it returns. Unknown and read-only tags may be ignored by
+the device implementation, but their syntactically valid SET packets are still
+acknowledged by the protocol runtime.
+
+`SET` is an idempotent absolute assignment because a lost response causes the
+hub to transmit the same request again, which may call `Device.Write` again.
+Device writes must therefore make duplicate calls harmless. `ACK` confirms
+neither acceptance nor completion of the requested action. The bridge publishes
+only values observed by later `GET` transactions; while an action is in
+progress, those GETs may return the previous or an intermediate state.
+
+The node emits exactly one direct response per handled request and sends no
+unsolicited protocol packets.
 
 ---
 
-## 10. Push Subscription Lifecycle
+## 8. Channel Ownership and Response Matching
 
-- A node keeps at most one subscription per register per hub.
-- A subscription expires if the node receives no packet from that hub for `T_idle` (recommended: 60 s). After expiry, push stops silently.
-- To keep subscriptions alive, the hub periodically re-sends `WATCH` for every active subscription well within `T_idle` (the reference host hub uses a 15 s refresh interval). Re-`WATCH` also re-establishes any subscription a node may have dropped (e.g. after a reboot).
-- The refresh doubles as a liveness check: each re-`WATCH` draws an immediate `IS` reply from a live node. When a node stops answering refreshes (e.g. it loses power), the hub treats the register as having no value after a few consecutive misses and reports it as `NULL`, so a vanished node's last value is not served indefinitely. The next successful refresh (or any push) restores the real value. The reference host hub marks a node offline after 2 missed refreshes (~30 s).
-- Change detection is implementation-defined. The hub may fall back to polling if a node pushes too frequently.
+One channel group has one persistent transaction lane, even when its physical
+radio is disconnected or replaced. A transaction owns that lane while queued
+work is excluded, from its initial send through all retries, reply waits, and
+any required response drain. Transactions on other channels use independent
+lanes and proceed concurrently.
+
+There is no transaction token in the packet. While a transaction owns its
+channel, the host accepts a response only when all of these match:
+
+- plaintext `SRC` selects the expected provisioned node and key;
+- decoded `REG` equals the requested register;
+- decoded type is `VALUE` for `GET` or `ACK` for `SET`.
+
+Other valid responses are classified as orphans and cannot complete the active
+or a later transaction. Unknown response types, unsupported versions, and
+decode failures are rejected.
+
+---
+
+## 9. Reliability and Turnaround
+
+RF delivery is best effort; the host provides bounded request retransmission:
+
+1. Send the request and wait one per-attempt timeout for a matching response.
+2. If the wait expires, retransmit the identical request and wait again.
+3. After all attempts expire, retain channel ownership for a bounded response
+  drain, consuming late responses, then return a timeout.
+
+The default per-attempt timeout is 50 ms. The default retry count is three
+retransmissions after the initial send, for at most four sends. A send error
+is not retried. A first-attempt success releases the channel immediately. After
+a retry succeeds, the engine drains responses before release because more than
+one request may have produced a valid reply. Cancellation before any successful
+send returns immediately; cancellation after a successful send also drains
+before release. Caller cancellation cannot abort a required drain.
+
+The assigned radio reports its reply guard. The host encodes its whole-millisecond
+value, clamped to 127 ms, on every request. Registering a radio fails when its
+guard plus 10 ms of minimum reply headroom exceeds the configured timeout.
+The drain interval is the larger of 10 ms and the radio guard plus that 10 ms
+headroom, so it covers both host receive latency and the latest valid node
+turnaround while remaining bounded by the configured timeout.
+
+Because retries repeat an absolute `SET`, acknowledgment loss cannot turn a
+write into a relative operation. A response arriving during the drain cannot
+satisfy the next transaction; response matching still requires source,
+register, and type.
+
+---
+
+## 10. Host Polling, Liveness, and Registry Publication
+
+The host bridge runs one scheduler worker per RF channel. Each round polls every
+register of every node assigned to that channel, serially through the channel's
+transaction lane. The configurable sweep interval is a target period for a
+complete channel round and defaults to one second. If a round takes longer, the
+next starts immediately; rounds never overlap.
+
+Each round rotates which node starts first. Every node in the round's snapshot
+completes before any node is repeated, so an overloaded channel does not always
+favor the same first node. Registers within a node are polled in descriptor
+order. Registry-originated `SET` calls use the same channel lane.
+
+Each Registry provider starts with `nil`. A successful `GET` is converted and
+published; protocol `NULL` bypasses conversion and publishes `nil`. A decode
+error also publishes `nil`, but the response still counts as node activity.
+Failed GETs retain the register's last publication until node-level liveness
+declares the node unavailable.
+
+Liveness uses consecutive wholly unsuccessful node sweeps. The default
+threshold is three. Any successful `GET`, or an acknowledged `SET`, resets the
+node's failure count. On reaching the threshold, the bridge publishes `nil` for
+all registers once. Later successes clear the offline state, and successful
+GETs republish current values.
+
+Writable Registry requests are encoded and sent as ordinary or `NULL` `SET`
+transactions. Read-only requests, including `NULL`, are ignored. An `ACK` is not
+published optimistically; a subsequent scheduled GET supplies the Registry value.
 
 ---
 
@@ -337,7 +342,7 @@ serialized into `main_gen.go` or sent over the radio.
 
 | Function | Direction | Contract |
 |----------|-----------|----------|
-| `Decode func(int32) (any, error)` | node raw value → Registry value | Called for successful GETs and pushes |
+| `Decode func(int32) (any, error)` | node raw value → Registry value | Called for successful non-NULL GETs |
 | `Encode func(any) (int32, error)` | Registry request → node raw value | Called before a non-NULL SET |
 
 The zero `Conversion` selects the natural conversion for `type`: `int32` maps
@@ -503,20 +508,19 @@ to keep in sync.
 
 ## 12. Radio Interface (implementation contract)
 
-Any radio backend must provide these three operations to the protocol layer. All operations are **non-blocking** from the protocol layer's perspective:
+Firmware uses a packet radio with these operations:
 
-```
+```text
 Send(dst [4]byte, payload []byte) error
-    Set the RF sync word to dst (the destination device address),
-    then transmit one packet. Blocks only for the duration of the
-    air transmission itself (~0.5 ms at 250 kbps). Returns
-    immediately after the TX-complete interrupt; does NOT wait for
-    a response.
-
 Receive(buf []byte) (n int, ok bool)
-    If a packet is waiting in the RX FIFO, copy it into buf and
-    return (n, true). Otherwise return (0, false) immediately
-    without blocking.
 ```
 
-The protocol layer must not assume any underlying transport beyond these three operations.
+`Send` sets the destination sync word and transmits one complete packet.
+`Receive` is non-blocking and copies at most one available packet. The firmware
+configures channel, spread factor, and its receive address before constructing
+the node runtime.
+
+The host engine uses `Send`, an asynchronous stream of complete received
+13-byte packets, and `ReplyGuard() time.Duration`. A host adapter may poll a
+physical dongle internally, but it presents complete packets to the engine. The
+protocol layer assumes no underlying host transport beyond this contract.

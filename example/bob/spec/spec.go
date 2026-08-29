@@ -34,9 +34,10 @@ func Type() inventory.DeviceType {
 				Type: inventory.TypeInt,
 			},
 			{
-				Tag:  RegGpio,
-				Name: "gpio",
-				Type: inventory.TypeInt,
+				Tag:      RegGpio,
+				Name:     "gpio",
+				Type:     inventory.TypeInt,
+				ReadOnly: true,
 			},
 		},
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 	"github.com/burgrp/bleriot/lib/shared/puya"
+	"github.com/burgrp/bleriot/lib/site/bridge"
 	"github.com/burgrp/bleriot/lib/site/engine"
 	"github.com/burgrp/bleriot/lib/site/node"
 	"github.com/burgrp/bleriot/lib/site/radio"
@@ -47,6 +48,45 @@ func sampleInstance() inventory.Instance {
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestHubSweepIntervalFlag(t *testing.T) {
+	cmd := newHubCmd(inventory.Inventory{sampleInstance()})
+	flag := cmd.Flags().Lookup("sweep-interval")
+	if flag == nil {
+		t.Fatal("missing --sweep-interval flag")
+	}
+	if flag.DefValue != bridge.DefaultSweepInterval.String() {
+		t.Fatalf("--sweep-interval default = %q, want %q", flag.DefValue, bridge.DefaultSweepInterval)
+	}
+	if err := cmd.Flags().Set("sweep-interval", "250ms"); err != nil {
+		t.Fatalf("set --sweep-interval: %v", err)
+	}
+	if got := flag.Value.String(); got != "250ms" {
+		t.Fatalf("--sweep-interval = %q, want 250ms", got)
+	}
+}
+
+func TestHubRetriesFlagAndValidation(t *testing.T) {
+	cmd := newHubCmd(inventory.Inventory{sampleInstance()})
+	flag := cmd.Flags().Lookup("retries")
+	if flag == nil {
+		t.Fatal("missing --retries flag")
+	}
+	if flag.DefValue != "3" {
+		t.Fatalf("--retries default = %q, want 3", flag.DefValue)
+	}
+	if err := cmd.Flags().Set("retries", "0"); err != nil {
+		t.Fatalf("set --retries=0: %v", err)
+	}
+	if got := flag.Value.String(); got != "0" {
+		t.Fatalf("--retries = %q, want 0", got)
+	}
+
+	err := runHub(context.Background(), inventory.Inventory{sampleInstance()}, hubOptions{retries: -1}, discardLogger())
+	if err == nil || !strings.Contains(err.Error(), "retries must be non-negative") {
+		t.Fatalf("negative retries error = %v", err)
+	}
 }
 
 func TestBuildNode(t *testing.T) {
@@ -226,7 +266,7 @@ func TestStartDonglesAlwaysStarts(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	eng := engine.New(engine.Options{
-		HubAddr: mustAddr(t, "FFFFFF01"), Timeout: time.Second, Retries: 1, RefreshInterval: time.Second,
+		HubAddr: mustAddr(t, "FFFFFF01"), Timeout: time.Second, Retries: 1,
 	})
 
 	chNames := map[uint8]string{37: "far", 38: "near"}
@@ -274,6 +314,34 @@ func TestDongleAssignerClaims(t *testing.T) {
 	}
 	d2.Close()
 	d3.Close()
+}
+
+func TestDongleAssignerSkipsFailedSelector(t *testing.T) {
+	saved := dongleTypes
+	t.Cleanup(func() { dongleTypes = saved })
+	var opened []string
+	dongleTypes = []dongleType{{
+		scheme:   "fake",
+		discover: func() ([]string, error) { return []string{"B", "A"}, nil },
+		open: func(selector string, _ uint8, _ config.SpreadFactor, _ [node.AddrLen]byte) (radio.Dongle, error) {
+			opened = append(opened, selector)
+			if selector == "A" {
+				return nil, errors.New("device unavailable")
+			}
+			return stubDongle{}, nil
+		},
+		guard: func(config.SpreadFactor) time.Duration { return time.Millisecond },
+	}}
+
+	assigner := newDongleAssigner(dongleTypes)
+	dongle, err := assigner.claim(37, config.SpreadFactorS8, mustAddr(t, "FFFFFF01"))
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	dongle.Close()
+	if len(opened) != 2 || opened[0] != "A" || opened[1] != "B" {
+		t.Fatalf("opened selectors = %v, want [A B]", opened)
+	}
 }
 
 // TestDongleAssignerEmpty verifies an empty pool yields errNoFreeDongle (the

@@ -32,14 +32,14 @@ import (
 // hubOptions holds the runtime/deploy settings for the hub, all sourced from
 // command-line flags (not the inventory).
 type hubOptions struct {
-	registry     string
-	hubAddress   string
-	timeout      time.Duration
-	retries      int
-	refresh      time.Duration
-	ttl          time.Duration
-	diagnostics  string // registry namespace prefix for diagnostic registers; empty disables them
-	diagInterval time.Duration
+	registry      string
+	hubAddress    string
+	timeout       time.Duration
+	retries       int
+	sweepInterval time.Duration
+	ttl           time.Duration
+	diagnostics   string // registry namespace prefix for diagnostic registers; empty disables them
+	diagInterval  time.Duration
 }
 
 // newHubCmd builds the "hub" subcommand: bridge the inventory's nodes to the
@@ -62,8 +62,8 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	f.StringVar(&o.registry, "registry", "", "Registry base URL (falls back to the REGISTRY environment variable)")
 	f.StringVar(&o.hubAddress, "hub-address", "FFFFFF01", "hub RF address (8 hex digits)")
 	f.DurationVar(&o.timeout, "timeout", 50*time.Millisecond, "per-attempt response wait")
-	f.IntVar(&o.retries, "retries", 3, "retransmissions after the first attempt")
-	f.DurationVar(&o.refresh, "refresh", 15*time.Second, "how often to re-WATCH active subscriptions")
+	f.IntVar(&o.retries, "retries", engine.DefaultRetries, "retransmissions after the first attempt")
+	f.DurationVar(&o.sweepInterval, "sweep-interval", bridge.DefaultSweepInterval, "target interval between complete channel sweeps")
 	f.DurationVar(&o.ttl, "ttl", 30*time.Second, "Registry provider TTL for each register")
 	f.StringVar(&o.diagnostics, "diagnostics", "", "publish hub-synthesised diagnostic registers under this "+
 		"registry namespace prefix (e.g. \"diag\"); empty disables them")
@@ -72,6 +72,9 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 }
 
 func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *slog.Logger) error {
+	if o.retries < 0 {
+		return fmt.Errorf("retries must be non-negative")
+	}
 	if err := inv.Validate(); err != nil {
 		return fmt.Errorf("inventory: %w", err)
 	}
@@ -85,12 +88,10 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 	defer stop()
 
 	eng := engine.New(engine.Options{
-		HubAddr:         hubAddr,
-		Timeout:         o.timeout,
-		Retries:         o.retries,
-		RefreshInterval: o.refresh,
+		HubAddr: hubAddr,
+		Timeout: o.timeout,
+		Retries: o.retries,
 	})
-	go eng.Run(ctx)
 
 	// Each channel/dongle drives a single spreading factor; derive the map from
 	// the inventory (Validate already proved each channel is uniform).
@@ -115,7 +116,7 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 	}
 	logger.Info("using registry", "url", regURL)
 
-	br := bridge.New(eng, regClient, o.ttl, bridge.WithLogger(logger))
+	br := bridge.New(eng, regClient, o.ttl, bridge.WithLogger(logger), bridge.WithSweepInterval(o.sweepInterval))
 	for _, n := range nodes {
 		br.ServeNode(ctx, n)
 		logger.Info("serving node", "node", n.Name, "registers", len(n.Registers), "channel", n.Channel)
@@ -226,8 +227,9 @@ var errNoFreeDongle = errors.New("no unassigned radio dongle connected")
 // errNoFreeDongle when every connected dongle is already claimed (or none is
 // connected).
 func (a *dongleAssigner) claim(channel uint8, sf config.SpreadFactor, hubAddr [node.AddrLen]byte) (radio.Dongle, error) {
+	failed := make(map[string]bool)
 	for {
-		dt, sel, key, ok, err := a.reserve()
+		dt, sel, key, ok, err := a.reserve(failed)
 		if err != nil {
 			return nil, err
 		}
@@ -237,8 +239,10 @@ func (a *dongleAssigner) claim(channel uint8, sf config.SpreadFactor, hubAddr [n
 		d, err := dt.open(sel, channel, sf, hubAddr)
 		if err != nil {
 			// Reserved but could not open (vanished, busy, no permission): release
-			// the reservation and try the next free device.
+			// the reservation and try each other free device once. If all fail,
+			// return offline so the reconnect supervisor supplies the backoff.
 			a.unclaim(key)
+			failed[key] = true
 			continue
 		}
 		return &claimedDongle{Dongle: d, release: func() { a.unclaim(key) }}, nil
@@ -249,7 +253,7 @@ func (a *dongleAssigner) claim(channel uint8, sf config.SpreadFactor, hubAddr [n
 // the first unclaimed one as claimed, returning how to open it. ok is false when
 // every connected dongle is already claimed (or none is connected). Selectors
 // within a type are sorted so assignment is deterministic.
-func (a *dongleAssigner) reserve() (dt *dongleType, selector, key string, ok bool, err error) {
+func (a *dongleAssigner) reserve(exclude map[string]bool) (dt *dongleType, selector, key string, ok bool, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for i := range a.types {
@@ -261,7 +265,7 @@ func (a *dongleAssigner) reserve() (dt *dongleType, selector, key string, ok boo
 		sort.Strings(sels)
 		for _, s := range sels {
 			k := t.scheme + ":" + s
-			if a.claimed[k] {
+			if a.claimed[k] || exclude[k] {
 				continue
 			}
 			a.claimed[k] = true

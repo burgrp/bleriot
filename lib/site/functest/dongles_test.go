@@ -4,8 +4,8 @@
 // BleRiot protocol stack. They run the real hub engine on one USB dongle and the
 // real node runtime (protocol/node) on a second USB dongle, exchanging packets
 // over the air with no microcontroller and no mocks — exercising the XTEA codec,
-// packet framing, GET/SET/WATCH transactions, retries, push subscriptions, the
-// reply turnaround guard (lib/README.md §6), and liveness detection end to end.
+// packet framing, GET/SET transactions, retries, and the reply turnaround guard
+// end to end.
 //
 // Every test runs twice, once per BLE Coded PHY spreading factor: S8 (long
 // range, ~125 kbps) on channel 37 and S2 (shorter range, ~500 kbps) on channel
@@ -62,7 +62,6 @@ var (
 const (
 	tagTemp    uint16 = 1
 	tagSetting uint16 = 2
-	tagPush    uint16 = 3
 	tagUnknown uint16 = 99
 )
 
@@ -90,14 +89,11 @@ var spreadConfigs = []spreadConfig{
 // full speed). The per-attempt timeout is therefore generous, and it comfortably
 // clears the dongle's reply turnaround guard (mcpdongle.replyGuard, ~20 ms) plus
 // the engine's minReplyHeadroom, so a deferred reply always lands inside the
-// window. The refresh interval is short enough to detect a silent node within a
-// few seconds (refreshInterval × livenessMisses).
+// response window.
 const (
-	opTimeout       = 500 * time.Millisecond
-	opRetries       = 3
-	refreshInterval = 200 * time.Millisecond
-	livenessMisses  = 2
-	waitTimeout     = 8 * time.Second
+	opTimeout   = 500 * time.Millisecond
+	opRetries   = 3
+	waitTimeout = 8 * time.Second
 )
 
 func mustAddr(s string) [node.AddrLen]byte {
@@ -128,8 +124,6 @@ func mcpSelector(tb testing.TB, env, val string) string {
 	return sel
 }
 
-// sensorEvent is an out-of-band register change applied inside the node loop so
-// that node.Notify is only ever called from the node's own goroutine.
 type sensorEvent struct {
 	tag   uint16
 	value int32
@@ -144,7 +138,6 @@ type memDevice struct {
 	mu   sync.Mutex
 	vals map[uint16]int32
 	null map[uint16]bool
-	nrt  *pnode.Node
 }
 
 func newMemDevice() *memDevice {
@@ -166,13 +159,9 @@ func (d *memDevice) Read(tag uint16) (int32, bool) {
 
 func (d *memDevice) Write(tag uint16, value int32, null bool) {
 	d.apply(sensorEvent{tag: tag, value: value, null: null})
-	// A SET that lands is also pushed to any watcher, like a real device whose
-	// register settled to the written value.
-	d.nrt.Notify(tag, value, null)
 }
 
-// apply mutates the stored value without notifying (used both for the initial
-// seed and for simulated sensor changes processed in the node loop).
+// apply mutates the stored value.
 func (d *memDevice) apply(ev sensorEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -187,13 +176,9 @@ func (d *memDevice) apply(ev sensorEvent) {
 
 // harness owns both dongles, the hub engine, and the node runtime for the test.
 type harness struct {
-	cancel  context.CancelFunc
-	eng     *engine.Engine
-	dev     *memDevice
-	sensor  chan sensorEvent
-	paused  chan bool
-	noderad *radio.NodeRadio
-	wg      sync.WaitGroup
+	eng *engine.Engine
+	dev *memDevice
+	wg  sync.WaitGroup
 }
 
 func setup(tb testing.TB, sc spreadConfig) *harness {
@@ -232,70 +217,42 @@ func setup(tb testing.TB, sc spreadConfig) *harness {
 	// The hub radio's receive loop owns hubD and closes it when ctx is cancelled;
 	// the node radio owns nodeD and closes it on nodeRadio.Close().
 	hubRadio := radio.New(ctx, hubD)
+	tb.Cleanup(func() {
+		cancel()
+		<-hubRadio.Done()
+	})
 	nodeRadio := radio.NewNode(nodeD)
+	tb.Cleanup(func() { nodeRadio.Close() })
 
 	eng := engine.New(engine.Options{
-		HubAddr:         hubAddr,
-		Timeout:         opTimeout,
-		Retries:         opRetries,
-		RefreshInterval: refreshInterval,
-		LivenessMisses:  livenessMisses,
+		HubAddr: hubAddr,
+		Timeout: opTimeout,
+		Retries: opRetries,
 	})
-	go eng.Run(ctx)
 	if err := eng.AddRadio(ctx, channel, hubRadio); err != nil {
-		cancel()
-		nodeRadio.Close()
 		tb.Fatalf("AddRadio: %v", err)
 	}
 
 	n := node.NewNode("functest", channel, &node.Descriptor{}, node.Identity{Address: nodeAddr, Key: nodeKey})
 	if err := eng.AddNode(n); err != nil {
-		cancel()
-		nodeRadio.Close()
 		tb.Fatalf("add node: %v", err)
 	}
 
 	dev := newMemDevice()
 	nrt, err := pnode.New(nodeRadio, nodeAddr, nodeKey, dev)
 	if err != nil {
-		cancel()
-		nodeRadio.Close()
 		tb.Fatalf("node runtime: %v", err)
 	}
-	dev.nrt = nrt
-
 	h := &harness{
-		cancel:  cancel,
-		eng:     eng,
-		dev:     dev,
-		sensor:  make(chan sensorEvent, 8),
-		paused:  make(chan bool, 1),
-		noderad: nodeRadio,
+		eng: eng,
+		dev: dev,
 	}
 
-	// Node loop: drains simulated sensor events and polls the runtime. Pausing
-	// makes the node stop answering, which is how the liveness test takes it
-	// "offline" without unplugging anything.
+	// Node loop polls the runtime for hub-initiated transactions.
 	h.wg.Add(1)
 	go func() {
 		defer h.wg.Done()
-		paused := false
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-			select {
-			case p := <-h.paused:
-				paused = p
-			case ev := <-h.sensor:
-				dev.apply(ev)
-				nrt.Notify(ev.tag, ev.value, ev.null)
-			default:
-			}
-			if paused {
-				time.Sleep(5 * time.Millisecond)
-				continue
-			}
+		for ctx.Err() == nil {
 			nrt.Poll()
 		}
 	}()
@@ -303,11 +260,6 @@ func setup(tb testing.TB, sc spreadConfig) *harness {
 	tb.Cleanup(func() {
 		cancel()
 		h.wg.Wait()
-		// Wait for the hub receive loop to exit and close its dongle, then close
-		// the node dongle, so neither physical device is still in use when the
-		// next test re-opens it (overlapping sessions desync the HID stream).
-		<-hubRadio.Done()
-		nodeRadio.Close()
 	})
 	return h
 }
@@ -315,16 +267,6 @@ func setup(tb testing.TB, sc spreadConfig) *harness {
 // seed sets a register value before exercising the stack.
 func (h *harness) seed(tag uint16, value int32) {
 	h.dev.apply(sensorEvent{tag: tag, value: value})
-}
-
-// pushSensor simulates an autonomous register change on the node.
-func (h *harness) pushSensor(tag uint16, value int32) {
-	h.sensor <- sensorEvent{tag: tag, value: value}
-}
-
-// setPaused toggles whether the node answers the radio.
-func (h *harness) setPaused(p bool) {
-	h.paused <- p
 }
 
 func opCtx() (context.Context, context.CancelFunc) {
@@ -408,77 +350,4 @@ func TestSetNullClears(t *testing.T) {
 			t.Fatalf("Get after SetNull = %+v, want null", u)
 		}
 	})
-}
-
-func TestWatchReceivesInitialAndPush(t *testing.T) {
-	forEachSpread(t, func(t *testing.T, h *harness) {
-		h.seed(tagPush, 100)
-
-		updates := make(chan engine.Update, 8)
-		ctx, cancel := opCtx()
-		defer cancel()
-		if err := h.eng.Watch(ctx, nodeAddr, tagPush, func(u engine.Update) {
-			updates <- u
-		}); err != nil {
-			t.Fatalf("Watch: %v", err)
-		}
-
-		// Initial IS reply carries the current value.
-		if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 100 }); u.Value != 100 {
-			t.Fatalf("initial update = %+v, want 100", u)
-		}
-
-		// An autonomous change is pushed to the watcher.
-		h.pushSensor(tagPush, 200)
-		if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 200 }); u.Value != 200 {
-			t.Fatalf("pushed update = %+v, want 200", u)
-		}
-	})
-}
-
-func TestLivenessNullOnSilentNode(t *testing.T) {
-	forEachSpread(t, func(t *testing.T, h *harness) {
-		h.seed(tagPush, 7)
-
-		updates := make(chan engine.Update, 8)
-		ctx, cancel := opCtx()
-		defer cancel()
-		if err := h.eng.Watch(ctx, nodeAddr, tagPush, func(u engine.Update) {
-			updates <- u
-		}); err != nil {
-			t.Fatalf("Watch: %v", err)
-		}
-		// Drain the initial live value.
-		waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null })
-
-		// Take the node offline: refreshes now time out, and after livenessMisses
-		// the engine must report the register as NULL.
-		h.setPaused(true)
-		if u := waitUpdate(t, updates, func(u engine.Update) bool { return u.Null }); !u.Null {
-			t.Fatalf("offline update = %+v, want null", u)
-		}
-
-		// Bringing the node back must restore a live value to the watcher.
-		h.setPaused(false)
-		if u := waitUpdate(t, updates, func(u engine.Update) bool { return !u.Null && u.Value == 7 }); u.Value != 7 {
-			t.Fatalf("recovered update = %+v, want 7", u)
-		}
-	})
-}
-
-// waitUpdate waits for an update matching pred or fails after waitTimeout.
-func waitUpdate(t *testing.T, ch <-chan engine.Update, pred func(engine.Update) bool) engine.Update {
-	t.Helper()
-	deadline := time.After(waitTimeout)
-	for {
-		select {
-		case u := <-ch:
-			if pred(u) {
-				return u
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for matching update")
-			return engine.Update{}
-		}
-	}
 }

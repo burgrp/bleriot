@@ -11,698 +11,537 @@ import (
 	"github.com/burgrp/bleriot/lib/site/node"
 )
 
-var testKey = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-
-const (
-	testChannel uint8 = 10
-	regTemp           = uint16(0x1234)
+var (
+	testKey   = [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	testKey2  = [16]byte{16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}
+	hubAddr   = [4]byte{0xCC, 0xA0, 0x00, 0x01}
+	nodeAddr  = [4]byte{0xCC, 0xA0, 0x00, 0x02}
+	nodeAddr2 = [4]byte{0xCC, 0xA0, 0x00, 0x03}
 )
 
-var (
-	hubAddr  = [4]byte{0xCC, 0xA0, 0x00, 0x01}
-	nodeAddr = [4]byte{0xCC, 0xA0, 0x00, 0x02}
+const (
+	testChannel  uint8 = 10
+	testChannel2 uint8 = 20
+	regTemp            = uint16(0x1234)
+	regOther           = uint16(0x4321)
 )
 
 func testDescriptor(t *testing.T) *node.Descriptor {
 	t.Helper()
-	descriptor, err := node.NewDescriptor(nil, []node.Register{{ID: regTemp, Name: "test", Type: node.TypeInt}})
+	descriptor, err := node.NewDescriptor(nil, []node.Register{
+		{ID: regTemp, Name: "temperature", Type: node.TypeInt},
+		{ID: regOther, Name: "other", Type: node.TypeInt},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return descriptor
 }
 
-// fakeRadio captures sent packets and lets a simulated node inject replies.
 type fakeRadio struct {
-	sent    chan [PacketLen]byte
-	recv    chan [PacketLen]byte
-	drop    int           // drop the first n Send calls (to exercise retries)
-	sendErr error         // returned instead of sending when non-nil
-	guard   time.Duration // reply turnaround guard reported to the engine
+	sent          chan [PacketLen]byte
+	recv          chan [PacketLen]byte
+	receivedCalls chan struct{}
+	guard         time.Duration
+
 	mu      sync.Mutex
+	drop    int
+	sendErr error
 }
 
 func newFakeRadio() *fakeRadio {
 	return &fakeRadio{
-		sent: make(chan [PacketLen]byte, 16),
-		recv: make(chan [PacketLen]byte, 16),
+		sent:          make(chan [PacketLen]byte, 32),
+		recv:          make(chan [PacketLen]byte, 32),
+		receivedCalls: make(chan struct{}, 32),
 	}
 }
 
-func (f *fakeRadio) Send(dst [4]byte, payload []byte) error {
-	f.mu.Lock()
-	drop := f.drop > 0
-	err := f.sendErr
+func (radio *fakeRadio) Send(_ [4]byte, payload []byte) error {
+	radio.mu.Lock()
+	drop := radio.drop > 0
 	if drop {
-		f.drop--
+		radio.drop--
 	}
-	f.mu.Unlock()
+	err := radio.sendErr
+	radio.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	var p [PacketLen]byte
-	copy(p[:], payload)
 	if !drop {
-		f.sent <- p
+		var packet [PacketLen]byte
+		copy(packet[:], payload)
+		radio.sent <- packet
 	}
 	return nil
 }
 
-func (f *fakeRadio) Received() <-chan [PacketLen]byte { return f.recv }
+func (radio *fakeRadio) Received() <-chan [PacketLen]byte {
+	radio.receivedCalls <- struct{}{}
+	return radio.recv
+}
+func (radio *fakeRadio) ReplyGuard() time.Duration { return radio.guard }
 
-func (f *fakeRadio) ReplyGuard() time.Duration { return f.guard }
-
-// simulateNode reads one request, decodes it, and replies: an ACK for a SET
-// (§8.2), or an IS for a GET/WATCH. reply transforms the request value into the
-// response value (used only for the IS reply).
-func simulateNode(t *testing.T, f *fakeRadio, c protocol.Codec, reply func(typ byte, reg uint16, val int32) (int32, bool)) {
+func newTestEngine(t *testing.T, timeout time.Duration, retries int) (*Engine, *fakeRadio, protocol.Codec) {
 	t.Helper()
+	engine := New(Options{HubAddr: hubAddr, Timeout: timeout, Retries: retries})
+	radio := newFakeRadio()
+	if err := engine.AddRadio(context.Background(), testChannel, radio); err != nil {
+		t.Fatal(err)
+	}
+	codec := addTestNode(t, engine, "node", testChannel, nodeAddr, testKey)
+	return engine, radio, codec
+}
+
+func addTestNode(t *testing.T, engine *Engine, name string, channel uint8, address [4]byte, key [16]byte) protocol.Codec {
+	t.Helper()
+	n := node.NewNode(name, channel, testDescriptor(t), node.Identity{Address: address, Key: key})
+	if err := engine.AddNode(n); err != nil {
+		t.Fatal(err)
+	}
+	codec, err := protocol.NewCodec(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return codec
+}
+
+func injectResponse(radio *fakeRadio, codec protocol.Codec, source [4]byte, typ, flags byte, reg uint16, value int32) {
+	var packet [PacketLen]byte
+	codec.Encode(packet[:], source, typ, flags, reg, value)
+	radio.recv <- packet
+}
+
+func TestGetCarriesGuardAndReturnsValue(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 50*time.Millisecond, 1)
+	radio.guard = 20 * time.Millisecond
+
 	go func() {
-		for req := range f.sent {
-			_, typ, _, reg, val, err := c.Decode(req[:])
+		request := <-radio.sent
+		_, typ, flags, reg, _, err := codec.Decode(request[:])
+		if err != nil {
+			t.Errorf("decode GET: %v", err)
+			return
+		}
+		if typ != protocol.TypeGET || reg != regTemp || protocol.GuardMillis(flags) != 20 {
+			t.Errorf("GET = type %d flags %#x reg %#x", typ, flags, reg)
+		}
+		injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 4242)
+	}()
+
+	update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if update != (Update{Value: 4242}) {
+		t.Fatalf("Get = %+v, want value 4242", update)
+	}
+}
+
+func TestSetAndSetNullCarryGuard(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 50*time.Millisecond, 1)
+	radio.guard = 7 * time.Millisecond
+
+	go func() {
+		for index := 0; index < 2; index++ {
+			request := <-radio.sent
+			_, typ, flags, reg, value, err := codec.Decode(request[:])
 			if err != nil {
-				t.Errorf("node decode: %v", err)
-				continue
+				t.Errorf("decode SET: %v", err)
+				return
 			}
-			rv, null := reply(typ, reg, val)
-			var resp [PacketLen]byte
-			if typ == protocol.TypeSET {
-				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
-				f.recv <- resp
-				continue
+			if typ != protocol.TypeSET || protocol.GuardMillis(flags) != 7 {
+				t.Errorf("SET = type %d flags %#x", typ, flags)
 			}
-			if typ == protocol.TypeWATCH && reg == protocol.RegAll {
-				// Watch-all is answered with a single ACK, not a value dump (§8.3).
-				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
-				f.recv <- resp
-				continue
+			if index == 0 && (flags&protocol.FlagNULL != 0 || value != 250) {
+				t.Errorf("ordinary SET = flags %#x value %d", flags, value)
 			}
-			flags := byte(0)
-			if null {
-				flags = protocol.FlagNULL
+			if index == 1 && flags&protocol.FlagNULL == 0 {
+				t.Errorf("null SET flags = %#x", flags)
 			}
-			c.Encode(resp[:], nodeAddr, protocol.TypeIS, flags, reg, rv)
-			f.recv <- resp
-		}
-	}()
-}
-
-func newEngine(t *testing.T) (*Engine, *fakeRadio, protocol.Codec, context.CancelFunc) {
-	t.Helper()
-	c, err := protocol.NewCodec(testKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := New(Options{HubAddr: hubAddr, Timeout: 50 * time.Millisecond, Retries: 3})
-	f := newFakeRadio()
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := e.AddRadio(ctx, testChannel, f); err != nil {
-		t.Fatal(err)
-	}
-
-	n := node.NewNode(
-		"t",
-		testChannel,
-		testDescriptor(t),
-		node.Identity{Address: nodeAddr, Key: testKey},
-	)
-	if err := e.AddNode(n); err != nil {
-		t.Fatal(err)
-	}
-	return e, f, c, cancel
-}
-
-func TestEngine_Get(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		return 4242, false
-	})
-
-	u, err := e.Get(context.Background(), nodeAddr, regTemp)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if u.Value != 4242 || u.Null {
-		t.Fatalf("Get = %+v, want {4242 false}", u)
-	}
-}
-
-// TestEngine_RequestCarriesGuard checks the engine packs the radio's reply
-// turnaround guard (lib/README.md §6) into the GUARD field of every request.
-func TestEngine_RequestCarriesGuard(t *testing.T) {
-	c, err := protocol.NewCodec(testKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := New(Options{HubAddr: hubAddr, Timeout: 50 * time.Millisecond, Retries: 3})
-	f := newFakeRadio()
-	f.guard = 20 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := e.AddRadio(ctx, testChannel, f); err != nil {
-		t.Fatal(err)
-	}
-	n := node.NewNode("t", testChannel, testDescriptor(t), node.Identity{Address: nodeAddr, Key: testKey})
-	if err := e.AddNode(n); err != nil {
-		t.Fatal(err)
-	}
-
-	// Reply so the transaction completes; assert the request's GUARD field.
-	go func() {
-		for req := range f.sent {
-			_, _, flags, reg, _, derr := c.Decode(req[:])
-			if derr != nil {
-				t.Errorf("decode: %v", derr)
-				continue
-			}
-			if got := protocol.GuardMillis(flags); got != 20 {
-				t.Errorf("request GUARD = %d ms, want 20", got)
-			}
-			var resp [PacketLen]byte
-			c.Encode(resp[:], nodeAddr, protocol.TypeIS, 0, reg, 1)
-			f.recv <- resp
+			injectResponse(radio, codec, nodeAddr, protocol.TypeACK, flags, reg, 0)
 		}
 	}()
 
-	if _, err := e.Get(context.Background(), nodeAddr, regTemp); err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-}
-
-// TestEngine_AddRadioRejectsLargeGuard checks AddRadio refuses a radio whose
-// reply guard leaves no headroom under the timeout (lib/README.md §6:
-// GUARD < T_timeout), so the misconfiguration surfaces at startup instead of as
-// silent, total packet loss.
-func TestEngine_AddRadioRejectsLargeGuard(t *testing.T) {
-	e := New(Options{HubAddr: hubAddr, Timeout: 20 * time.Millisecond, Retries: 3})
-	f := newFakeRadio()
-	f.guard = 20 * time.Millisecond // == timeout: no room for the reply to arrive
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := e.AddRadio(ctx, testChannel, f); !errors.Is(err, ErrGuardTooLarge) {
-		t.Fatalf("AddRadio error = %v, want ErrGuardTooLarge", err)
-	}
-}
-
-func TestEngine_Set(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		if typ != protocol.TypeSET {
-			t.Errorf("expected SET, got %d", typ)
-		}
-		return val, false
-	})
-
-	if err := e.Set(context.Background(), nodeAddr, regTemp, 250); err != nil {
+	if err := engine.Set(context.Background(), nodeAddr, regTemp, 250); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-}
-
-func TestEngine_SetNull(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-
-	// Simulate a node that checks the request carries the NULL flag, then ACKs.
-	go func() {
-		for req := range f.sent {
-			_, typ, flags, reg, _, err := c.Decode(req[:])
-			if err != nil {
-				t.Errorf("node decode: %v", err)
-				continue
-			}
-			if typ != protocol.TypeSET {
-				t.Errorf("expected SET, got %d", typ)
-			}
-			if flags&protocol.FlagNULL == 0 {
-				t.Errorf("expected NULL flag, got flags %#x", flags)
-			}
-			var resp [PacketLen]byte
-			c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
-			f.recv <- resp
-		}
-	}()
-
-	if err := e.SetNull(context.Background(), nodeAddr, regTemp); err != nil {
+	if err := engine.SetNull(context.Background(), nodeAddr, regTemp); err != nil {
 		t.Fatalf("SetNull: %v", err)
 	}
 }
 
-func TestEngine_NullResponse(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		return 0, true
-	})
-
-	u, err := e.Get(context.Background(), nodeAddr, regTemp)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if !u.Null {
-		t.Fatal("expected Null update")
-	}
-}
-
-func TestEngine_RetriesThenSucceeds(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-	f.mu.Lock()
-	f.drop = 2 // drop first two attempts; third should succeed
-	f.mu.Unlock()
-	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		return 7, false
-	})
-
-	u, err := e.Get(context.Background(), nodeAddr, regTemp)
-	if err != nil {
-		t.Fatalf("Get after retries: %v", err)
-	}
-	if u.Value != 7 {
-		t.Fatalf("value = %d, want 7", u.Value)
-	}
-}
-
-func TestEngine_Timeout(t *testing.T) {
-	e, _, _, cancel := newEngine(t)
-	defer cancel()
-	// No node simulator: never replies.
-	_, err := e.Get(context.Background(), nodeAddr, regTemp)
-	if err != ErrTimeout {
-		t.Fatalf("err = %v, want ErrTimeout", err)
-	}
-}
-
-func TestEngine_UnknownNode(t *testing.T) {
-	e, _, _, cancel := newEngine(t)
-	defer cancel()
-	_, err := e.Get(context.Background(), [4]byte{9, 9, 9, 9}, regTemp)
-	if err != ErrUnknownNode {
-		t.Fatalf("err = %v, want ErrUnknownNode", err)
-	}
-}
-
-func TestEngine_Watch(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		return 11, false // immediate value on WATCH
-	})
-
-	var mu sync.Mutex
-	var got []int32
-	err := e.Watch(context.Background(), nodeAddr, regTemp, func(u Update) {
-		mu.Lock()
-		got = append(got, u.Value)
-		mu.Unlock()
-	})
-	if err != nil {
-		t.Fatalf("Watch: %v", err)
-	}
-
-	// Simulate an unsolicited push.
-	var push [PacketLen]byte
-	c.Encode(push[:], nodeAddr, protocol.TypeIS, 0, regTemp, 22)
-	f.recv <- push
-
-	deadline := time.After(2 * time.Second)
-	for {
-		mu.Lock()
-		n := len(got)
-		mu.Unlock()
-		if n >= 2 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("expected >=2 callback values, got %v", got)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if got[0] != 11 || got[1] != 22 {
-		t.Fatalf("callback values = %v, want [11 22]", got)
-	}
-}
-
-func TestEngine_RefreshReWatches(t *testing.T) {
-	c, err := protocol.NewCodec(testKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Short refresh interval so the test runs quickly.
-	e := New(Options{HubAddr: hubAddr, Timeout: 50 * time.Millisecond, Retries: 3, RefreshInterval: 20 * time.Millisecond})
-	f := newFakeRadio()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := e.AddRadio(ctx, testChannel, f); err != nil {
-		t.Fatal(err)
-	}
-	n := node.NewNode(
-		"t",
-		testChannel,
-		testDescriptor(t),
-		node.Identity{Address: nodeAddr, Key: testKey},
-	)
-	if err := e.AddNode(n); err != nil {
-		t.Fatal(err)
-	}
-
-	// Count WATCH requests the node sees.
-	var mu sync.Mutex
-	var watches int
-	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		if typ == protocol.TypeWATCH && val == 1 {
-			mu.Lock()
-			watches++
-			mu.Unlock()
-		}
-		return 1, false
-	})
-
-	if err := e.Watch(context.Background(), nodeAddr, regTemp, func(Update) {}); err != nil {
-		t.Fatalf("Watch: %v", err)
-	}
-
-	go e.Run(ctx)
-
-	// Expect the initial WATCH plus several refreshes.
-	deadline := time.After(2 * time.Second)
-	for {
-		mu.Lock()
-		w := watches
-		mu.Unlock()
-		if w >= 4 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("expected >=4 WATCH requests from refresh, got %d", w)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-
-	// After Unwatch, refreshes must stop targeting the register.
-	if err := e.Unwatch(context.Background(), nodeAddr, regTemp); err != nil {
-		t.Fatalf("Unwatch: %v", err)
-	}
-	mu.Lock()
-	baseline := watches
-	mu.Unlock()
-	time.Sleep(100 * time.Millisecond)
-	mu.Lock()
-	after := watches
-	mu.Unlock()
-	if after != baseline {
-		t.Fatalf("WATCH refreshes continued after Unwatch: %d -> %d", baseline, after)
-	}
-}
-
-// TestEngine_OfflineNodeReportsNull verifies that when a watched node stops
-// answering refreshes (e.g. it is powered off), the engine delivers a NULL
-// update to the watcher after LivenessMisses consecutive unanswered refreshes,
-// so a stale value is not reported indefinitely.
-func TestEngine_OfflineNodeReportsNull(t *testing.T) {
-	c, err := protocol.NewCodec(testKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := New(Options{
-		HubAddr:         hubAddr,
-		Timeout:         20 * time.Millisecond,
-		Retries:         1,
-		RefreshInterval: 15 * time.Millisecond,
-		LivenessMisses:  2,
-	})
-	f := newFakeRadio()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := e.AddRadio(ctx, testChannel, f); err != nil {
-		t.Fatal(err)
-	}
-	n := node.NewNode("t", testChannel, testDescriptor(t),
-		node.Identity{Address: nodeAddr, Key: testKey})
-	if err := e.AddNode(n); err != nil {
-		t.Fatal(err)
-	}
-
-	// The simulated node answers while alive, then goes silent (powered off).
-	var smu sync.Mutex
-	alive := true
+func TestGetRetriesThenSucceeds(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 20*time.Millisecond, 1)
+	radio.mu.Lock()
+	radio.drop = 1
+	radio.mu.Unlock()
 	go func() {
-		for req := range f.sent {
-			smu.Lock()
-			up := alive
-			smu.Unlock()
-			if !up {
-				continue // node is off: no reply
-			}
-			_, _, _, reg, _, derr := c.Decode(req[:])
-			if derr != nil {
-				t.Errorf("node decode: %v", derr)
-				continue
-			}
-			var resp [PacketLen]byte
-			c.Encode(resp[:], nodeAddr, protocol.TypeIS, 0, reg, 11)
-			f.recv <- resp
+		request := <-radio.sent
+		_, typ, flags, reg, _, err := codec.Decode(request[:])
+		if err != nil || typ != protocol.TypeGET {
+			t.Errorf("retry GET type %d err %v", typ, err)
+			return
 		}
+		injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 7)
 	}()
 
-	var cmu sync.Mutex
-	var updates []Update
-	if err := e.Watch(context.Background(), nodeAddr, regTemp, func(u Update) {
-		cmu.Lock()
-		updates = append(updates, u)
-		cmu.Unlock()
-	}); err != nil {
-		t.Fatalf("Watch: %v", err)
-	}
-
-	go e.Run(ctx)
-
-	// Let a few refreshes succeed, then power the node off.
-	time.Sleep(45 * time.Millisecond)
-	smu.Lock()
-	alive = false
-	smu.Unlock()
-
-	// Expect a NULL update once the refreshes go unanswered past the threshold.
-	deadline := time.After(2 * time.Second)
-	for {
-		cmu.Lock()
-		var sawNull bool
-		for _, u := range updates {
-			if u.Null {
-				sawNull = true
-			}
-		}
-		cmu.Unlock()
-		if sawNull {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("expected a NULL update after node went offline")
-		case <-time.After(5 * time.Millisecond):
-		}
+	update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+	if err != nil || update.Value != 7 {
+		t.Fatalf("Get after retry = %+v, %v", update, err)
 	}
 }
 
-// TestEngine_AcksSpontaneousPush checks the hub acknowledges a received
-// spontaneous push (IS with the PUSH flag, lib/README.md §8.3) so the node stops
-// retransmitting it.
-func TestEngine_AcksSpontaneousPush(t *testing.T) {
-	_, f, c, cancel := newEngine(t)
-	defer cancel()
-
-	var pkt [PacketLen]byte
-	c.Encode(pkt[:], nodeAddr, protocol.TypeIS, protocol.FlagPush, regTemp, 99)
-	f.recv <- pkt
-
-	select {
-	case got := <-f.sent:
-		_, typ, _, reg, _, err := c.Decode(got[:])
-		if err != nil {
-			t.Fatalf("decode ACK: %v", err)
-		}
-		if typ != protocol.TypeACK {
-			t.Fatalf("reply type = %#x, want ACK", typ)
-		}
-		if reg != regTemp {
-			t.Fatalf("ACK reg = %#x, want %#x", reg, regTemp)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("engine did not ACK the spontaneous push")
-	}
-}
-
-// TestEngine_DoesNotAckSolicitedIS checks the hub does not ACK a plain IS (PUSH
-// clear): solicited replies are recovered by request retransmission, and a
-// spurious ACK would waste a transmit window.
-func TestEngine_DoesNotAckSolicitedIS(t *testing.T) {
-	_, f, c, cancel := newEngine(t)
-	defer cancel()
-
-	var pkt [PacketLen]byte
-	c.Encode(pkt[:], nodeAddr, protocol.TypeIS, 0, regTemp, 7) // no PUSH flag
-	f.recv <- pkt
-
-	select {
-	case got := <-f.sent:
-		_, typ, _, _, _, _ := c.Decode(got[:])
-		t.Fatalf("engine transmitted type %#x for a solicited IS, want nothing", typ)
-	case <-time.After(150 * time.Millisecond):
-		// No transmit: correct.
-	}
-}
-
-// TestEngine_WatchAllResolvesOnAck checks a watch-all subscription (§8.3)
-// completes on the node's single ACK, not on an IS value dump.
-func TestEngine_WatchAllResolvesOnAck(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-	simulateNode(t, f, c, func(typ byte, reg uint16, val int32) (int32, bool) {
-		return 0, false
-	})
-
-	if err := e.WatchAll(context.Background(), nodeAddr, func(uint16, Update) {}); err != nil {
-		t.Fatalf("WatchAll: %v", err)
-	}
-}
-
-// TestEngine_WatchAllFansOutPushes checks a watch-all subscriber receives every
-// register's push tagged by its register ID, and that the push is acknowledged.
-func TestEngine_WatchAllFansOutPushes(t *testing.T) {
-	e, f, c, cancel := newEngine(t)
-	defer cancel()
-
-	// Answer the watch-all WATCH with a single ACK and drain any push ACKs the
-	// engine sends so f.sent never blocks.
+func TestRetryDuplicateCannotCompleteNextTransaction(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 20*time.Millisecond, 1)
+	firstDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
 	go func() {
-		for req := range f.sent {
-			_, typ, _, reg, _, err := c.Decode(req[:])
-			if err != nil {
-				t.Errorf("node decode: %v", err)
-				continue
-			}
-			if typ == protocol.TypeWATCH {
-				var resp [PacketLen]byte
-				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
-				f.recv <- resp
-			}
-		}
+		update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+		firstDone <- struct {
+			update Update
+			err    error
+		}{update, err}
 	}()
 
-	type push struct {
-		reg uint16
-		u   Update
-	}
-	got := make(chan push, 4)
-	if err := e.WatchAll(context.Background(), nodeAddr, func(reg uint16, u Update) {
-		got <- push{reg, u}
-	}); err != nil {
-		t.Fatalf("WatchAll: %v", err)
-	}
+	firstRequest := <-radio.sent
+	_, _, flags, reg, _, _ := codec.Decode(firstRequest[:])
+	<-radio.sent
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 11)
 
-	// A spontaneous push for an arbitrary register reaches the watch-all callback.
-	var pkt [PacketLen]byte
-	c.Encode(pkt[:], nodeAddr, protocol.TypeIS, protocol.FlagPush, regTemp, 77)
-	f.recv <- pkt
+	secondDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
+	go func() {
+		update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+		secondDone <- struct {
+			update Update
+			err    error
+		}{update, err}
+	}()
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 11)
 
-	select {
-	case g := <-got:
-		if g.reg != regTemp || g.u.Value != 77 || g.u.Null {
-			t.Fatalf("watch-all push = reg %#x %+v, want %#x {77 false}", g.reg, g.u, regTemp)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("watch-all callback was not invoked for the push")
+	first := <-firstDone
+	if first.err != nil || first.update.Value != 11 {
+		t.Fatalf("first Get = %+v, %v", first.update, first.err)
+	}
+	request := <-radio.sent
+	_, _, flags, reg, _, _ = codec.Decode(request[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 22)
+	second := <-secondDone
+	if second.err != nil || second.update.Value != 22 {
+		t.Fatalf("second Get = %+v, %v; retry duplicate escaped drain", second.update, second.err)
+	}
+	if got := engine.SnapshotNode(nodeAddr).Packet.RxOrphanVALUE; got != 1 {
+		t.Fatalf("orphan VALUEs = %d, want 1 drained duplicate", got)
 	}
 }
 
-// TestEngine_WatchAllOfflineReportsNull checks that when a watch-all node stops
-// answering refreshes, the engine signals the callback once with reg == RegAll
-// and a NULL Update, telling the caller every register is now unknown.
-func TestEngine_WatchAllOfflineReportsNull(t *testing.T) {
-	c, err := protocol.NewCodec(testKey)
-	if err != nil {
+func TestGetIgnoresWrongSourceRegisterAndType(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 80*time.Millisecond, 1)
+	codec2 := addTestNode(t, engine, "other", testChannel, nodeAddr2, testKey2)
+
+	go func() {
+		request := <-radio.sent
+		_, _, flags, _, _, _ := codec.Decode(request[:])
+		injectResponse(radio, codec2, nodeAddr2, protocol.TypeVALUE, flags, regTemp, 1)
+		injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, regOther, 2)
+		injectResponse(radio, codec, nodeAddr, protocol.TypeACK, flags, regTemp, 0)
+		injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, regTemp, 4)
+	}()
+
+	update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+	if err != nil || update.Value != 4 {
+		t.Fatalf("Get = %+v, %v; wrong response completed transaction", update, err)
+	}
+	stats := engine.SnapshotNode(nodeAddr).Packet
+	if stats.RxOrphanVALUE != 1 || stats.RxOrphanACK != 1 || stats.RxMatchedVALUE != 1 {
+		t.Fatalf("source-node packet stats = %+v", stats)
+	}
+	if got := engine.SnapshotNode(nodeAddr2).Packet.RxOrphanVALUE; got != 1 {
+		t.Fatalf("wrong-source orphan VALUEs = %d, want 1", got)
+	}
+}
+
+func TestSameChannelTransactionsQueue(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 200*time.Millisecond, 1)
+	firstResult := make(chan Update, 1)
+	secondResult := make(chan Update, 1)
+	go func() {
+		update, _ := engine.Get(context.Background(), nodeAddr, regTemp)
+		firstResult <- update
+	}()
+	firstRequest := <-radio.sent
+
+	go func() {
+		update, _ := engine.Get(context.Background(), nodeAddr, regTemp)
+		secondResult <- update
+	}()
+	select {
+	case <-radio.sent:
+		t.Fatal("second same-channel transaction transmitted before first completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	_, _, flags, reg, _, _ := codec.Decode(firstRequest[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 1)
+	secondRequest := <-radio.sent
+	_, _, flags, reg, _, _ = codec.Decode(secondRequest[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 2)
+
+	if first := <-firstResult; first.Value != 1 {
+		t.Fatalf("first result = %+v", first)
+	}
+	if second := <-secondResult; second.Value != 2 {
+		t.Fatalf("second result = %+v", second)
+	}
+}
+
+func TestDistinctChannelsProceedConcurrently(t *testing.T) {
+	engine := New(Options{HubAddr: hubAddr, Timeout: 200 * time.Millisecond, Retries: 1})
+	radio1 := newFakeRadio()
+	radio2 := newFakeRadio()
+	if err := engine.AddRadio(context.Background(), testChannel, radio1); err != nil {
 		t.Fatal(err)
 	}
-	e := New(Options{
-		HubAddr:         hubAddr,
-		Timeout:         20 * time.Millisecond,
-		Retries:         1,
-		RefreshInterval: 15 * time.Millisecond,
-		LivenessMisses:  2,
-	})
-	f := newFakeRadio()
+	if err := engine.AddRadio(context.Background(), testChannel2, radio2); err != nil {
+		t.Fatal(err)
+	}
+	codec1 := addTestNode(t, engine, "one", testChannel, nodeAddr, testKey)
+	codec2 := addTestNode(t, engine, "two", testChannel2, nodeAddr2, testKey2)
+	done := make(chan error, 2)
+	go func() { _, err := engine.Get(context.Background(), nodeAddr, regTemp); done <- err }()
+	go func() { _, err := engine.Get(context.Background(), nodeAddr2, regTemp); done <- err }()
+
+	request1 := <-radio1.sent
+	request2 := <-radio2.sent
+	_, _, flags1, reg1, _, _ := codec1.Decode(request1[:])
+	_, _, flags2, reg2, _, _ := codec2.Decode(request2[:])
+	injectResponse(radio1, codec1, nodeAddr, protocol.TypeVALUE, flags1, reg1, 1)
+	injectResponse(radio2, codec2, nodeAddr2, protocol.TypeVALUE, flags2, reg2, 2)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestContextCancellationWhileQueued(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 200*time.Millisecond, 1)
+	firstDone := make(chan error, 1)
+	go func() { _, err := engine.Get(context.Background(), nodeAddr, regTemp); firstDone <- err }()
+	request := <-radio.sent
+
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := e.AddRadio(ctx, testChannel, f); err != nil {
+	queuedDone := make(chan error, 1)
+	go func() { _, err := engine.Get(ctx, nodeAddr, regOther); queuedDone <- err }()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	if err := <-queuedDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued Get error = %v, want context canceled", err)
+	}
+	select {
+	case <-radio.sent:
+		t.Fatal("canceled queued transaction transmitted")
+	default:
+	}
+	_, _, flags, reg, _, _ := codec.Decode(request[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 1)
+	if err := <-firstDone; err != nil {
 		t.Fatal(err)
 	}
-	n := node.NewNode("t", testChannel, testDescriptor(t),
-		node.Identity{Address: nodeAddr, Key: testKey})
-	if err := e.AddNode(n); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	// The node ACKs watch-all refreshes while alive, then goes silent.
-	var smu sync.Mutex
-	alive := true
+type stagedCancelContext struct {
+	context.Context
+	mu       sync.Mutex
+	errCalls int
+	cancelAt int
+}
+
+func (ctx *stagedCancelContext) Err() error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	ctx.errCalls++
+	if ctx.errCalls >= ctx.cancelAt {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestCancellationBeforeRetryPreventsSend(t *testing.T) {
+	engine, radio, _ := newTestEngine(t, 10*time.Millisecond, 1)
+	ctx := &stagedCancelContext{Context: context.Background(), cancelAt: 4}
+	if _, err := engine.Get(ctx, nodeAddr, regTemp); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Get error = %v, want context canceled", err)
+	}
+	if got := len(radio.sent); got != 1 {
+		t.Fatalf("send count = %d, want no retry after cancellation", got)
+	}
+}
+
+func TestCancellationAfterSendDrainsBeforeRelease(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 40*time.Millisecond, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() { _, err := engine.Get(ctx, nodeAddr, regTemp); firstDone <- err }()
+	request := <-radio.sent
+	<-radio.receivedCalls
+	_, _, flags, reg, _, _ := codec.Decode(request[:])
+	cancel()
+	<-radio.receivedCalls
+
+	secondDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
 	go func() {
-		for req := range f.sent {
-			smu.Lock()
-			up := alive
-			smu.Unlock()
-			if !up {
-				continue
-			}
-			_, typ, _, reg, _, derr := c.Decode(req[:])
-			if derr != nil {
-				t.Errorf("node decode: %v", derr)
-				continue
-			}
-			if typ == protocol.TypeWATCH {
-				var resp [PacketLen]byte
-				c.Encode(resp[:], nodeAddr, protocol.TypeACK, 0, reg, 0)
-				f.recv <- resp
-			}
-		}
+		update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+		secondDone <- struct {
+			update Update
+			err    error
+		}{update, err}
 	}()
-
-	var cmu sync.Mutex
-	var offline bool
-	if err := e.WatchAll(context.Background(), nodeAddr, func(reg uint16, u Update) {
-		if reg == RegAll && u.Null {
-			cmu.Lock()
-			offline = true
-			cmu.Unlock()
-		}
-	}); err != nil {
-		t.Fatalf("WatchAll: %v", err)
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 11)
+	if err := <-firstDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first Get error = %v, want context canceled", err)
 	}
 
-	go e.Run(ctx)
+	request = <-radio.sent
+	_, _, flags, reg, _, _ = codec.Decode(request[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 22)
+	second := <-secondDone
+	if second.err != nil || second.update.Value != 22 {
+		t.Fatalf("second Get = %+v, %v; canceled transaction reply escaped drain", second.update, second.err)
+	}
+}
 
-	time.Sleep(45 * time.Millisecond)
-	smu.Lock()
-	alive = false
-	smu.Unlock()
+func TestCancellationDuringRetrySuccessDrainDoesNotReleaseGate(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 20*time.Millisecond, 1)
+	radio.guard = 8 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
+	go func() {
+		update, err := engine.Get(ctx, nodeAddr, regTemp)
+		firstDone <- struct {
+			update Update
+			err    error
+		}{update, err}
+	}()
+	request := <-radio.sent
+	<-radio.receivedCalls
+	_, _, flags, reg, _, _ := codec.Decode(request[:])
+	<-radio.sent
+	<-radio.receivedCalls
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 11)
+	<-radio.receivedCalls
+	cancel()
 
-	deadline := time.After(2 * time.Second)
-	for {
-		cmu.Lock()
-		off := offline
-		cmu.Unlock()
-		if off {
-			break
+	secondDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
+	go func() {
+		update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+		secondDone <- struct {
+			update Update
+			err    error
+		}{update, err}
+	}()
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 11)
+	select {
+	case <-radio.sent:
+		t.Fatal("next transaction sent while retry-success drain still owned channel")
+	case <-time.After(5 * time.Millisecond):
+	}
+
+	first := <-firstDone
+	if first.err != nil || first.update.Value != 11 {
+		t.Fatalf("first Get = %+v, %v; cancellation aborted successful drain", first.update, first.err)
+	}
+	request = <-radio.sent
+	_, _, flags, reg, _, _ = codec.Decode(request[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 22)
+	second := <-secondDone
+	if second.err != nil || second.update.Value != 22 {
+		t.Fatalf("second Get = %+v, %v; duplicate escaped canceled drain", second.update, second.err)
+	}
+}
+
+func TestFinalTimeoutQuarantinesLateReply(t *testing.T) {
+	engine, radio, codec := newTestEngine(t, 20*time.Millisecond, 1)
+	firstDone := make(chan error, 1)
+	go func() { _, err := engine.Get(context.Background(), nodeAddr, regTemp); firstDone <- err }()
+	<-radio.sent
+	secondAttempt := <-radio.sent
+	_, _, flags, reg, _, _ := codec.Decode(secondAttempt[:])
+	time.AfterFunc(22*time.Millisecond, func() {
+		injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 11)
+	})
+	if err := <-firstDone; !errors.Is(err, ErrTimeout) {
+		t.Fatalf("first Get error = %v, want timeout", err)
+	}
+
+	secondDone := make(chan struct {
+		update Update
+		err    error
+	}, 1)
+	go func() {
+		update, err := engine.Get(context.Background(), nodeAddr, regTemp)
+		secondDone <- struct {
+			update Update
+			err    error
+		}{update, err}
+	}()
+	request := <-radio.sent
+	_, _, flags, reg, _, _ = codec.Decode(request[:])
+	injectResponse(radio, codec, nodeAddr, protocol.TypeVALUE, flags, reg, 22)
+	result := <-secondDone
+	if result.err != nil || result.update.Value != 22 {
+		t.Fatalf("second Get = %+v, %v; late reply escaped quarantine", result.update, result.err)
+	}
+}
+
+func TestAddRadioRejectsLargeGuard(t *testing.T) {
+	engine := New(Options{HubAddr: hubAddr, Timeout: 20 * time.Millisecond, Retries: 1})
+	radio := newFakeRadio()
+	radio.guard = 20 * time.Millisecond
+	if err := engine.AddRadio(context.Background(), testChannel, radio); !errors.Is(err, ErrGuardTooLarge) {
+		t.Fatalf("AddRadio error = %v, want ErrGuardTooLarge", err)
+	}
+}
+
+func TestZeroRetriesMeansOneAttempt(t *testing.T) {
+	engine, radio, _ := newTestEngine(t, 10*time.Millisecond, 0)
+	if _, err := engine.Get(context.Background(), nodeAddr, regTemp); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("Get error = %v, want timeout", err)
+	}
+	if got := len(radio.sent); got != 1 {
+		t.Fatalf("send count = %d, want one attempt", got)
+	}
+}
+
+func TestClosedReceivedChannelEndsFinalDrain(t *testing.T) {
+	engine, radio, _ := newTestEngine(t, 20*time.Millisecond, 0)
+	close(radio.recv)
+	done := make(chan error, 1)
+	go func() {
+		_, err := engine.Get(context.Background(), nodeAddr, regTemp)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("Get error = %v, want timeout", err)
 		}
-		select {
-		case <-deadline:
-			t.Fatal("expected an all-registers NULL signal after node went offline")
-		case <-time.After(5 * time.Millisecond):
-		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("closed receive channel left drain spinning")
 	}
 }

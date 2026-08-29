@@ -1,166 +1,122 @@
 # BleRiot
 
-BleRiot is a lightweight request/response protocol for reading and writing named
-integer registers on low-power RF IoT nodes, bridged to an external
-[Registry](https://github.com/burgrp/reg) service. A single **hub** talks to many
-small **nodes** over a BLE-compatible 250 kbps radio link; the hub exposes every
-node register to the Registry, and turns Registry change requests into radio
-writes.
+BleRiot is a compact request/response protocol for reading and writing named
+integer registers on low-power RF nodes. A Linux hub polls the nodes and bridges
+their registers to an external [Registry](https://github.com/burgrp/reg)
+service. Registry change requests become idempotent absolute register
+assignments.
 
-This repository is a mono-repo built around a single Go library module,
-[`lib`](lib) — which holds the shared wire format, the node firmware runtime, and
-the host hub — plus small example modules for the firmware and site binary, and
-the reference hardware designs.
+The radio uses 250 kbps GFSK and a BLE-compatible raw packet format. It is not a
+standard BLE connection: BleRiot selects raw RF channels and uses its own fixed
+packet, addressing, transaction, and encryption rules.
 
----
+## Architecture
 
-## Architecture at a glance
-
-```
-┌─────────────────────────────┐
-│        Registry service     │
-└─────────────────────────────┘
-              ▲
-              │  provide / consume
-              ▼
-┌─────────────────────────────┐
-│      lib/site (bleriot hub) │
-│  Linux SBC: protocol logic, │
-│  XTEA keys, retries, watch  │
-└─────────────────────────────┘
-              ▲
-              │  USB-HID  (MCP2210 USB-to-SPI bridge)
-              ▼
-┌─────────────────────────────┐
-│        USB radio dongle     │
-│   MCP2210 ─SPI─ PAN211x RF  │
-│     (no microcontroller)    │
-└─────────────────────────────┘
-              ▲
-              │  RF · BLE-compatible radio link
-              ▼
-┌─────────────────────────────┐
-│          node (×N)          │
-└─────────────────────────────┘
+```text
+Registry service
+       ^  provide values / consume assignments
+       |
+Linux hub: lib/site
+  - inventory and per-node XTEA keys
+  - one polling scheduler per RF channel
+  - retries, liveness, Registry publication, diagnostics
+       |
+       | USB HID
+       v
+MCP2210 --SPI-- PAN211x radio   one passive dongle per active channel
+       |
+       | 250 kbps BLE-compatible raw RF framing
+       v
+nodes sharing that channel
 ```
 
-The hub runs entirely on the Linux host:
+Each independent group uses one half-duplex RX/TX radio channel. The hub permits
+one in-flight `GET` or `SET` transaction on a channel, including its retries and
+reply wait. Different channels have independent transaction lanes and run
+concurrently.
 
-- **`lib/site`** (the BleRiot host library) owns all protocol intelligence —
-  per-node XTEA keys, register tables, retries/timeouts, push-subscription
-  bookkeeping, and the Registry client — and drives the radio directly. A site
-  repository drives it with inventory-as-code (see [`example/bob`](example/bob))
-  and runs it on a Linux SBC.
-- The **USB radio dongle** is a passive USB-to-SPI bridge: an
-  [MCP2210](usb) drives a PAN211x radio over SPI with **no microcontroller and no
-  firmware**. The host runs the PAN211x register sequence for every packet over
-  USB-HID; the dongle holds no secrets and no protocol state.
+The [MCP2210 dongle](dongle/mcp2210) is a passive USB-to-SPI bridge driving a
+PAN211x. It has no microcontroller, firmware, keys, or protocol state. All
+protocol and scheduling logic runs on the Linux host.
 
-The transport is abstracted (`lib/site/radio`): the MCP2210 dongle is one
-implementation, and a future smart MCU-resident dongle would slot in unchanged.
-One dongle is one radio on one channel; the host fans out across several dongles,
-so multiplexing lives in the host, above the wire.
+## Protocol Summary
 
----
+Every packet is 13 bytes: a four-byte plaintext source address, a one-byte
+plaintext packet version, and one XTEA-encrypted eight-byte block containing
+type, flags, register tag, and raw `int32` value. The four packet types are:
 
-## Repository layout
+| Value | Type | Transaction |
+|---:|---|---|
+| `0x00` | `GET` | Hub asks for a register; node replies with `VALUE`. |
+| `0x01` | `VALUE` | Node returns the current value or `NULL`. |
+| `0x02` | `SET` | Hub assigns an absolute value or `NULL`; node replies with `ACK`. |
+| `0x03` | `ACK` | Node confirms receipt of a `SET`; resulting state may settle asynchronously. |
 
-The code is one Go library module, [`lib`](lib) (`github.com/burgrp/bleriot/lib`),
-subdivided into shared, node, and host packages, plus two example modules and the
-hardware designs.
+There is no transaction token. Channel ownership serializes requests, and the
+hub accepts a reply only when its source, register, and response type match the
+active transaction. See the [authoritative protocol specification](lib/README.md)
+for packet fields, pacing, retry, and register semantics.
 
-| Path | What it is | Docs |
-|------|------------|------|
-| [`lib/`](lib) | The BleRiot library module. Its top-level README is the full **protocol specification**. | [lib/README.md](lib/README.md) |
-| [`lib/shared/`](lib/shared) | Neutral, dependency-free, build-tag-free packages shared by firmware and host: [`protocol`](lib/shared/protocol) (packet codec + XTEA), [`config`](lib/shared/config) (identity primitives and constants), [`inventory`](lib/shared/inventory) (inventory-as-code model), [`conversion`](lib/shared/conversion) (hub-side value conversions, including NTC thermistors), and [`puya`](lib/shared/puya) (PY32 chip profiles and memory maps). Compile for host and TinyGo alike; conversion code referenced only by `Type()` is dead-stripped from firmware. | [lib/README.md](lib/README.md) |
-| [`lib/node/`](lib/node) | The firmware-side BleRiot runtime: the receive/dispatch loop, XTEA codec and `GET`/`SET`/`WATCH` handling. Imported by node firmware; allocation-free in steady state. | — |
-| [`lib/site/`](lib/site) | The BleRiot host library (Linux SBC): protocol engine, USB radio dongle drivers, firmware provisioning generator, Registry bridge. | [lib/site/README.md](lib/site/README.md) |
-| [`usb/`](usb) | KiCad design for the USB radio dongle (MCP2210 USB-to-SPI bridge + PAN211x). | — |
-| [`example/bob/`](example/bob) | Example device-type module (own module). One flat `package main` holds both targets, split by build tag: the TinyGo node firmware (`//go:build tinygo`) and the example host hub (`//go:build !tinygo`) that declares an inventory-as-code deployment and runs the host runtime. Its importable `spec` subpackage (`Config` + `Type()` + register tags) is shared by both. | — |
-| [`bob/`](bob) | KiCad PCB design (breakout board v1.3, the reference node hardware). | — |
-| [`sub/hw-kicad/`](sub/hw-kicad) | Shared KiCad symbol/footprint library (git submodule). | — |
+## Repository Layout
 
----
+| Path | Responsibility |
+|---|---|
+| [lib](lib) | The Go library module and authoritative protocol specification. |
+| [lib/shared](lib/shared) | Build-tag-free packages shared by host and TinyGo: packet codec, configuration, inventory, conversions, and chip profiles. |
+| [lib/node](lib/node) | Allocation-free firmware runtime for `GET` and `SET`. |
+| [lib/site](lib/site) | Linux host engine, polling bridge, diagnostics, CLI, and radio drivers. |
+| [example/bob](example/bob) | Reference device type, TinyGo firmware, and inventory-driven host executable. |
+| [dongle/mcp2210](dongle/mcp2210) | Passive MCP2210/PAN211x dongle hardware and Linux udev rule. |
+| [dongle/py32f403](dongle/py32f403) | Smart-dongle hardware design. |
+| [bob](bob) | Reference node PCB. |
+| [sub/hw-kicad](sub/hw-kicad) | Shared KiCad symbols and footprints. |
 
-## How the pieces fit together
+Register identity is a permanent, nonzero per-device-type `uint16` tag.
+Deployments are ordinary Go `inventory.Inventory` values; there is no JSON
+descriptor. `bleriot make` generates only the TinyGo entry point that bakes one
+instance's address, key, channel, spread factor, and config into its firmware.
 
-1. **Inventory as code** (see [lib/site](lib/site/README.md)). A deployment is a Go
-   program: it declares its devices — each binding a device type's register
-   table, random RF address, XTEA key, channel and config — as an
-   `inventory.Inventory` and hands it to `cli.Start`. Register identity on the
-   wire is a permanent per-type `Tag`; there is no JSON or generated descriptor.
-   See [protocol §11](lib/README.md#11-register-model-and-node-identity).
+## Quick Start
 
-2. **On the node** (firmware). The node stores raw `int32` per wire ID, encrypts
-   each packet with its XTEA key, and answers `GET`/`SET`/`WATCH` over the air
-   using the [`lib/node`](lib/node) runtime. See [protocol §4–§10](lib/README.md#4-packet-format).
-
-3. **On the dongle** ([usb](usb)). The MCP2210 is a passive USB-to-SPI bridge:
-   the host clocks the PAN211x's registers over it to apply channel + receive
-   address, transmit packets, and poll for received ones — no secrets, no
-   retries, no firmware.
-
-4. **On the host** ([lib/site](lib/site/README.md)). The engine handles XTEA,
-   timeouts/retries, and watch refresh; the bridge maps every node register to a
-   Registry provider/consumer.
-
----
-
-## Quick start
-
-### Host hub
+Run the reference hub against a Registry service:
 
 ```sh
 cd example/bob
-go run . hub --registry http://localhost:8080
+go run . hub --registry http://localhost:8080 --sweep-interval 1s
 ```
 
-The hub discovers the connected USB radio dongles automatically and assigns them
-to the RF channels the inventory uses — no `--dongle` flag. It always starts,
-even with no dongle connected: each channel stays offline until a dongle is
-available, and a dongle plugged in later is assigned to an orphan channel (and
-freed for another when unplugged). A dongle's `/dev/hidraw*` node is owned by the
-`plugdev` group via the shipped udev rule, so no `sudo` is needed (see
-[USB access](lib/site/README.md#usb-access)). See [lib/site/README.md](lib/site/README.md)
-for the inventory model, commands and flags.
+The hub discovers MCP2210 dongles and assigns them to inventory channels. It
+starts with no dongle attached and brings channels online as dongles appear.
+Install the shipped udev rule first so the hub can use `/dev/hidraw*` without
+root; see [USB access](lib/site/README.md#usb-access).
 
-### Onboarding a device
+Useful optional flags include `--timeout 50ms`, `--retries 3`,
+`--diagnostics bleriot`, and `--diag-interval 1s`. Put the global `--debug` flag
+before the subcommand:
+
+```sh
+go run . --debug hub --registry http://localhost:8080 --diagnostics bleriot
+```
+
+Create and flash an inventory identity from the reference module:
 
 ```sh
 cd example/bob
-go run . new             # generate a random address + key, print an Instance stub
-go run . make bob flash  # bake identity + config, build, and flash over SWD
+go run . new
+go run . make bob flash
 ```
 
-`bleriot make <name> flash` builds and flashes any device from the hub: it
-locates the firmware source, writes the baked-in identity + config into it,
-injects the chip's build/flash targets, and runs make. See
-[lib/site/README.md](lib/site/README.md#commands) for details.
+`new` works offline and prints an `inventory.Instance` stub with a random
+nonzero address and XTEA key. `make` selects the inventory instance, generates
+its baked firmware entry point, injects the device type's TinyGo and pyocd
+targets, and invokes its Makefile.
 
----
+## Documentation
 
-## Module dependencies
-
-```
-lib/shared  ──────┬─► lib/site   (also: github.com/burgrp/reg, cobra)
- (codec, config,  ├─► lib/node   (the firmware runtime)
-  inventory,      │
-  conversion)     └─► example/bob ─┬─ firmware  (//go:build tinygo:  lib/node + pan211x, TinyGo)
-                                   └─ host hub  (//go:build !tinygo: lib/site)
-```
-
-`lib/shared` is intentionally dependency-free and build-tag-free so the exact
-same source compiles into both the Linux host and the TinyGo node firmware,
-single-sourcing the on-wire formats. The `example/bob` module is dual-target: one
-flat `package main` whose firmware (`//go:build tinygo`) and host hub
-(`//go:build !tinygo`) entry points are selected by build tag, and it consumes
-`lib` via a local `replace` directive.
-
----
-
-## Documentation index
-
-- **[Protocol specification](lib/README.md)** — the authoritative wire-format,
-  security, transaction, and register-model spec.
-- **[Host library](lib/site/README.md)** — inventory-as-code model, the `hub`/`gen`/`make`/`new` commands, the USB radio dongle drivers, and internal packages.
+- [Protocol specification](lib/README.md): authoritative wire format, RF,
+  transactions, reliability, register model, and identity.
+- [Host library](lib/site/README.md): inventory, commands, polling scheduler,
+  Registry behavior, USB access, and diagnostics.
+- [Diagnostic metrics](lib/site/DIAGNOSTICS.md): schema 8 catalog, accounting
+  rules, and Prometheus examples.
 

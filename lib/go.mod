@@ -7,7 +7,7 @@
 //     on-wire formats are single-sourced here and compile for the host and under
 //     TinyGo alike (see lib/README.md, the protocol specification).
 //   - lib/node — the firmware-side BleRiot runtime (receive/dispatch loop, XTEA
-//     codec, GET/SET/WATCH), imported by node firmware.
+//     codec, GET/VALUE and SET/ACK), imported by node firmware.
 //   - lib/site — the host (Linux-SBC) hub library: engine, radio dongle drivers,
 //     firmware identity generation and the Registry bridge (see lib/site/README.md).
 module github.com/burgrp/bleriot/lib

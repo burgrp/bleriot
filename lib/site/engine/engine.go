@@ -1,11 +1,6 @@
-// Package engine implements the BleRiot hub protocol logic (lib/README.md §8–§10):
-// GET/SET/WATCH transactions with best-effort retries and timeouts, response
-// correlation, and push-subscription bookkeeping.
-//
-// The engine is transport-agnostic: it talks to radios through the small Radio
-// interface (satisfied by *radio.Radio) and identifies nodes by their address
-// using per-node XTEA codecs. Routing to a radio is by node channel; routing of
-// received packets to a node is by source address.
+// Package engine implements the host side of the BleRiot request/response
+// protocol. Each RF channel is a half-duplex transaction group: one GET or SET,
+// including retries and its reply wait, owns the channel at a time.
 package engine
 
 import (
@@ -19,733 +14,372 @@ import (
 	"github.com/burgrp/bleriot/lib/site/node"
 )
 
-// PacketLen is the fixed BleRiot on-wire packet size (§4).
+// PacketLen is the fixed BleRiot on-wire packet size.
 const PacketLen = protocol.PacketLen
 
-// Defaults from lib/README.md §9.
 const (
 	DefaultTimeout = 50 * time.Millisecond
 	DefaultRetries = 3
+
+	// A final timeout has already allowed a complete reply window. Keep ownership
+	// briefly afterward so a reply delayed in the host receive path cannot satisfy
+	// the next transaction for the same source and register.
+	timeoutQuarantine = 10 * time.Millisecond
+	minReplyHeadroom  = 10 * time.Millisecond
 )
-
-// DefaultRefreshInterval is how often Run re-sends WATCH for active
-// subscriptions. A node drops a subscription after T_idle of silence from the
-// hub (lib/README.md §10, recommended 60 s), so the default leaves comfortable
-// margin below that.
-const DefaultRefreshInterval = 15 * time.Second
-
-// DefaultLivenessMisses is how many consecutive unanswered WATCH refreshes
-// (§10) mark a node offline. When a subscription's refresh has timed out this
-// many times in a row, the engine delivers a NULL update to its watcher so a
-// vanished node's last value is not reported indefinitely. With
-// DefaultRefreshInterval this detects a powered-off node in ~30 s while
-// tolerating a single lost refresh.
-const DefaultLivenessMisses = 2
-
-// minReplyHeadroom is the slack the per-attempt timeout must keep above a
-// radio's reply guard (lib/README.md §6 requires GUARD < T_timeout). A node does
-// not even begin transmitting until GUARD has elapsed, so the reply then needs a
-// little longer to travel on air and be polled in: the timeout must exceed the
-// guard by at least this much or every attempt would expire before the answer
-// could arrive. It is generous relative to a 13-byte packet's on-air time plus
-// the host poll interval.
-const minReplyHeadroom = 10 * time.Millisecond
 
 // Radio is the minimal transmit/receive surface the engine needs. *radio.Radio
 // satisfies it.
 type Radio interface {
 	Send(dst [node.AddrLen]byte, payload []byte) error
 	Received() <-chan [PacketLen]byte
-	// ReplyGuard reports the reply turnaround guard (lib/README.md §6) this radio
-	// needs nodes to honour before answering: the engine carries it in every
-	// request's GUARD field.
 	ReplyGuard() time.Duration
 }
 
-// Update is an observed register value delivered to a Watch callback.
+// Update is a register value returned by Get.
 type Update struct {
 	Value int32
-	Null  bool // register has no value (FLAGS.NULL set)
+	Null  bool
 }
-
-// Callback receives subscription updates for a watched register.
-type Callback func(Update)
-
-// AllCallback receives subscription updates for a watch-all subscription (§8.3):
-// every register's push is delivered with its register ID. The reserved register
-// RegAll carries two node-level signals instead of a register value:
-//   - reg == RegAll with a NULL Update: the node went offline (liveness, §10);
-//     all of its registers are now unknown.
-//   - reg == RegAll with a non-NULL Update: the node reported the watch-all
-//     subscription as freshly (re)created — it lost its (in-RAM) subscription
-//     table, e.g. across a reboot. Because a watch-all draws no value dump, this
-//     is the hub's cue to re-seed every register so values that changed while the
-//     node was down are picked up.
-type AllCallback func(reg uint16, u Update)
-
-// RegAll is the reserved register ID 0 used by WatchAll/UnwatchAll to subscribe
-// to every register of a node at once (protocol §8.3). It is re-exported here so
-// callers (e.g. the bridge) need not import the protocol package for the
-// all-registers sentinel.
-const RegAll = protocol.RegAll
 
 var (
-	// ErrTimeout is returned when no matching response arrives within the
-	// configured timeout across all retries.
-	ErrTimeout = errors.New("engine: transaction timed out")
-	// ErrBusy is returned when another transaction for the same (node, register)
-	// is already in flight.
-	ErrBusy = errors.New("engine: transaction already in flight for register")
-	// ErrUnknownNode is returned when no node is registered for an address.
-	ErrUnknownNode = errors.New("engine: unknown node address")
-	// ErrNoRadio is returned when no radio is registered for a node's channel.
-	ErrNoRadio = errors.New("engine: no radio for node channel")
-	// ErrGuardTooLarge is returned by AddRadio when a radio's reply guard leaves
-	// no room under the per-attempt timeout (lib/README.md §6: GUARD < T_timeout).
-	// A node defers its reply by the guard, so a timeout at or below it would fire
-	// before any answer could arrive and every attempt would fail.
+	ErrTimeout       = errors.New("engine: transaction timed out")
+	ErrUnknownNode   = errors.New("engine: unknown node address")
+	ErrNoRadio       = errors.New("engine: no radio for node channel")
 	ErrGuardTooLarge = errors.New("engine: radio reply guard too large for timeout")
 )
-
-type key struct {
-	addr [node.AddrLen]byte
-	reg  uint16
-}
-
-// pendingReq is an in-flight transaction awaiting its reply. want is the reply
-// TYPE that resolves it (IS for GET/WATCH, ACK for SET), so an unrelated push
-// (e.g. a WATCH IS) cannot complete a pending SET.
-type pendingReq struct {
-	ch   chan Update
-	want byte
-}
 
 type nodeState struct {
 	n     *node.Node
 	codec protocol.Codec
 }
 
+// channelState persists when a channel's physical radio is replaced, ensuring
+// old and new Radio instances cannot create independent transaction lanes.
+type channelState struct {
+	gate chan struct{}
+
+	mu    sync.RWMutex
+	radio Radio
+}
+
+func newChannelState(r Radio) *channelState {
+	state := &channelState{gate: make(chan struct{}, 1), radio: r}
+	state.gate <- struct{}{}
+	return state
+}
+
+func (state *channelState) setRadio(r Radio) {
+	state.mu.Lock()
+	state.radio = r
+	state.mu.Unlock()
+}
+
+func (state *channelState) getRadio() Radio {
+	state.mu.RLock()
+	r := state.radio
+	state.mu.RUnlock()
+	return r
+}
+
 // Options configures an Engine.
 type Options struct {
-	HubAddr [node.AddrLen]byte // SRC address used in outgoing packets
-	Timeout time.Duration      // per-attempt response wait (default §9)
-	Retries int                // retransmissions after the first attempt (default §9)
-	// RefreshInterval is how often Run re-WATCHes active subscriptions to keep
-	// them alive within the node's T_idle window (§10). Defaults to
-	// DefaultRefreshInterval.
-	RefreshInterval time.Duration
-	// LivenessMisses is the number of consecutive unanswered WATCH refreshes
-	// after which a node is considered offline and its watchers receive a NULL
-	// update. Defaults to DefaultLivenessMisses.
-	LivenessMisses int
+	HubAddr [node.AddrLen]byte
+	Timeout time.Duration
+	// Retries is the number of retransmissions after the initial attempt. Zero
+	// means one attempt total; production callers should pass DefaultRetries.
+	Retries int
 }
 
-// Engine coordinates BleRiot transactions across radios and nodes.
+// Engine coordinates BleRiot transactions across channel radios and nodes.
 type Engine struct {
-	hubAddr  [node.AddrLen]byte
-	timeout  time.Duration
-	retries  int
-	refresh  time.Duration
-	liveness int
+	hubAddr [node.AddrLen]byte
+	timeout time.Duration
+	retries int
 
-	mu      sync.Mutex
-	radios  map[uint8]Radio // by channel
-	nodes   map[[node.AddrLen]byte]*nodeState
-	pending map[key]pendingReq
-	subs    map[key]Callback
-	misses  map[key]int // consecutive unanswered WATCH refreshes per subscription
-	// watchAll holds node-level watch-all subscriptions (§8.3): a single WATCH
-	// reg=0 covers every register, and pushes fan out by ID through the callback.
-	watchAll  map[[node.AddrLen]byte]AllCallback
-	allMisses map[[node.AddrLen]byte]int          // consecutive unanswered watch-all refreshes per node
-	metrics   map[[node.AddrLen]byte]*nodeMetrics // cumulative diagnostic counters per node
+	mu       sync.Mutex
+	channels map[uint8]*channelState
+	nodes    map[[node.AddrLen]byte]*nodeState
+	metrics  map[[node.AddrLen]byte]*nodeMetrics
 }
 
-// New creates an Engine. HubAddr should match the receive address configured on
-// each radio so nodes' replies reach this hub.
+// New creates an Engine. HubAddr must match the receive address configured on
+// each radio so node replies return to this hub.
 func New(opts Options) *Engine {
-	to := opts.Timeout
-	if to <= 0 {
-		to = DefaultTimeout
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
-	rt := opts.Retries
-	if rt <= 0 {
-		rt = DefaultRetries
-	}
-	rf := opts.RefreshInterval
-	if rf <= 0 {
-		rf = DefaultRefreshInterval
-	}
-	lm := opts.LivenessMisses
-	if lm <= 0 {
-		lm = DefaultLivenessMisses
+	retries := opts.Retries
+	if retries < 0 {
+		retries = 0
 	}
 	return &Engine{
-		hubAddr:   opts.HubAddr,
-		timeout:   to,
-		retries:   rt,
-		refresh:   rf,
-		liveness:  lm,
-		radios:    make(map[uint8]Radio),
-		nodes:     make(map[[node.AddrLen]byte]*nodeState),
-		pending:   make(map[key]pendingReq),
-		subs:      make(map[key]Callback),
-		misses:    make(map[key]int),
-		watchAll:  make(map[[node.AddrLen]byte]AllCallback),
-		allMisses: make(map[[node.AddrLen]byte]int),
-		metrics:   make(map[[node.AddrLen]byte]*nodeMetrics),
+		hubAddr:  opts.HubAddr,
+		timeout:  timeout,
+		retries:  retries,
+		channels: make(map[uint8]*channelState),
+		nodes:    make(map[[node.AddrLen]byte]*nodeState),
+		metrics:  make(map[[node.AddrLen]byte]*nodeMetrics),
 	}
 }
 
-// Run keeps active push subscriptions alive by periodically re-sending WATCH
-// for every watched register. A node silently drops a subscription after T_idle
-// of no packets from this hub (§10); re-WATCHing well within that window keeps
-// pushes flowing and re-establishes subscriptions the node may have lost (e.g.
-// after a reboot). Run blocks until ctx is cancelled.
-func (e *Engine) Run(ctx context.Context) {
-	ticker := time.NewTicker(e.refresh)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			e.refreshSubscriptions(ctx)
-		}
-	}
-}
-
-// refreshSubscriptions re-WATCHes every active subscription. It is best-effort:
-// transient errors (timeouts, an in-flight transaction for the same register)
-// are ignored and retried on the next tick. The registered callback is
-// preserved across refreshes.
-func (e *Engine) refreshSubscriptions(ctx context.Context) {
-	e.mu.Lock()
-	keys := make([]key, 0, len(e.subs))
-	for k := range e.subs {
-		keys = append(keys, k)
-	}
-	allAddrs := make([][node.AddrLen]byte, 0, len(e.watchAll))
-	for a := range e.watchAll {
-		allAddrs = append(allAddrs, a)
-	}
-	e.mu.Unlock()
-
-	for _, k := range keys {
-		if ctx.Err() != nil {
-			return
-		}
-		// Skip if the subscription was cancelled between snapshot and now.
-		e.mu.Lock()
-		_, live := e.subs[k]
-		e.mu.Unlock()
-		if !live {
-			continue
-		}
-		_, err := e.transact(ctx, TransactionRefresh, k.addr, protocol.TypeWATCH, 0, k.reg, 1)
-		e.noteLiveness(k, err)
-	}
-
-	// A watch-all node is refreshed with a single WATCH reg=0 (§8.3), regardless
-	// of how many registers it exposes — one refresh per node instead of per
-	// register.
-	for _, addr := range allAddrs {
-		if ctx.Err() != nil {
-			return
-		}
-		e.mu.Lock()
-		cb, live := e.watchAll[addr]
-		e.mu.Unlock()
-		if !live {
-			continue
-		}
-		u, err := e.transact(ctx, TransactionRefresh, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
-		e.noteLivenessAll(addr, err)
-		// A non-zero ACK value means the node registered this as a fresh
-		// subscription (§8.3) — it lost its table, e.g. across a reboot. Signal the
-		// watcher to re-seed every register, since a watch-all draws no value dump,
-		// so values that reverted while the node was down are picked up.
-		if err == nil && u.Value != 0 {
-			cb(RegAll, Update{})
-		}
-	}
-}
-
-// noteLiveness records the outcome of a subscription refresh and detects a node
-// going offline. A successful refresh (or any received IS, see handle) clears
-// the miss counter; consecutive timeouts accumulate, and exactly when they reach
-// the liveness threshold the watcher is told the register is NULL so a vanished
-// node's stale value stops being reported. ErrBusy is not a liveness signal (a
-// transaction was merely already in flight) and is ignored.
-func (e *Engine) noteLiveness(k key, err error) {
-	if errors.Is(err, ErrBusy) {
-		return
-	}
-	e.mu.Lock()
-	cb, live := e.subs[k]
-	if !live {
-		delete(e.misses, k)
-		e.mu.Unlock()
-		return
-	}
-	if err == nil {
-		e.misses[k] = 0
-		nm := e.metricsFor(k.addr)
-		e.mu.Unlock()
-		if nm != nil {
-			nm.livenessSuccess(time.Now())
-		}
-		return
-	}
-	e.misses[k]++
-	misses := e.misses[k]
-	threshold := e.liveness
-	nm := e.metricsFor(k.addr)
-	cross := misses == threshold
-	e.mu.Unlock()
-	if nm != nil {
-		nm.livenessFailure(misses, threshold, time.Now())
-	}
-	if cross {
-		cb(Update{Null: true})
-	}
-}
-
-// noteLivenessAll is noteLiveness for a watch-all node (§8.3). Liveness is
-// per-node: a successful refresh (or any received IS, see handle) clears the
-// miss counter; consecutive timeouts accumulate, and exactly when they reach the
-// threshold the callback is signalled once with reg == RegAll and a NULL Update,
-// telling the caller every register of the vanished node is now unknown.
-func (e *Engine) noteLivenessAll(addr [node.AddrLen]byte, err error) {
-	if errors.Is(err, ErrBusy) {
-		return
-	}
-	e.mu.Lock()
-	cb, live := e.watchAll[addr]
-	if !live {
-		delete(e.allMisses, addr)
-		e.mu.Unlock()
-		return
-	}
-	if err == nil {
-		e.allMisses[addr] = 0
-		nm := e.metricsFor(addr)
-		e.mu.Unlock()
-		if nm != nil {
-			nm.livenessSuccess(time.Now())
-		}
-		return
-	}
-	e.allMisses[addr]++
-	misses := e.allMisses[addr]
-	threshold := e.liveness
-	nm := e.metricsFor(addr)
-	cross := misses == threshold
-	e.mu.Unlock()
-	if nm != nil {
-		nm.livenessFailure(misses, threshold, time.Now())
-	}
-	if cross {
-		cb(RegAll, Update{Null: true})
-	}
-}
-
-// AddRadio registers a radio for a channel and starts servicing its received
-// packets until ctx is cancelled or the radio's channel closes.
-//
-// It rejects a radio whose reply guard (lib/README.md §6) leaves less than
-// minReplyHeadroom under the engine's per-attempt timeout: the node defers its
-// reply by the guard, so a timeout that does not clear it (plus headroom for the
-// reply to arrive) would expire on every attempt. This turns the §6 invariant
-// GUARD < T_timeout into a startup error instead of silent, total packet loss.
-func (e *Engine) AddRadio(ctx context.Context, channel uint8, r Radio) error {
+// AddRadio registers or replaces the one half-duplex radio for channel.
+func (e *Engine) AddRadio(_ context.Context, channel uint8, r Radio) error {
 	if guard := r.ReplyGuard(); guard+minReplyHeadroom > e.timeout {
 		return fmt.Errorf("%w: guard %v + headroom %v exceeds timeout %v on channel %d",
 			ErrGuardTooLarge, guard, minReplyHeadroom, e.timeout, channel)
 	}
 	e.mu.Lock()
-	e.radios[channel] = r
+	state := e.channels[channel]
+	if state == nil {
+		e.channels[channel] = newChannelState(r)
+	} else {
+		state.setRadio(r)
+	}
 	e.mu.Unlock()
-	go e.recvLoop(ctx, r)
 	return nil
 }
 
 // AddNode registers a node, building its XTEA codec from the provisioned key.
 func (e *Engine) AddNode(n *node.Node) error {
-	c, err := protocol.NewCodec(n.Key)
+	codec, err := protocol.NewCodec(n.Key)
 	if err != nil {
 		return err
 	}
 	e.mu.Lock()
-	e.nodes[n.Address] = &nodeState{n: n, codec: c}
+	e.nodes[n.Address] = &nodeState{n: n, codec: codec}
 	e.metrics[n.Address] = &nodeMetrics{}
 	e.mu.Unlock()
 	return nil
 }
 
-// Get reads a register's current value (§8.1).
+// Get reads a register's current value.
 func (e *Engine) Get(ctx context.Context, addr [node.AddrLen]byte, reg uint16) (Update, error) {
 	return e.transact(ctx, TransactionGet, addr, protocol.TypeGET, 0, reg, 0)
 }
 
-// Set writes a register (§8.2). The node replies with an ACK that confirms
-// receipt but carries no value; the resulting value is observed via a Watch
-// subscription (or a subsequent Get). Set returns once the ACK arrives, or
-// ErrTimeout after exhausting retries.
+// Set requests a register assignment and returns after the node acknowledges
+// receiving it. The resulting state may settle asynchronously.
 func (e *Engine) Set(ctx context.Context, addr [node.AddrLen]byte, reg uint16, value int32) error {
 	_, err := e.transact(ctx, TransactionSet, addr, protocol.TypeSET, 0, reg, value)
 	return err
 }
 
-// SetNull clears a register (§8.2): it sends a SET with FLAGS.NULL=1, asking the
-// node to unset the register. Like Set it returns once the ACK arrives.
+// SetNull requests a register clear and returns after the node acknowledges
+// receiving it. The resulting state may settle asynchronously.
 func (e *Engine) SetNull(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error {
 	_, err := e.transact(ctx, TransactionSet, addr, protocol.TypeSET, protocol.FlagNULL, reg, 0)
-	return err
-}
-
-// Watch subscribes to a register (§8.3). cb is invoked for the immediate reply
-// and on every subsequent pushed change until Unwatch.
-//
-// The subscription is a persistent intent: it is registered immediately and
-// retained even if the initial WATCH attempt times out (e.g. the node is
-// offline at startup). Run keeps re-sending WATCH until the node answers, so a
-// node that comes up later is subscribed automatically. Watch returns the error
-// from the first attempt for the caller's information, but the subscription
-// stays active regardless.
-func (e *Engine) Watch(ctx context.Context, addr [node.AddrLen]byte, reg uint16, cb Callback) error {
-	if cb == nil {
-		return errors.New("engine: nil callback")
-	}
-	k := key{addr, reg}
-	e.mu.Lock()
-	e.subs[k] = cb
-	e.mu.Unlock()
-
-	_, err := e.transact(ctx, TransactionWatch, addr, protocol.TypeWATCH, 0, reg, 1)
-	return err
-}
-
-// Unwatch cancels a subscription (§8.4).
-func (e *Engine) Unwatch(ctx context.Context, addr [node.AddrLen]byte, reg uint16) error {
-	k := key{addr, reg}
-	_, err := e.transact(ctx, TransactionUnwatch, addr, protocol.TypeWATCH, 0, reg, 0)
-	e.mu.Lock()
-	delete(e.subs, k)
-	delete(e.misses, k)
-	e.mu.Unlock()
-	return err
-}
-
-// WatchAll subscribes to every register of a node with a single watch-all
-// (§8.3). cb is invoked for each register's push, identified by its register ID,
-// and once with reg == RegAll and a NULL Update if the node is later detected
-// offline (§10). Unlike Watch, the node answers with a single ACK and does not
-// dump current values, so callers seed the values they need with Get.
-//
-// Like Watch, the subscription is a persistent intent: it is registered
-// immediately and retained even if the initial watch-all attempt times out. Run
-// keeps re-sending it, so a node that comes up later is subscribed
-// automatically. WatchAll returns the error from the first attempt for the
-// caller's information, but the subscription stays active regardless.
-func (e *Engine) WatchAll(ctx context.Context, addr [node.AddrLen]byte, cb AllCallback) error {
-	if cb == nil {
-		return errors.New("engine: nil callback")
-	}
-	e.mu.Lock()
-	e.watchAll[addr] = cb
-	e.mu.Unlock()
-
-	u, err := e.transact(ctx, TransactionWatch, addr, protocol.TypeWATCH, 0, protocol.RegAll, 1)
-	// A fresh subscription (non-zero ACK value, §8.3) tells the caller to seed
-	// every register; on the very first subscribe the registers have no value yet,
-	// so this simply confirms the seeding the caller already performs.
-	if err == nil && u.Value != 0 {
-		cb(RegAll, Update{})
-	}
-	return err
-}
-
-// UnwatchAll cancels a watch-all subscription (§8.4).
-func (e *Engine) UnwatchAll(ctx context.Context, addr [node.AddrLen]byte) error {
-	_, err := e.transact(ctx, TransactionUnwatch, addr, protocol.TypeWATCH, 0, protocol.RegAll, 0)
-	e.mu.Lock()
-	delete(e.watchAll, addr)
-	delete(e.allMisses, addr)
-	e.mu.Unlock()
 	return err
 }
 
 func (e *Engine) transact(ctx context.Context, operation TransactionOperation, addr [node.AddrLen]byte, typ, flags byte, reg uint16, value int32) (Update, error) {
 	started := time.Now()
 	e.mu.Lock()
-	ns, ok := e.nodes[addr]
-	if !ok {
+	ns := e.nodes[addr]
+	if ns == nil {
 		e.mu.Unlock()
 		return Update{}, ErrUnknownNode
 	}
-	r, ok := e.radios[ns.n.Channel]
+	channel := e.channels[ns.n.Channel]
 	nm := e.metricsFor(addr)
-	if !ok {
-		e.mu.Unlock()
+	e.mu.Unlock()
+	if channel == nil {
 		nm.recordOutcome(operation, TransactionNoRadio)
 		return Update{}, ErrNoRadio
 	}
-	k := key{addr, reg}
-	if _, busy := e.pending[k]; busy {
-		e.mu.Unlock()
-		nm.recordOutcome(operation, TransactionBusy)
-		return Update{}, ErrBusy
+
+	if err := ctx.Err(); err != nil {
+		nm.recordOutcome(operation, TransactionCanceled)
+		return Update{}, err
 	}
-	ch := make(chan Update, 1)
-	want := protocol.TypeIS
+	select {
+	case <-channel.gate:
+		defer func() { channel.gate <- struct{}{} }()
+	case <-ctx.Done():
+		nm.recordOutcome(operation, TransactionCanceled)
+		return Update{}, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		nm.recordOutcome(operation, TransactionCanceled)
+		return Update{}, err
+	}
+
+	r := channel.getRadio()
+	if r == nil {
+		nm.recordOutcome(operation, TransactionNoRadio)
+		return Update{}, ErrNoRadio
+	}
+	want := protocol.TypeVALUE
 	if typ == protocol.TypeSET {
 		want = protocol.TypeACK
 	}
-	// A watch-all (WATCH reg=0, §8.3) is answered with a single ACK, not an IS
-	// value dump, so it resolves on ACK like a SET.
-	if typ == protocol.TypeWATCH && reg == protocol.RegAll {
-		want = protocol.TypeACK
-	}
-	e.pending[k] = pendingReq{ch: ch, want: want}
-	e.mu.Unlock()
-
-	defer func() {
-		e.mu.Lock()
-		delete(e.pending, k)
-		e.mu.Unlock()
-	}()
-
-	var pkt [PacketLen]byte
-	// Carry the radio's turnaround guard (lib/README.md §6) so the node defers its
-	// reply until this hub's radio is listening again.
 	flags = protocol.FlagsWithGuard(flags, guardMillis(r.ReplyGuard()))
-	ns.codec.Encode(pkt[:], e.hubAddr, typ, flags, reg, value)
+	var packet [PacketLen]byte
+	ns.codec.Encode(packet[:], e.hubAddr, typ, flags, reg, value)
 
+	sent := false
 	for attempt := 0; attempt <= e.retries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if sent {
+				e.drain(r)
+			}
+			nm.recordOutcome(operation, TransactionCanceled)
+			return Update{}, err
+		}
 		if attempt == 0 {
 			nm.transactions[operation].attemptInitial.Add(1)
 		} else {
 			nm.transactions[operation].attemptRetry.Add(1)
 		}
-		if err := r.Send(addr, pkt[:]); err != nil {
+		if err := r.Send(addr, packet[:]); err != nil {
 			nm.transactions[operation].attemptSendError.Add(1)
 			nm.recordOutcome(operation, TransactionSendError)
 			nm.packet.txError.Add(1)
+			if sent {
+				e.drain(r)
+			}
 			return Update{}, fmt.Errorf("engine: send: %w", err)
 		}
+		sent = true
 		nm.packet.txSuccess.Add(1)
-		timer := time.NewTimer(e.timeout)
-		select {
-		case u := <-ch:
-			timer.Stop()
+
+		update, matched, err := e.waitForReply(ctx, r, addr, reg, want)
+		if err != nil {
+			e.drain(r)
+			nm.recordOutcome(operation, TransactionCanceled)
+			return Update{}, err
+		}
+		if matched {
 			outcome := TransactionSuccessFirst
 			if attempt > 0 {
 				outcome = TransactionSuccessRetry
 			}
 			nm.recordOutcome(operation, outcome)
 			nm.recordSuccessLatency(operation, time.Since(started))
-			return u, nil
-		case <-timer.C:
-			nm.transactions[operation].responseTimeout.Add(1)
-			// retransmit
-		case <-ctx.Done():
-			timer.Stop()
-			nm.recordOutcome(operation, TransactionCanceled)
-			return Update{}, ctx.Err()
+			if attempt > 0 {
+				e.drain(r)
+			}
+			return update, nil
 		}
+		nm.transactions[operation].attemptTimeout.Add(1)
+	}
+
+	e.drain(r)
+	if err := ctx.Err(); err != nil {
+		nm.recordOutcome(operation, TransactionCanceled)
+		return Update{}, err
 	}
 	nm.recordOutcome(operation, TransactionTimeout)
 	return Update{}, ErrTimeout
 }
 
-// guardMillis converts a radio's reply turnaround guard to the millisecond GUARD
-// field carried in a request (lib/README.md §6), clamped to the field width.
-func guardMillis(d time.Duration) byte {
-	ms := d.Milliseconds()
-	if ms <= 0 {
-		return 0
-	}
-	if ms > int64(protocol.MaxGuardMillis) {
-		return protocol.MaxGuardMillis
-	}
-	return byte(ms)
-}
-
-func (e *Engine) recvLoop(ctx context.Context, r Radio) {
-	in := r.Received()
+func (e *Engine) waitForReply(ctx context.Context, r Radio, addr [node.AddrLen]byte, reg uint16, want byte) (Update, bool, error) {
+	timer := time.NewTimer(e.timeout)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			return Update{}, false, ctx.Err()
+		case <-timer.C:
+			return Update{}, false, nil
+		case packet, ok := <-r.Received():
+			if !ok {
+				return Update{}, false, nil
+			}
+			if update, matched := e.inspectPacket(packet, addr, reg, want, true); matched {
+				return update, true, nil
+			}
+		}
+	}
+}
+
+// drain consumes packets for a bounded interval while the channel is still
+// owned. The radio guard plus reply headroom covers a response that starts at
+// the latest valid turnaround; timeoutQuarantine covers host receive latency.
+// Caller cancellation cannot release the tokenless lane while such a response
+// may still arrive.
+func (e *Engine) drain(r Radio) {
+	interval := timeoutQuarantine
+	if radioWindow := r.ReplyGuard() + minReplyHeadroom; radioWindow > interval {
+		interval = radioWindow
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
 			return
-		case pkt, ok := <-in:
+		case packet, ok := <-r.Received():
 			if !ok {
 				return
 			}
-			e.handle(pkt)
+			e.inspectPacket(packet, [node.AddrLen]byte{}, 0, 0, false)
 		}
 	}
 }
 
-func (e *Engine) handle(pkt [PacketLen]byte) {
-	var src [node.AddrLen]byte
-	copy(src[:], pkt[0:node.AddrLen])
+// inspectPacket authenticates and accounts for a response. It matches only the
+// expected source, register, and response type while the channel owner is
+// waiting; every other valid response remains an orphan.
+func (e *Engine) inspectPacket(packet [PacketLen]byte, expectedAddr [node.AddrLen]byte, expectedReg uint16, expectedType byte, accept bool) (Update, bool) {
+	var clearSource [node.AddrLen]byte
+	copy(clearSource[:], packet[:node.AddrLen])
 
 	e.mu.Lock()
-	ns, ok := e.nodes[src]
-	nm := e.metricsFor(src)
+	ns := e.nodes[clearSource]
+	nm := e.metricsFor(clearSource)
 	e.mu.Unlock()
-	if !ok {
-		return // unknown source: silently discard (§5)
+	if ns == nil {
+		return Update{}, false
 	}
 
-	// Attribute raw reception from the cleartext source separately from packets
-	// that pass authenticated decoding and semantic validation.
-	if nm != nil {
-		nm.packet.rxTotal.Add(1)
-		nm.packet.lastReceived.Store(time.Now().Unix())
-	}
-
-	srcDec, typ, flags, reg, value, err := ns.codec.Decode(pkt[:])
+	now := time.Now()
+	nm.packet.rxTotal.Add(1)
+	nm.packet.lastReceived.Store(now.Unix())
+	_, typ, flags, reg, value, err := ns.codec.Decode(packet[:])
 	if err != nil {
-		if nm != nil {
-			nm.packet.rxInvalidDecode.Add(1)
-		}
-		return
+		nm.packet.rxInvalidDecode.Add(1)
+		return Update{}, false
 	}
-	if srcDec != src {
-		if nm != nil {
-			nm.packet.rxInvalidSource.Add(1)
-		}
-		return
+	if typ != protocol.TypeVALUE && typ != protocol.TypeACK {
+		nm.packet.rxInvalidType.Add(1)
+		return Update{}, false
 	}
-	isPush := typ == protocol.TypeIS && flags&protocol.FlagPush != 0
-
-	switch typ {
-	case protocol.TypeIS:
-		// A value report: resolves a pending GET/WATCH and feeds subscribers.
-	case protocol.TypeACK:
-		// A SET acknowledgement carries no value; a watch-all WATCH ACK (§8.3)
-		// carries a fresh-subscription flag in VALUE (1 = newly created, e.g. after
-		// the node rebooted and lost its table). Clear FLAGS so a stray guard/NULL
-		// bit cannot leak into the Update, but preserve VALUE so that flag reaches
-		// the watch-all refresh logic.
-		flags = 0
-	default:
-		if nm != nil {
-			nm.packet.rxInvalidType.Add(1)
-		}
-		return // nodes send only IS and ACK
-	}
-	if _, known := ns.n.ByID(reg); !known && !(typ == protocol.TypeACK && reg == protocol.RegAll) && nm != nil {
+	if _, known := ns.n.ByID(reg); !known {
 		nm.packet.rxUnknownRegister.Add(1)
 	}
-	if nm != nil {
-		now := time.Now()
-		nm.packet.rxValid.Add(1)
-		nm.packet.lastValid.Store(now.Unix())
-		nm.livenessSuccess(now)
-		if typ == protocol.TypeIS && flags&protocol.FlagNULL != 0 {
-			nm.packet.rxNullIS.Add(1)
-		}
-	}
+	nm.packet.rxValid.Add(1)
+	nm.packet.lastValid.Store(now.Unix())
 
-	u := Update{Value: value, Null: flags&protocol.FlagNULL != 0}
-	k := key{src, reg}
-
-	// A spontaneous push (lib/README.md §8.3) is marked PUSH and has no outstanding
-	// request behind it, so the node retransmits it until acknowledged: ACK it
-	// back so the node stops. Solicited IS replies (PUSH clear) are recovered by
-	// request retransmission and must not be ACKed.
-	if isPush {
-		e.ackPush(ns, src, reg)
-	}
-
-	e.mu.Lock()
-	cb := e.subs[k]
-	allCb := e.watchAll[src]
-	pr := e.pending[k]
-	// A received IS proves the node is alive: clear any accumulated refresh
-	// misses so an active node is never marked offline.
-	if typ == protocol.TypeIS {
-		if _, live := e.subs[k]; live {
-			e.misses[k] = 0
+	matched := accept && clearSource == expectedAddr && reg == expectedReg && typ == expectedType
+	switch typ {
+	case protocol.TypeVALUE:
+		if flags&protocol.FlagNULL != 0 {
+			nm.packet.rxNullVALUE.Add(1)
 		}
-		if _, live := e.watchAll[src]; live {
-			e.allMisses[src] = 0
+		if matched {
+			nm.packet.rxMatchedVALUE.Add(1)
+		} else {
+			nm.packet.rxOrphanVALUE.Add(1)
+		}
+	case protocol.TypeACK:
+		if matched {
+			nm.packet.rxMatchedACK.Add(1)
+		} else {
+			nm.packet.rxOrphanACK.Add(1)
 		}
 	}
-	e.mu.Unlock()
-
-	matched := pr.ch != nil && pr.want == typ && !isPush
-	if nm != nil {
-		switch typ {
-		case protocol.TypeIS:
-			if isPush {
-				nm.packet.rxPushIS.Add(1)
-			} else if matched {
-				nm.packet.rxSolicitedIS.Add(1)
-			} else {
-				nm.packet.rxOrphanIS.Add(1)
-			}
-		case protocol.TypeACK:
-			if matched {
-				nm.packet.rxMatchedACK.Add(1)
-			} else {
-				nm.packet.rxOrphanACK.Add(1)
-			}
-		}
-	}
-
-	// ACKs are not value reports; they must not be delivered to a watcher.
-	if typ == protocol.TypeIS {
-		if cb != nil {
-			cb(u)
-		}
-		// A watch-all subscriber receives every register's push, tagged by its
-		// register ID. The watch-all ACK reply (reg=0) is a TypeACK, not an IS,
-		// so it is never delivered here.
-		if allCb != nil {
-			allCb(reg, u)
-		}
-	}
-	// Resolve a pending transaction only with the reply type it is waiting for,
-	// so a WATCH push (IS) cannot complete a pending SET (ACK) and vice versa.
-	if matched {
-		select {
-		case pr.ch <- u:
-		default:
-		}
-	}
+	return Update{Value: value, Null: flags&protocol.FlagNULL != 0}, matched
 }
 
-// ackPush acknowledges a received spontaneous push (lib/README.md §8.3) back to the
-// node so it stops retransmitting. Like a request it carries the radio's reply
-// guard (§6) so the node keeps its transmit pacing current. It is best effort: a
-// lost ACK simply draws another push, which is acknowledged again.
-func (e *Engine) ackPush(ns *nodeState, dst [node.AddrLen]byte, reg uint16) {
-	e.mu.Lock()
-	r, ok := e.radios[ns.n.Channel]
-	nm := e.metricsFor(dst)
-	e.mu.Unlock()
-	if !ok {
-		if nm != nil {
-			nm.packet.pushACKNoRadio.Add(1)
-		}
-		return
+func guardMillis(duration time.Duration) byte {
+	milliseconds := duration.Milliseconds()
+	if milliseconds <= 0 {
+		return 0
 	}
-	var pkt [PacketLen]byte
-	flags := protocol.FlagsWithGuard(0, guardMillis(r.ReplyGuard()))
-	ns.codec.Encode(pkt[:], e.hubAddr, protocol.TypeACK, flags, reg, 0)
-	if err := r.Send(dst, pkt[:]); err != nil {
-		if nm != nil {
-			nm.packet.txError.Add(1)
-			nm.packet.pushACKError.Add(1)
-		}
-		return
+	if milliseconds > int64(protocol.MaxGuardMillis) {
+		return protocol.MaxGuardMillis
 	}
-	if nm != nil {
-		nm.packet.txSuccess.Add(1)
-		nm.packet.pushACKSuccess.Add(1)
-	}
+	return byte(milliseconds)
 }
