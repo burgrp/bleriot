@@ -37,15 +37,20 @@ These parameters define the current BleRiot radio link:
 
 | Parameter | Value |
 |---|---|
-| Channel | One channel number and spread factor per independent node group |
+| Channel | Raw RF channel 0..83 ($2400+N$ MHz) and one spread factor per independent node group |
 | Sync word | Four-byte destination address (§3) |
-| Data rate | 250 kbps |
+| Data rate | S8: approximately 125 kbps; S2: approximately 500 kbps |
 | Modulation | GFSK |
 | Framing | PAN211x BLE-compatible raw packet format: preamble, sync word, PDU, three-byte CRC, and whitening |
 | PDU size | 13 bytes, fixed |
 
 This is not a standard BLE connection. BleRiot selects raw RF channels and uses
 its own packet, addressing, transaction, and encryption rules.
+
+The channel number is written directly to the PAN211x RF channel register, so
+channel $N$ is centered at $2400+N$ MHz. The same number is used as the
+proprietary whitening seed. It is not a standard BLE logical channel index.
+Inventory validation accepts only channels 0..83 and the S8/S2 spread factors.
 
 Each node's channel and spread factor are baked into its firmware (§11.5). All
 nodes in a channel group use the same pair. The hub assigns one half-duplex radio
@@ -76,7 +81,7 @@ All packets share the same fixed 13-byte structure:
 ```text
 Offset  Size  Field
 ──────  ────  ─────────────────────────────────────────────────
-0       4     SRC   — source device address (little-endian, plaintext)
+0       4     SRC   — opaque source-device address bytes (plaintext)
 4       1     VER   — packet format version 0x01 (plaintext)
 5       8     BLOCK — XTEA encrypted block (see §5):
                         TYPE  (1 byte)  — packet type (see §6)
@@ -321,6 +326,7 @@ tags are unique within the type.
 |------------|----------------------|-------------------------------------------------------------|
 | name       | string               | Device-type name (e.g. `bob`)                               |
 | registers  | list<Register>       | Register table (see §11.3)                                  |
+| chip       | `inventory.Chip`     | TinyGo/pyocd build and flash targets                         |
 
 ### 11.3 Register
 
@@ -333,7 +339,7 @@ tags are unique within the type.
 | conversion | `inventory.Conversion`     | Optional raw-to-Registry and Registry-to-raw functions        |
 | metadata   | map<string,string>         | Key-value pairs merged into the hub's register record         |
 
-All registers carry `int32` on the wire (§8). `type`, `readOnly`, and
+All registers carry `int32` on the wire (§4). `type`, `readOnly`, and
 `conversion` are hub-side only: the node always sends and receives raw `int32`.
 They are ordinary Go values in the device type's `Type()` function; they are not
 serialized into `main_gen.go` or sent over the radio.
@@ -358,7 +364,7 @@ the same hardware policy independently.
 A NULL node value bypasses `Decode` and is published as `nil`. If `Decode`
 returns an error for a non-NULL raw value, the bridge logs the raw value and
 also publishes `nil`. The node did answer, so this is not treated as transport
-loss and does not start repeated seeding GETs.
+loss.
 
 The [`shared/conversion`](shared/conversion) package supplies invertible linear
 factories. `Scale(factor)` exposes `raw*factor`; `Linear(factor, offset)` exposes
@@ -425,10 +431,10 @@ times.
 | type     | DeviceType| The device's register table (§11.2)                             |
 | config   | any       | Device-type-specific configuration baked into the firmware image |
 
-A `Channel` bundles a required, unique `Name`, the RF `Number`, and the
-`SpreadFactor` every node on it uses (a dongle transmits one factor at a time, so
-binding the two prevents two nodes on one channel from disagreeing). The zero
-`SpreadFactor` is the highest-range S8.
+A `Channel` bundles a required, unique `Name`, the raw RF `Number` (0..83), and
+the `SpreadFactor` every node on it uses. A dongle transmits one factor at a
+time; inventory validation rejects nodes that assign different factors to the
+same channel. The zero `SpreadFactor` is the highest-range S8.
 
 The host validates the inventory at startup: tags are unique and non-zero within
 each device type, instance names and nonzero addresses are unique, and each
@@ -458,10 +464,11 @@ A `bob` device type, authored in Go (tags hand-assigned, permanent):
 ```go
 inventory.DeviceType{
     Name: "bob",
+    Chip: puya.PY32F030x8,
     Registers: []inventory.Register{
-    {Tag: 1, Name: "green", Type: inventory.TypeInt},
-    {Tag: 2, Name: "red", Type: inventory.TypeInt},
-    {Tag: 3, Name: "gpio", Type: inventory.TypeInt},
+        {Tag: 1, Name: "green", Type: inventory.TypeInt},
+        {Tag: 2, Name: "red", Type: inventory.TypeInt},
+        {Tag: 3, Name: "gpio", Type: inventory.TypeInt, ReadOnly: true},
     },
 }
 ```
@@ -491,7 +498,8 @@ the wire never sees the instance concept.
 1. **Onboard.** Run `new`: the host generates a random nonzero address and XTEA
   key and prints a paste-ready `Instance{}` stub without contacting hardware.
   Fill in the name, channel, type and config, and commit it to inventory.
-2. **Build + flash.** Run `make <name> flash` (name the instance, or rely on the
+2. **Build + flash.** Run `bleriot make <name> flash`, or from a Go site binary
+  use `go run . make <name> flash` (name the instance, or rely on the
    sole one): the host writes a generated Go file that bakes the device's identity
   (address, key, channel, spread factor) and config into the
    firmware source, injects the chip's build/flash targets, and runs the device

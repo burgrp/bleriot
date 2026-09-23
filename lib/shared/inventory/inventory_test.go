@@ -127,6 +127,22 @@ func TestInventoryValidate_Errors(t *testing.T) {
 			t.Fatal("expected error for unnamed channel")
 		}
 	})
+	t.Run("channel outside RF range", func(t *testing.T) {
+		inv := Inventory{
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 84}, Type: bobType()},
+		}
+		if err := inv.Validate(); err == nil {
+			t.Fatal("expected error for RF channel above 83")
+		}
+	})
+	t.Run("invalid spread factor", func(t *testing.T) {
+		inv := Inventory{
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37, SpreadFactor: config.SpreadFactor(2)}, Type: bobType()},
+		}
+		if err := inv.Validate(); err == nil {
+			t.Fatal("expected error for invalid spreading factor")
+		}
+	})
 	t.Run("one number two names", func(t *testing.T) {
 		inv := Inventory{
 			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},

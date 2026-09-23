@@ -9,7 +9,7 @@
 // Start builds the "bleriot" command tree around that inventory and runs it. The
 // inventory is the single source of truth for which devices exist, their
 // identities, types and configuration; runtime/deploy concerns (registry URL,
-// hub RF address, serial ports, timeouts) are command-line flags, not inventory
+// hub RF address, timeouts) are command-line flags, not inventory
 // data.
 //
 // Subcommands:
@@ -68,7 +68,7 @@ func newRootCmd(inv inventory.Inventory) *cobra.Command {
 			})))
 		},
 	}
-	root.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging (shows serial communication)")
+	root.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug-level application logging")
 	root.AddCommand(newHubCmd(inv))
 	root.AddCommand(newGenCmd(inv))
 	root.AddCommand(newMakeCmd(inv))

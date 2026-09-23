@@ -96,17 +96,16 @@ type Chip struct {
 
 // Channel is an RF channel together with the spreading factor every node on it
 // uses. Spreading factor is a property of the channel as driven by a dongle (a
-// dongle transmits one factor at a time), not of an individual node, so binding
-// the two in a single value makes it impossible to give two nodes on the same
-// channel different factors. Declare each channel once and share that value
-// across the instances that use it.
+// dongle transmits one factor at a time), not of an individual node. Declare
+// each channel once and share that value across instances; validation rejects
+// inconsistent assignments.
 type Channel struct {
 	// Name is the channel's human-readable identity, e.g. "far". It is required
-	// and must be unique: the hub uses it to scope per-dongle diagnostic registers
-	// (e.g. "diag.dongle.far.connected"), so two channels may not share a name and
+	// and must be unique: the hub uses it to scope per-channel diagnostic registers
+	// (e.g. "diag.channel.far.state"), so two channels may not share a name and
 	// one channel number may not carry two names.
 	Name string
-	// Number is the BLE RF channel number.
+	// Number is the raw RF channel number: 0..83 selects 2400..2483 MHz.
 	Number uint8
 	// SpreadFactor is the BLE Coded PHY spreading factor used on this channel. The
 	// zero value is config.SpreadFactorS8 (highest range), so a bare
@@ -130,7 +129,7 @@ type Instance struct {
 	// Type is the device's type (register table).
 	Type DeviceType
 	// Config is the device-type-specific configuration baked into the device's
-	// firmware image by the "gen" command. It may be any value the firmware's
+	// firmware image by the "make" command. It may be any value the firmware's
 	// bleriotMain accepts; nil means no config.
 	Config any
 }
@@ -174,9 +173,9 @@ func (dt DeviceType) Validate() error {
 }
 
 // Validate checks the whole inventory: every device type's register table is
-// valid, every instance name is non-empty and unique, every address is nonzero
-// and unique, and every channel uses a single spreading factor (a dongle drives
-// one factor at a time).
+// valid; instance names and nonzero addresses are unique; channel numbers are
+// in 0..83; spread factors are S8 or S2 and uniform per channel; and channel
+// names and numbers form a one-to-one mapping.
 func (inv Inventory) Validate() error {
 	seenName := make(map[string]bool, len(inv))
 	seenAddress := make(map[[config.AddrLen]byte]string, len(inv))
@@ -210,14 +209,20 @@ func (inv Inventory) Validate() error {
 
 // validateChannels checks that every channel has a non-empty name and that names
 // and numbers form a one-to-one mapping: a channel number must not carry two
-// names, and a name must not be reused for two numbers. The hub scopes per-dongle
-// diagnostic registers by channel name, so a collision would mix two dongles'
-// metrics under one register.
+// names, and a name must not be reused for two numbers. The hub scopes
+// per-channel diagnostic registers by channel name, so a collision would mix
+// two endpoints' metrics under one register.
 func (inv Inventory) validateChannels() error {
 	nameByNum := make(map[uint8]string, len(inv))
 	numByName := make(map[string]uint8, len(inv))
 	for _, inst := range inv {
 		ch := inst.Channel
+		if ch.Number > 83 {
+			return fmt.Errorf("instance %q: RF channel %d is outside 0..83", inst.Name, ch.Number)
+		}
+		if ch.SpreadFactor != config.SpreadFactorS8 && ch.SpreadFactor != config.SpreadFactorS2 {
+			return fmt.Errorf("instance %q: channel %d has invalid spreading factor %d", inst.Name, ch.Number, ch.SpreadFactor)
+		}
 		if ch.Name == "" {
 			return fmt.Errorf("instance %q: channel %d has no name", inst.Name, ch.Number)
 		}
@@ -234,7 +239,7 @@ func (inv Inventory) validateChannels() error {
 }
 
 // ChannelNames maps each RF channel number in the inventory to its name. The hub
-// uses it to label per-dongle diagnostic registers by channel name. Call
+// uses it to label per-channel diagnostic registers by channel name. Call
 // Validate first to ensure the mapping is one-to-one.
 func (inv Inventory) ChannelNames() map[uint8]string {
 	names := make(map[uint8]string, len(inv))

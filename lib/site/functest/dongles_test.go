@@ -2,7 +2,7 @@
 
 // Package functest contains hardware-in-the-loop functional tests for the whole
 // BleRiot protocol stack. They run the real hub engine on one USB dongle and the
-// real node runtime (protocol/node) on a second USB dongle, exchanging packets
+// real lib/node runtime on a second USB dongle, exchanging packets
 // over the air with no microcontroller and no mocks — exercising the XTEA codec,
 // packet framing, GET/SET transactions, retries, and the reply turnaround guard
 // end to end.

@@ -6,7 +6,8 @@ their registers to an external [Registry](https://github.com/burgrp/reg)
 service. Registry change requests become idempotent absolute register
 assignments.
 
-The radio uses 250 kbps GFSK and a BLE-compatible raw packet format. It is not a
+The radio uses GFSK with BLE Coded PHY framing: S8 provides about 125 kbps for
+maximum range, while S2 provides about 500 kbps at shorter range. It is not a
 standard BLE connection: BleRiot selects raw RF channels and uses its own fixed
 packet, addressing, transaction, and encryption rules.
 
@@ -25,7 +26,7 @@ Linux hub: lib/site
        v
 MCP2210 --SPI-- PAN211x radio   one passive dongle per active channel
        |
-       | 250 kbps BLE-compatible raw RF framing
+       | BLE-compatible raw RF framing (S8 ~125 kbps / S2 ~500 kbps)
        v
 nodes sharing that channel
 ```
@@ -91,8 +92,8 @@ Install the shipped udev rule first so the hub can use `/dev/hidraw*` without
 root; see [USB access](lib/site/README.md#usb-access).
 
 Useful optional flags include `--timeout 50ms`, `--retries 3`,
-`--diagnostics bleriot`, and `--diag-interval 1s`. Put the global `--debug` flag
-before the subcommand:
+`--diagnostics bleriot`, and `--diag-interval 1s`. The persistent `--debug` flag
+may appear before or after the subcommand:
 
 ```sh
 go run . --debug hub --registry http://localhost:8080 --diagnostics bleriot
@@ -117,6 +118,6 @@ targets, and invokes its Makefile.
   transactions, reliability, register model, and identity.
 - [Host library](lib/site/README.md): inventory, commands, polling scheduler,
   Registry behavior, USB access, and diagnostics.
-- [Diagnostic metrics](lib/site/DIAGNOSTICS.md): schema 8 catalog, accounting
+- [Diagnostic metrics](lib/site/DIAGNOSTICS.md): schema 9 catalog, accounting
   rules, and Prometheus examples.
 

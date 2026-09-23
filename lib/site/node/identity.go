@@ -11,15 +11,16 @@ const AddrLen = 4
 // KeyLen is the XTEA shared-key length in bytes (§5).
 const KeyLen = 16
 
-// Identity is a node's per-device secret material, provisioned out of band
-// (lib/README.md §11.5) and never present in the generated descriptor.
+// Identity is a node's per-device address and secret key, stored in inventory
+// and baked into firmware out of band (lib/README.md §11.5). It is not part of
+// the shared device-type register descriptor.
 type Identity struct {
 	Address [AddrLen]byte
 	Key     [KeyLen]byte
 }
 
 // ParseIdentity builds an Identity from a hex address (e.g. "0xA3F2B841" or
-// "A3F2B841", big-endian as written) and a 32-char hex key.
+// "A3F2B841", in the byte order written) and a 32-char hex key.
 func ParseIdentity(address, key string) (Identity, error) {
 	var id Identity
 
@@ -41,7 +42,7 @@ func ParseIdentity(address, key string) (Identity, error) {
 }
 
 // ParseAddress parses a BleRiot device address from hex (e.g. "0xA3F2B841" or
-// "A3F2B841", big-endian as written). The optional "0x"/"0X" prefix is allowed.
+// "A3F2B841", in the byte order written). The optional "0x"/"0X" prefix is allowed.
 func ParseAddress(s string) ([AddrLen]byte, error) {
 	var a [AddrLen]byte
 	if len(s) >= 2 && (s[:2] == "0x" || s[:2] == "0X") {
@@ -61,7 +62,7 @@ func ParseAddress(s string) ([AddrLen]byte, error) {
 // Node couples a node's descriptor with its provisioned identity, name, and RF
 // channel. It is the host's complete view of one node. The name and channel
 // identify and reach the physical device (on the hub they come from the
-// instance file) and are distinct from the shared, per-type descriptor.
+// inventory instance) and are distinct from the shared, per-type descriptor.
 type Node struct {
 	Name    string
 	Channel uint8

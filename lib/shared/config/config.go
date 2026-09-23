@@ -4,9 +4,9 @@
 //
 // A device's identity (RF address, XTEA key, channel, spread factor) and its
 // device-type Config are no longer serialized to a flash page; they are baked
-// into the per-device firmware image by the host "gen" command (see
-// lib/site/cli) as ordinary Go values. This package therefore carries only the
-// small primitives both sides must agree on.
+// into the per-device firmware image by the host "make" command; "gen" emits
+// the same source for inspection (see lib/site/cli). This package therefore
+// carries only the small primitives both sides must agree on.
 package config
 
 // Field widths shared by firmware and host.

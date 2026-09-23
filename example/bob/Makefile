@@ -31,13 +31,13 @@ flash: build
 	pkill pyocd || true
 	sleep 1
 	pyocd load -t ${TARGET_PYOCD} ${IMAGE}
-	pyocd rtt -t ${TARGET_PYOCD}
+	pyocd rtt -M under-reset -t ${TARGET_PYOCD}
 
 gdb:
 	pyocd gdb --target ${TARGET_PYOCD} --semihosting --persist
 
 rtt:
-	pyocd rtt -t ${TARGET_PYOCD}
+	pyocd rtt -M under-reset -t ${TARGET_PYOCD}
 
 install-pack:
 	pyocd pack install ${CMSIS_PACK}

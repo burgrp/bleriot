@@ -167,9 +167,8 @@ type dongleType struct {
 	// scheme names the dongle type in logs and diagnostics, e.g. "mcp2210".
 	scheme string
 	// discover returns a stable selector for every connected device of this type.
-	// Each selector round-trips through open and is stable enough (a USB serial
-	// where possible) that a reconnecting supervisor re-finds the same physical
-	// device after a replug.
+	// Each selector round-trips through open; USB serials remain stable across
+	// hidraw renumbering. Channel assignment may choose any free selector.
 	discover func() ([]string, error)
 	open     dongleOpener
 	guard    func(spreadFactor config.SpreadFactor) time.Duration

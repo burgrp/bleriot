@@ -182,10 +182,9 @@ func resolve(selector string) (string, error) {
 
 // Discover returns a stable selector for every MCP2210 currently connected, for
 // the hub's automatic dongle assignment. Each selector is the device's USB
-// serial when it has one — so a reconnecting supervisor re-finds it even if it
-// returns on a different hidraw node — and otherwise its /dev/hidraw* path. Each
-// selector round-trips through Open. A host with no HID subsystem at all yields
-// no devices and no error.
+// serial when it has one, so the selector survives hidraw renumbering, and
+// otherwise its /dev/hidraw* path. Each selector round-trips through Open. A
+// host with no HID subsystem at all yields no devices and no error.
 func Discover() ([]string, error) {
 	devs, err := enumerate()
 	if err != nil {

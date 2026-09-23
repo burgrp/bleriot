@@ -1,6 +1,6 @@
 # BleRiot Diagnostic Metrics
 
-This is the standalone reference for BleRiot diagnostics schema **8**. It
+This is the standalone reference for BleRiot diagnostics schema **9**. It
 describes every Registry path published by the hub, the accounting rules behind
 each value, and the corresponding Prometheus names. The implementation is in
 `site/bridge/diag.go`; source counters come from the transaction engine and the
@@ -27,13 +27,18 @@ trailing `.` from the configured prefix before appending its paths.
 Every diagnostic register has Registry type `int` and initial metadata:
 
 ```text
-type=int, readOnly=true, diagnostic=true, schema=8
+type=int, readOnly=true, diagnostic=true, schema=9
 ```
 
 Metadata is sent when a path is first published by this process. Later updates
 and TTL refreshes omit metadata. The active version is always the value of
 `bleriot.hub.main.schema.version`; metadata retained on an existing Registry
 path is not authoritative.
+
+The kinds below describe metric semantics. Registry v1.0.12 currently exports
+numeric and boolean Registry values to Prometheus as gauges; strings and `nil`
+are omitted. Consumers should still treat the monotonic values documented here
+as counters.
 
 Metric kinds are:
 
@@ -60,12 +65,13 @@ Paths have one of three forms:
 <prefix>.channel.<escaped-channel-name>.<metric>
 ```
 
-A node or channel name is kept in one path component. Each `_` becomes `__`,
-then each `.` becomes `_`:
+A node or channel name is kept in one path component. Each `_` becomes `_u`,
+and each `.` becomes `_d`; because the escape marker itself is encoded, this
+mapping is injective:
 
 ```text
-basement.fan -> basement_fan
-zone_1       -> zone__1
+basement.fan -> basement_dfan
+zone_1       -> zone_u1
 ```
 
 This distinguishes `a.b` from `a_b`. The configured prefix itself is not
@@ -75,9 +81,9 @@ The Registry Prometheus exporter maps dots to colons and also exposes path
 components as positional labels. For example:
 
 ```text
-Registry:   bleriot.node.basement_fan.transaction.get.outcome.timeout
-Prometheus: bleriot:node:basement_fan:transaction:get:outcome:timeout
-Labels:     n1="bleriot", n2="node", n3="basement_fan",
+Registry:   bleriot.node.basement_dfan.transaction.get.outcome.timeout
+Prometheus: bleriot:node:basement_dfan:transaction:get:outcome:timeout
+Labels:     n1="bleriot", n2="node", n3="basement_dfan",
             n4="transaction", n5="get", n6="outcome", n7="timeout"
 ```
 
@@ -107,7 +113,7 @@ Hub paths use `bleriot.hub.main.`.
 
 | Suffix | Kind | Meaning |
 |---|---|---|
-| `schema.version` | Gauge | Active diagnostic schema, exactly `8`. |
+| `schema.version` | Gauge | Active diagnostic schema, exactly `9`. |
 | `process.started` | Timestamp | Time this diagnostics publisher was constructed. |
 | `process.heartbeat` | Timestamp | Time of the latest in-memory catalog snapshot. |
 
@@ -125,8 +131,9 @@ Hub paths use `bleriot.hub.main.`.
 The publisher snapshots the whole catalog once per diagnostic interval and
 sends at most one Registry `SetRegisters` batch per snapshot. A changed value is
 included. Unchanged values are normally coalesced, then refreshed in stable,
-distributed cohorts so every path is selected within half its TTL. The cohort
-count is:
+distributed cohorts. When the diagnostic interval is at most half the TTL,
+every path is selected within half its TTL; otherwise every path is selected on
+each interval. The cohort count is:
 
 $$
 \max\left(1, \left\lfloor\frac{TTL}{2 \times interval}\right\rfloor\right)
@@ -175,9 +182,10 @@ The process-lifetime mean in microseconds is
 Prometheus range is:
 
 ```promql
-increase(bleriot:hub:main:latency:success:microseconds[$__range])
+increase(bleriot:hub:main:latency:success:microseconds[5m])
 /
-increase(bleriot:hub:main:latency:success:count[$__range])
+ignoring(n6)
+increase(bleriot:hub:main:latency:success:count[5m])
 ```
 
 A range histogram bucket count is the `increase()` of that bucket. Quantiles
@@ -291,7 +299,7 @@ $$
 Unknown plaintext sources are discarded without a node metric. A known
 register is not required for packet validity: a VALUE or ACK for an unknown
 register can still be valid and orphaned. The engine tracks unknown-register
-and raw receive totals internally, but schema 8 does not publish them.
+and raw receive totals internally, but schema 9 does not publish them.
 
 ## Per-Channel Catalog
 

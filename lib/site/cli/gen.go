@@ -21,9 +21,9 @@ import (
 const firmwareNodePkg = "github.com/burgrp/bleriot/lib/node"
 
 // newGenCmd builds the "gen" subcommand: emit the firmware provisioning source
-// for one inventory instance to stdout. It touches no hardware; the Makefile
-// redirects its output into a generated, gitignored Go file that the firmware
-// build compiles in, baking the device's identity and config into the image.
+// for one inventory instance to stdout. It touches no hardware. The "make"
+// command renders the same source directly into the generated, gitignored Go
+// file that the firmware build compiles.
 //
 // The instance is chosen by name, or defaulted to the sole instance when the
 // inventory has exactly one.
@@ -31,10 +31,10 @@ func newGenCmd(inv inventory.Inventory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gen [name]",
 		Short: "Generate the firmware provisioning source for a device",
-		Long: "Emit a Go source file (to stdout) that bakes the named inventory " +
+		Long: "Emit a Go source file (to stdout) containing the named inventory " +
 			"instance's identity (RF address, key, channel, spread factor) and config " +
-			"into the firmware image. The Makefile redirects this into a generated file " +
-			"the firmware build compiles in. With no name, the sole instance is used.",
+			"for compilation into a firmware image. This is the same generated source " +
+			"that the make subcommand writes and builds. With no name, the sole instance is used.",
 		Args: cobra.MaximumNArgs(1),
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {

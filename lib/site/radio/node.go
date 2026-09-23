@@ -1,6 +1,6 @@
 package radio
 
-// NodeRadio adapts a Dongle to protocol/node.Radio, the node (firmware) end of
+// NodeRadio adapts a Dongle to lib/node.Radio, the node (firmware) end of
 // the link. Unlike the hub-side Radio it runs no receive goroutine: the node
 // runtime drives Receive synchronously from its Poll loop. Running it on the
 // host (over an mcpdongle) lets the machine-free node runtime be exercised over

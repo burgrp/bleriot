@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-// MCP2210 GPIO pins wired to the dongle's status LEDs (see usb/usb.kicad_sch).
+// MCP2210 GPIO pins wired to the dongle's status LEDs (see
+// dongle/mcp2210/board/dongle-mcp2210.kicad_sch).
 // Both LEDs are active-high: GPn → 330R → LED anode → cathode → GND.
 const (
 	ledRedPin   uint8 = 1 // GP1: lit while transmitting

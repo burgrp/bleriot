@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultDiagnosticInterval = time.Second
-	diagnosticSchemaVersion   = 8
+	diagnosticSchemaVersion   = 9
 )
 
 // DiagnosticBatchRegistry is the Registry wire operation needed by the
@@ -288,7 +288,7 @@ func addDongleValues(values map[string]diagnosticValue, prefix, name string, sta
 func integer(value any) diagnosticValue { return diagnosticValue{value: value, typ: "int"} }
 
 func pathComponent(name string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(name, "_", "__"), ".", "_")
+	return strings.NewReplacer("_", "_u", ".", "_d").Replace(name)
 }
 
 func diagMeta(valueType string) map[string]any {

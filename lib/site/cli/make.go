@@ -31,7 +31,7 @@ import (
 func newMakeCmd(inv inventory.Inventory) *cobra.Command {
 	var root string
 	cmd := &cobra.Command{
-		Use:   "make [name] [make-args...]",
+		Use:   "make [--root dir] [name] [make-args...]",
 		Short: "Build/flash a device's firmware via GNU make, with its identity injected",
 		Long: "Run GNU make on a device's firmware source tree with the inventory instance's " +
 			"identity and config baked in and its chip's build/flash targets injected as make " +
@@ -39,13 +39,14 @@ func newMakeCmd(inv inventory.Inventory) *cobra.Command {
 			"is inferred from the device type's Config package (the nearest enclosing directory with " +
 			"a Makefile), or given with --root. Arguments other than a leading instance name pass " +
 			"straight through to make, e.g. \"bleriot make bob flash\". Requires the firmware source " +
-			"tree and toolchain (make, tinygo, pyocd) present, so run it from a checkout of the hub.",
+			"tree and toolchain (make, tinygo, pyocd) present, so run it from a checkout of the hub. " +
+			"Because make flags pass through untouched, --root must appear before the instance name or make arguments.",
 		Args: cobra.ArbitraryArgs,
 	}
 	// Stop flag parsing at the first positional so make's own flags (e.g. -j) pass
 	// through untouched; --root must therefore precede the arguments.
 	cmd.Flags().SetInterspersed(false)
-	cmd.Flags().StringVar(&root, "root", "", "firmware source tree (default: inferred from the device type's Config package)")
+	cmd.Flags().StringVar(&root, "root", "", "firmware source tree; must precede positional arguments (default: inferred from Config package)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name, makeArgs := splitInstanceArgs(inv, args)
 		return runMake(inv, name, root, makeArgs, os.Stdout, os.Stderr)

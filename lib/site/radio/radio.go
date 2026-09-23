@@ -33,7 +33,7 @@ type Dongle interface {
 	// ReplyGuard reports the reply turnaround guard (lib/README.md §6) the hub must
 	// ask nodes to wait before answering a request sent through this dongle, so a
 	// slow half-duplex dongle has switched back to receive in time. It is a
-	// per-dongle constant.
+	// per-endpoint constant.
 	ReplyGuard() time.Duration
 	// Close releases the dongle (and any underlying device).
 	Close() error

@@ -13,10 +13,11 @@ import (
 //
 // It takes the node's identity (RF channel, spread factor, address, and XTEA
 // key) as a node.Provisioning value baked into the firmware image by the host
-// "gen" command, initializes the radio over a 3-wire SPI interface on the given
-// pins, tunes it to the provisioned channel, and registers the node's receive
-// address. On success it returns the constructed node; any failure during radio
-// setup is returned as an error.
+// "make" command (the "gen" command emits the same source for inspection),
+// initializes the radio over a 3-wire SPI interface on the given pins, tunes it
+// to the provisioned channel, and registers the node's receive address. On
+// success it returns the constructed node; any failure during radio setup is
+// returned as an error.
 func StartNode(prov node.Provisioning, pinSpiSck, pinSpiData, pinSpiCsn machine.Pin, device node.Device) (*node.Node, error) {
 
 	println("Starting Bleriot node with PAN211x radio...")

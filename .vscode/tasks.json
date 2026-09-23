@@ -6,14 +6,14 @@
         {
             "label": "flash",
             "type": "shell",
-            "command": "make flash",
+            "command": "go run . make bob flash",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
             "options": {
-                "cwd": "${workspaceFolder}/hub/fw"
+                "cwd": "${workspaceFolder}/example/bob"
             },
             "runOptions": {
                 "instanceLimit": 2

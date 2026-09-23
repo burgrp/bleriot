@@ -2,15 +2,15 @@
 
 // Command (firmware) main is the BleRiot node for the BOB breakout
 // board (PY32F030 + PAN211x). It is a full protocol node: it owns the radio and
-// runs the BleRiot runtime (protocol/node) over the bob device (the example
+// runs the BleRiot runtime (lib/node) over the bob device (the example
 // package).
 //
 // The device's identity (RF address, XTEA key, channel, spread factor) and its
-// config are not read from flash: they are baked into the firmware image by the
-// host "bleriot make" command, which generates a tiny main() that calls
-// bleriotMain (this file) with a node.Provisioning value and a spec.Config. That
-// generated main lives in main_gen.go (gitignored, written by "bleriot make"
-// before each build).
+// config are compiled into the program image rather than loaded from a separate
+// provisioning flash page. The host "bleriot make" command generates a tiny
+// main() that calls bleriotMain (this file) with a node.Provisioning value and a
+// spec.Config. That generated main lives in main_gen.go (gitignored, written by
+// "bleriot make" before each build).
 //
 // On boot bleriotMain:
 //   - initialises the PAN211x radio in BLE LongRange mode and applies the
@@ -19,7 +19,7 @@
 //     it polls the radio for GET/SET requests and drives the red and green LEDs
 //     from their period registers. GPIO input pins are sampled for each GET.
 //
-// All XTEA crypto and register dispatch live in protocol/node; this file is only
+// All XTEA crypto and register dispatch live in lib/node; this file is only
 // hardware wiring. Debug logging uses println() over SEGGER RTT.
 package main
 
@@ -36,18 +36,14 @@ import (
 )
 
 const (
-	pinLedRed   = machine.PB0 // lit on fatal fault (blink pattern)
-	pinLedGreen = machine.PB1 // heartbeat
+	pinLedRed   = machine.PB0 // red output/status LED
+	pinLedGreen = machine.PB1 // green output/status LED
 
 	// PAN211x over 3-wire SPI.
 	pinSpiSck  = machine.PA9  // SCK  → PAN211x pin 2
 	pinSpiData = machine.PA7  // DATA → PAN211x pin 3, bidirectional
 	pinSpiCsn  = machine.PA10 // CSN  → PAN211x pin 1, active-low
 )
-
-// sampleInterval is how often the temperature sensor is read and the control
-// loop re-evaluated.
-const sampleInterval = time.Second
 
 var gpioPins = [7]machine.Pin{
 	machine.PA0,

@@ -2,7 +2,7 @@
 
 // Command hub is the example BleRiot site binary. It declares the deployment as
 // inventory-as-code and hands it to the shared host runtime, which provides the
-// hub, gen and new subcommands.
+// hub, gen, make and new subcommands.
 //
 //	go run . new
 //	go run . gen
@@ -19,7 +19,7 @@ import (
 
 // Far and Near are the deployment's RF channels. Each bundles a channel number
 // with the spreading factor every node on it uses, so two nodes on one channel
-// can never disagree on the factor. Far uses the highest-range S8 factor; Near,
+// are validated to agree on the factor. Far uses the highest-range S8 factor; Near,
 // for nodes close to the hub, uses the faster, shorter-range S2 factor. The
 // dongle serving each channel is driven at that channel's factor.
 var (

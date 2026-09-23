@@ -69,8 +69,8 @@ type fakeSnap struct{ stats engine.NodeStats }
 func (source *fakeSnap) SnapshotNode([4]byte) engine.NodeStats { return source.stats }
 
 func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
-	if diagnosticSchemaVersion != 8 {
-		t.Fatalf("diagnostic schema = %d, want 8", diagnosticSchemaVersion)
+	if diagnosticSchemaVersion != 9 {
+		t.Fatalf("diagnostic schema = %d, want 9", diagnosticSchemaVersion)
 	}
 	source := &fakeSnap{}
 	get := &source.stats.Transactions[engine.TransactionGet]
@@ -101,20 +101,20 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 
 	batch := registry.waitBatch(t)
 	wants := map[string]any{
-		"diag.hub.main.schema.version":                                        8,
-		"diag.hub.main.latency.success.bucket.le_plus_Inf":                    uint64(8),
-		"diag.node.basement_fan.transaction.get.outcome.success_first":        uint64(7),
-		"diag.node.basement_fan.transaction.get.outcome.timeout":              uint64(2),
-		"diag.node.basement_fan.transaction.get.attempt.retry":                uint64(3),
-		"diag.node.basement_fan.transaction.get.latency.success.microseconds": uint64(140000),
-		"diag.node.basement_fan.transaction.set.outcome.success_retry":        uint64(1),
-		"diag.node.basement_fan.packet.value.matched":                         uint64(7),
-		"diag.node.basement_fan.packet.value.orphan":                          uint64(2),
-		"diag.node.basement_fan.packet.value.null":                            uint64(1),
-		"diag.node.basement_fan.packet.ack.matched":                           uint64(1),
-		"diag.node.basement_fan.packet.last.received":                         int64(1700000000),
-		"diag.channel.far.connection.open.attempt":                            uint64(3),
-		"diag.channel.far.packet.tx.error":                                    uint64(1),
+		"diag.hub.main.schema.version":                                         9,
+		"diag.hub.main.latency.success.bucket.le_plus_Inf":                     uint64(8),
+		"diag.node.basement_dfan.transaction.get.outcome.success_first":        uint64(7),
+		"diag.node.basement_dfan.transaction.get.outcome.timeout":              uint64(2),
+		"diag.node.basement_dfan.transaction.get.attempt.retry":                uint64(3),
+		"diag.node.basement_dfan.transaction.get.latency.success.microseconds": uint64(140000),
+		"diag.node.basement_dfan.transaction.set.outcome.success_retry":        uint64(1),
+		"diag.node.basement_dfan.packet.value.matched":                         uint64(7),
+		"diag.node.basement_dfan.packet.value.orphan":                          uint64(2),
+		"diag.node.basement_dfan.packet.value.null":                            uint64(1),
+		"diag.node.basement_dfan.packet.ack.matched":                           uint64(1),
+		"diag.node.basement_dfan.packet.last.received":                         int64(1700000000),
+		"diag.channel.far.connection.open.attempt":                             uint64(3),
+		"diag.channel.far.packet.tx.error":                                     uint64(1),
 	}
 	for name, want := range wants {
 		update, ok := batch[name]
@@ -125,11 +125,11 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 		if update.Value != want {
 			t.Errorf("%s = %v (%T), want %v (%T)", name, update.Value, update.Value, want, want)
 		}
-		if update.Metadata["schema"] != 8 || update.TTL != 30*time.Second {
+		if update.Metadata["schema"] != 9 || update.TTL != 30*time.Second {
 			t.Errorf("%s metadata/TTL = %v/%v", name, update.Metadata, update.TTL)
 		}
 	}
-	nodePrefix := "diag.node.basement_fan."
+	nodePrefix := "diag.node.basement_dfan."
 	nodeRegisters := 0
 	for name := range batch {
 		if strings.HasPrefix(name, nodePrefix) {
@@ -147,8 +147,14 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 }
 
 func TestPathComponentAvoidsDotUnderscoreCollisions(t *testing.T) {
-	if pathComponent("a.b") == pathComponent("a_b") {
-		t.Fatal("dotted and underscored names collapse to the same path")
+	names := []string{"a.b", "a_b", "a_.b", "a._b", "a_db", "a_ub"}
+	seen := make(map[string]string, len(names))
+	for _, name := range names {
+		encoded := pathComponent(name)
+		if previous, ok := seen[encoded]; ok {
+			t.Fatalf("names %q and %q collapse to %q", previous, name, encoded)
+		}
+		seen[encoded] = name
 	}
 }
 
@@ -205,7 +211,7 @@ func TestDiagnosticsRetriesFailedRefreshCohort(t *testing.T) {
 
 func TestDiagMetaMarksRegisterReadOnly(t *testing.T) {
 	metadata := diagMeta("int")
-	if metadata["type"] != "int" || metadata["diagnostic"] != true || metadata["readOnly"] != true || metadata["schema"] != 8 {
+	if metadata["type"] != "int" || metadata["diagnostic"] != true || metadata["readOnly"] != true || metadata["schema"] != 9 {
 		t.Fatalf("metadata = %v", metadata)
 	}
 }
