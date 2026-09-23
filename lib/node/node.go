@@ -8,10 +8,24 @@
 package node
 
 import (
+	_ "unsafe" // for go:linkname of runtime.nanotime
+
 	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/protocol"
 )
+
+const (
+	onlineTimeout   = 5 * time.Second
+	statusLEDPeriod = time.Second
+	statusLEDOn     = 200 * time.Millisecond
+)
+
+// nanotime returns a monotonic clock reading in nanoseconds. The epoch is
+// unspecified; status tracking only compares readings and deadlines.
+//
+//go:linkname nanotime runtime.nanotime
+func nanotime() int64
 
 // Radio is the minimal transport the runtime needs. It matches the way a PAN211x
 // is driven directly: the caller configures the channel and receive address
@@ -49,6 +63,12 @@ type Node struct {
 
 	rxBuf [protocol.PacketLen]byte
 	txBuf [protocol.PacketLen]byte
+
+	statusStart       time.Duration
+	onlineUntil       time.Duration
+	statusInitialized bool
+	statusOnline      bool
+	statusLED         bool
 }
 
 // New builds a Node for a device whose RF source address is self and whose shared
@@ -72,8 +92,9 @@ func (n *Node) Run() {
 
 // Poll performs one iteration of the runtime: if a packet is waiting it is
 // decoded and dispatched. It is non-blocking and returns true when it handled a
-// packet. Poll is exported so firmware can interleave other work (and so tests
-// can step the runtime deterministically).
+// packet. Every handled packet refreshes the liveness state reported by
+// PollWithStatus. Poll is exported so firmware can interleave other work (and
+// so tests can step the runtime deterministically).
 func (n *Node) Poll() bool {
 	m, ok := n.radio.Receive(n.rxBuf[:])
 	if !ok || m != protocol.PacketLen {
@@ -83,6 +104,7 @@ func (n *Node) Poll() bool {
 	if err != nil {
 		return false
 	}
+	n.receivedAt(statusNow())
 	switch typ {
 	case protocol.TypeGET:
 		current, null := n.dev.Read(reg)
@@ -99,6 +121,43 @@ func (n *Node) Poll() bool {
 		// VALUE and ACK are node→hub only. Consuming one produces no response.
 	}
 	return true
+}
+
+// PollWithStatus performs one Poll and returns the node's connection and status
+// LED state. online remains true for five seconds after the most recent packet
+// handled by Poll. led follows a one-second heartbeat that is true for 200 ms
+// and false for 800 ms, independently of online. changed is true on the first
+// call and whenever online or led differs from the preceding call.
+//
+// Callers should invoke PollWithStatus frequently enough to observe the LED
+// edges they need to drive.
+func (n *Node) PollWithStatus() (online, led, changed bool) {
+	n.Poll()
+	return n.statusAt(statusNow())
+}
+
+func statusNow() time.Duration {
+	return time.Duration(nanotime())
+}
+
+func (n *Node) receivedAt(now time.Duration) {
+	n.onlineUntil = now + onlineTimeout
+}
+
+func (n *Node) statusAt(now time.Duration) (online, led, changed bool) {
+	first := !n.statusInitialized
+	if first {
+		n.statusStart = now
+	}
+
+	online = now < n.onlineUntil
+	led = (now-n.statusStart)%statusLEDPeriod < statusLEDOn
+	changed = first || online != n.statusOnline || led != n.statusLED
+
+	n.statusInitialized = true
+	n.statusOnline = online
+	n.statusLED = led
+	return
 }
 
 // waitGuard gives the hub's half-duplex radio time to switch from transmit to

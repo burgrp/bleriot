@@ -32,6 +32,7 @@ bench:
 # TinyGo-only, so it is intentionally excluded from the standard Go package set.
 test:
 	cd lib && go test ./node ./shared/... ./site/...
+	cd example/bob && go test ./...
 
 .PHONY: functest bench test
 

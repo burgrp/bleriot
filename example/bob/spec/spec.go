@@ -6,14 +6,13 @@ import (
 )
 
 type Config struct {
-	DefaultRedPeriod   uint32
-	DefaultGreenPeriod uint32
+	DefaultLedPeriod uint32
 }
 
+// Tag 2 is retired; permanent register tags are never reassigned.
 const (
-	RegLedGreen = 1 // green LED period [ms] (0=off, 1=on, >1=blink)
-	RegLedRed   = 2 // red LED period [ms] (0=off, 1=on, >1=blink)
-	RegGpio     = 3 // GPIO PA0..6 pins state (int)
+	RegLed  = 1 // green LED period [ms] (0=off, 1=on, >1=blink)
+	RegGpio = 3 // GPIO PA0..6 pins state (int)
 )
 
 var Chip = puya.PY32F030x8
@@ -24,13 +23,8 @@ func Type() inventory.DeviceType {
 		Chip: Chip,
 		Registers: []inventory.Register{
 			{
-				Tag:  RegLedGreen,
-				Name: "green",
-				Type: inventory.TypeInt,
-			},
-			{
-				Tag:  RegLedRed,
-				Name: "red",
+				Tag:  RegLed,
+				Name: "led",
 				Type: inventory.TypeInt,
 			},
 			{

@@ -112,6 +112,11 @@ nonzero address and XTEA key. `make` selects the inventory instance, generates
 its baked firmware entry point, injects the device type's TinyGo and pyocd
 targets, and invokes its Makefile.
 
+The reference firmware exposes `bob.led` as the single writable LED register;
+it controls the green LED. The red LED is reserved for connection status: off
+while hub packets are arriving, and a 200 ms pulse once per second after five
+seconds without a packet.
+
 ## Documentation
 
 - [Protocol specification](lib/README.md): authoritative wire format, RF,

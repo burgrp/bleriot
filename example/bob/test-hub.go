@@ -36,8 +36,7 @@ func main() {
 			Channel: Far,
 			Type:    bob.Type(),
 			Config: bob.Config{
-				DefaultRedPeriod:   500,
-				DefaultGreenPeriod: 500,
+				DefaultLedPeriod: 500,
 			},
 		},
 		// {
@@ -47,8 +46,7 @@ func main() {
 		// 	Channel: Near,
 		// 	Type:    bob.Type(),
 		// 	Config: bob.Config{
-		// 		DefaultRedPeriod:   500,
-		// 		DefaultGreenPeriod: 100,
+		// 		DefaultLedPeriod: 100,
 		// 	},
 		// },
 	})

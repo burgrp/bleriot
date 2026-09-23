@@ -33,16 +33,16 @@ import (
 )
 
 func main() {
-	cli.Start(inventory.Inventory{
-		{
-			Name:    "bob",
-      Address: [4]byte{ /* random RF address */ },
-			Key:     [16]byte{ /* XTEA key */ },
-			Channel: inventory.Channel{Name: "far", Number: 37},
-			Type:    bob.Type(),
-			Config:  bob.Config{DefaultRedPeriod: 500, DefaultGreenPeriod: 100},
-		},
-	})
+    cli.Start(inventory.Inventory{
+        {
+            Name:    "bob",
+            Address: [4]byte{ /* random RF address */ },
+            Key:     [16]byte{ /* XTEA key */ },
+            Channel: inventory.Channel{Name: "far", Number: 37},
+            Type:    bob.Type(),
+            Config:  bob.Config{DefaultLedPeriod: 500},
+        },
+    })
 }
 ```
 

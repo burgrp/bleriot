@@ -16,8 +16,9 @@
 //   - initialises the PAN211x radio in BLE LongRange mode and applies the
 //     channel and receive address from the provisioning;
 //   - builds the bob device and the node runtime, then loops forever:
-//     it polls the radio for GET/SET requests and drives the red and green LEDs
-//     from their period registers. GPIO input pins are sampled for each GET.
+//     it polls the radio for GET/SET requests, drives the green LED from its
+//     period register, and uses the red LED for offline status. GPIO input pins
+//     are sampled for each GET.
 //
 // All XTEA crypto and register dispatch live in lib/node; this file is only
 // hardware wiring. Debug logging uses println() over SEGGER RTT.
@@ -80,18 +81,23 @@ func bleriotMain(prov node.Provisioning, cfg spec.Config) {
 		haltBlink("failed to start node: "+err.Error(), 100*time.Millisecond)
 	}
 
-	println("Device config: defaultRedPeriod", cfg.DefaultRedPeriod, "defaultGreenPeriod", cfg.DefaultGreenPeriod)
+	println("Device config: defaultLedPeriod", cfg.DefaultLedPeriod)
 
-	device.redPeriod.Store(int32(cfg.DefaultRedPeriod))
-	device.greenPeriod.Store(int32(cfg.DefaultGreenPeriod))
+	device.ledPeriod.Store(int32(cfg.DefaultLedPeriod))
 
-	go device.ledLoop(pinLedRed, &device.redPeriod)
-	go device.ledLoop(pinLedGreen, &device.greenPeriod)
+	go device.ledLoop(pinLedGreen, &device.ledPeriod)
 
 	// go memstat()
 
 	for {
-		n.Poll()
+		online, statusLED, changed := n.PollWithStatus()
+		if changed {
+			if redLEDOn(online, statusLED) {
+				pinLedRed.High()
+			} else {
+				pinLedRed.Low()
+			}
+		}
 		runtime.Gosched()
 	}
 
@@ -107,8 +113,7 @@ func bleriotMain(prov node.Provisioning, cfg spec.Config) {
 // }
 
 type Device struct {
-	redPeriod   atomic.Int32
-	greenPeriod atomic.Int32
+	ledPeriod atomic.Int32
 }
 
 func (d *Device) readPins() int32 {
@@ -124,10 +129,8 @@ func (d *Device) readPins() int32 {
 func (d *Device) Read(tag uint16) (value int32, null bool) {
 
 	switch tag {
-	case spec.RegLedRed:
-		return d.redPeriod.Load(), false
-	case spec.RegLedGreen:
-		return d.greenPeriod.Load(), false
+	case spec.RegLed:
+		return d.ledPeriod.Load(), false
 	case spec.RegGpio:
 		return d.readPins(), false
 	default:
@@ -139,10 +142,8 @@ func (d *Device) Read(tag uint16) (value int32, null bool) {
 
 func (d *Device) Write(tag uint16, value int32, null bool) {
 	switch tag {
-	case spec.RegLedRed:
-		writePeriod(&d.redPeriod, value, null)
-	case spec.RegLedGreen:
-		writePeriod(&d.greenPeriod, value, null)
+	case spec.RegLed:
+		writePeriod(&d.ledPeriod, value, null)
 	default:
 		// unknown tag: ignore
 	}
@@ -183,7 +184,7 @@ func haltBlink(msg string, period time.Duration) {
 }
 
 func writePeriod(period *atomic.Int32, value int32, null bool) {
-	if null {
+	if null || value < 0 {
 		value = 0
 	}
 	period.Store(value)

@@ -466,12 +466,14 @@ inventory.DeviceType{
     Name: "bob",
     Chip: puya.PY32F030x8,
     Registers: []inventory.Register{
-        {Tag: 1, Name: "green", Type: inventory.TypeInt},
-        {Tag: 2, Name: "red", Type: inventory.TypeInt},
+        {Tag: 1, Name: "led", Type: inventory.TypeInt},
         {Tag: 3, Name: "gpio", Type: inventory.TypeInt, ReadOnly: true},
     },
 }
 ```
+
+Tag 2 was previously assigned and remains retired; permanent register tags are
+not reused when a register is removed.
 
 A site inventory instantiates it per physical device:
 
@@ -483,15 +485,15 @@ inventory.Inventory{
         Key:     [16]byte{ /* XTEA key */ },
         Channel: inventory.Channel{Name: "far", Number: 37},
         Type:    bob.Type(),
-        Config:  bob.Config{DefaultRedPeriod: 500, DefaultGreenPeriod: 100},
+        Config:  bob.Config{DefaultLedPeriod: 500},
     },
 }
 ```
 
 The host uses `bob`'s stored address, maps each register's tag to its wire REG,
-and publishes `bob.green`, `bob.red` and `bob.gpio` to the
-Registry. Two instances of the same type coexist because their *names* differ;
-the wire never sees the instance concept.
+and publishes `bob.led` and `bob.gpio` to the Registry. Two instances of the
+same type coexist because their *names* differ; the wire never sees the
+instance concept.
 
 ### 11.7 Onboarding and Build Workflow
 
@@ -514,7 +516,9 @@ to keep in sync.
 
 ---
 
-## 12. Radio Interface (implementation contract)
+## 12. Firmware Runtime Interfaces
+
+### 12.1 Radio
 
 Firmware uses a packet radio with these operations:
 
@@ -532,3 +536,30 @@ The host engine uses `Send`, an asynchronous stream of complete received
 13-byte packets, and `ReplyGuard() time.Duration`. A host adapter may poll a
 physical dongle internally, but it presents complete packets to the engine. The
 protocol layer assumes no underlying host transport beyond this contract.
+
+### 12.2 Polling and Connection Status
+
+Firmware constructs a `node.Node` and repeatedly calls either `Poll` or
+`PollWithStatus`. Both methods process at most one waiting packet per call.
+`PollWithStatus` calls `Poll` once and then returns:
+
+```go
+online, led, changed := n.PollWithStatus()
+```
+
+`online` starts false. Every complete packet that `Poll` successfully decodes
+refreshes a five-second deadline; malformed packets and unsupported packet
+versions do not. The value remains true before that deadline and becomes false
+exactly five seconds after the last successfully decoded packet.
+
+`led` is a hardware-neutral heartbeat output. Its one-second cycle starts with
+the first `PollWithStatus` call: true for 200 ms, then false for 800 ms. The
+heartbeat runs independently of `online`, allowing firmware to combine it with
+other LED policy. For example, the Bob firmware drives its red status LED with
+`!online && led`, producing a short pulse only while offline.
+
+`changed` is true on the first call so firmware can initialize its outputs. On
+later calls it is true only when the returned `online` or `led` value differs
+from the preceding `PollWithStatus` result. No callback, timer goroutine, or
+hardware pin is owned by the runtime; firmware must call `PollWithStatus`
+frequently enough to observe the heartbeat edges it intends to display.

@@ -3,6 +3,7 @@ package node
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/protocol"
 )
@@ -278,5 +279,150 @@ func TestPollIgnoresMissingAndMalformedPackets(t *testing.T) {
 	}
 	if len(radio.sent) != 0 {
 		t.Fatalf("malformed input produced %d responses, want 0", len(radio.sent))
+	}
+}
+
+func TestPollWithStatusHeartbeatBoundaries(t *testing.T) {
+	n, _ := newTestNode(t, &fakeDevice{})
+	tests := []struct {
+		name        string
+		now         time.Duration
+		wantLED     bool
+		wantChanged bool
+	}{
+		{name: "initial", now: 0, wantLED: true, wantChanged: true},
+		{name: "end of on interval", now: 199 * time.Millisecond, wantLED: true},
+		{name: "start of off interval", now: 200 * time.Millisecond, wantChanged: true},
+		{name: "end of off interval", now: 999 * time.Millisecond},
+		{name: "next cycle", now: time.Second, wantLED: true, wantChanged: true},
+		{name: "same phase", now: 1100 * time.Millisecond, wantLED: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			online, led, changed := n.statusAt(test.now)
+			if online || led != test.wantLED || changed != test.wantChanged {
+				t.Fatalf("status = online %v led %v changed %v, want false/%v/%v", online, led, changed, test.wantLED, test.wantChanged)
+			}
+		})
+	}
+}
+
+func TestPollWithStatusHeartbeatIsIndependentOfOnline(t *testing.T) {
+	n, _ := newTestNode(t, &fakeDevice{})
+	n.receivedAt(0)
+
+	online, led, changed := n.statusAt(0)
+	if !online || !led || !changed {
+		t.Fatalf("initial status = %v/%v/%v, want true/true/true", online, led, changed)
+	}
+
+	online, led, changed = n.statusAt(statusLEDOn)
+	if !online || led || !changed {
+		t.Fatalf("status at LED off edge = %v/%v/%v, want true/false/true", online, led, changed)
+	}
+}
+
+func TestPollWithStatusOnlineTimeoutAndRefresh(t *testing.T) {
+	n, _ := newTestNode(t, &fakeDevice{})
+	n.receivedAt(0)
+
+	online, led, changed := n.statusAt(0)
+	if !online || !led || !changed {
+		t.Fatalf("initial received status = %v/%v/%v, want true/true/true", online, led, changed)
+	}
+
+	n.receivedAt(4 * time.Second)
+	online, led, changed = n.statusAt(4 * time.Second)
+	if !online || !led || changed {
+		t.Fatalf("refreshed status = %v/%v/%v, want true/true/false", online, led, changed)
+	}
+
+	online, led, changed = n.statusAt(8 * time.Second)
+	if !online || !led || changed {
+		t.Fatalf("status before refreshed deadline = %v/%v/%v, want true/true/false", online, led, changed)
+	}
+
+	online, led, changed = n.statusAt(9 * time.Second)
+	if online || !led || !changed {
+		t.Fatalf("status at refreshed deadline = %v/%v/%v, want false/true/true", online, led, changed)
+	}
+
+	n.receivedAt(10 * time.Second)
+	online, led, changed = n.statusAt(10 * time.Second)
+	if !online || !led || !changed {
+		t.Fatalf("recovered status = %v/%v/%v, want true/true/true", online, led, changed)
+	}
+}
+
+func TestPollWithStatusUsesPollResultForLiveness(t *testing.T) {
+	n, radio := newTestNode(t, &fakeDevice{})
+
+	online, led, changed := n.PollWithStatus()
+	if online || !led || !changed {
+		t.Fatalf("initial status = %v/%v/%v, want false/true/true", online, led, changed)
+	}
+
+	radio.rx = append(radio.rx, encodeRequest(t, protocol.TypeGET, 0, 1, 0))
+	online, _, changed = n.PollWithStatus()
+	if !online || !changed {
+		t.Fatalf("status after valid request = online %v changed %v, want true/true", online, changed)
+	}
+
+	n, radio = newTestNode(t, &fakeDevice{})
+	radio.rx = append(radio.rx, encodeRequest(t, protocol.TypeACK, 0, 1, 0))
+	online, _, changed = n.PollWithStatus()
+	if !online || !changed {
+		t.Fatalf("status after silently consumed packet = online %v changed %v, want true/true", online, changed)
+	}
+	if len(radio.sent) != 0 {
+		t.Fatalf("silently consumed packet produced %d responses, want 0", len(radio.sent))
+	}
+
+	n, radio = newTestNode(t, &fakeDevice{})
+	radio.rx = append(radio.rx, encodeRequest(t, protocol.TypeGET, 0, 1, 0))
+	if !n.Poll() {
+		t.Fatal("valid request was not handled")
+	}
+	deadline := n.onlineUntil
+	online, _, changed = n.PollWithStatus()
+	if !online || !changed {
+		t.Fatalf("status after Poll = online %v changed %v, want true/true", online, changed)
+	}
+
+	unsupportedVersion := encodeRequest(t, protocol.TypeGET, 0, 1, 0)
+	unsupportedVersion[4] = protocol.PacketVersion + 1
+	invalidPackets := []struct {
+		name   string
+		packet []byte
+	}{
+		{name: "short", packet: make([]byte, protocol.PacketLen-1)},
+		{name: "unsupported version", packet: unsupportedVersion},
+	}
+	for _, invalid := range invalidPackets {
+		t.Run(invalid.name, func(t *testing.T) {
+			radio.rx = append(radio.rx, invalid.packet)
+			if n.Poll() {
+				t.Fatal("invalid packet reported as handled")
+			}
+			if n.onlineUntil != deadline {
+				t.Fatalf("invalid packet moved deadline from %v to %v", deadline, n.onlineUntil)
+			}
+		})
+	}
+	online, _, changed = n.statusAt(deadline)
+	if online || !changed {
+		t.Fatalf("malformed packet extended liveness: online %v changed %v", online, changed)
+	}
+}
+
+func TestPollWithStatusDoesNotAllocate(t *testing.T) {
+	n, _ := newTestNode(t, &fakeDevice{})
+	n.PollWithStatus()
+
+	if allocs := testing.AllocsPerRun(1000, func() {
+		n.PollWithStatus()
+	}); allocs != 0 {
+		t.Fatalf("PollWithStatus allocated %v times per call, want 0", allocs)
 	}
 }
