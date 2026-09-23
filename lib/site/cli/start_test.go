@@ -91,6 +91,7 @@ func TestHubRetriesFlagAndValidation(t *testing.T) {
 
 func TestBuildNode(t *testing.T) {
 	inst := sampleInstance()
+	inst.RegistryNames = inventory.RegistryNames{1: "zones.kitchen.light.green"}
 
 	n, err := buildNode(inst)
 	if err != nil {
@@ -105,11 +106,14 @@ func TestBuildNode(t *testing.T) {
 	if n.Key != inst.Key {
 		t.Fatalf("node key mismatch")
 	}
-	if r, ok := n.ByID(1); !ok || r.Name != "green" {
+	if r, ok := n.ByID(1); !ok || r.Name != "green" || r.RegistryName != "zones.kitchen.light.green" {
 		t.Fatalf("register tag 1 not mapped: %v %v", r, ok)
 	}
-	if _, ok := n.ByID(2); !ok {
+	if r, ok := n.ByID(2); !ok || r.Name != "red" || r.RegistryName != "kitchen.red" {
 		t.Fatalf("register tag 2 not mapped")
+	}
+	if inst.Type.Registers[0].Name != "green" {
+		t.Fatalf("device type register mutated to %q", inst.Type.Registers[0].Name)
 	}
 }
 

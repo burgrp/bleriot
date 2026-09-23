@@ -83,6 +83,9 @@ func buildNode(inst inventory.Instance) (*node.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	for index, register := range inst.Type.Registers {
+		desc.Registers[index].RegistryName = inst.RegistryName(register)
+	}
 	id := node.Identity{
 		Address: inst.Address,
 		Key:     inst.Key,

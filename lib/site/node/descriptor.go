@@ -32,10 +32,13 @@ type Conversion struct {
 
 // Register is one resolved register from a node descriptor.
 type Register struct {
-	ID       uint16
-	Name     string
-	Type     RegType
-	ReadOnly bool
+	ID   uint16
+	Name string
+	// RegistryName is the complete deployment-specific name published by the
+	// hub. An empty value retains the default "<device>.<register>" name.
+	RegistryName string
+	Type         RegType
+	ReadOnly     bool
 	// Conversion translates raw wire values to and from Registry-facing values.
 	// NewDescriptor installs Type-based defaults for omitted functions.
 	Conversion Conversion
@@ -43,9 +46,9 @@ type Register struct {
 }
 
 // Descriptor is a node's register table, plus indexes for lookup by wire ID and
-// by qualified name. It is a shared, per-type artifact and carries no node name
-// or RF channel; those are per-device facts that come from the inventory
-// instance (name) and provisioning (channel).
+// by driver name. It is built from a shared device type and may carry resolved
+// per-instance Registry names. The node name and RF channel remain separate
+// per-device facts supplied by the inventory and provisioning.
 type Descriptor struct {
 	Metadata  map[string]string
 	Registers []Register

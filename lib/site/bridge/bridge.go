@@ -296,7 +296,10 @@ func (job *polledNode) noteFailedSweep(startedWith uint64) {
 
 func (bridge *Bridge) serveRegister(ctx context.Context, job *polledNode, bridged *bridgedRegister) {
 	register := bridged.register
-	name := job.node.Name + "." + register.Name
+	name := register.RegistryName
+	if name == "" {
+		name = job.node.Name + "." + register.Name
+	}
 	log := bridge.log.With("device", job.node.Name, "register", name, "id", register.ID)
 	updates, requests, err := bridge.reg.Provide(ctx, name, nil, metadata(register, job.node.Name), bridge.ttl)
 	if err != nil {
@@ -369,12 +372,14 @@ func regValue(register *node.Register, update engine.Update) (any, error) {
 }
 
 func metadata(register *node.Register, deviceName string) map[string]any {
-	result := make(map[string]any, len(register.Metadata)+3)
+	result := make(map[string]any, len(register.Metadata)+5)
 	for key, value := range register.Metadata {
 		result[key] = value
 	}
 	result["type"] = string(register.Type)
 	result["device"] = deviceName
+	result["register"] = register.Name
+	result["tag"] = register.ID
 	result["readOnly"] = register.ReadOnly
 	return result
 }

@@ -35,6 +35,7 @@ type fakeTx struct {
 	gets     chan getCall
 	mu       sync.Mutex
 	sets     []int32
+	setRegs  []uint16
 	setNulls int
 	setDone  chan struct{}
 	setErr   error
@@ -59,9 +60,10 @@ func (tx *fakeTx) Get(ctx context.Context, addr [4]byte, reg uint16) (engine.Upd
 	}
 }
 
-func (tx *fakeTx) Set(_ context.Context, _ [4]byte, _ uint16, value int32) error {
+func (tx *fakeTx) Set(_ context.Context, _ [4]byte, reg uint16, value int32) error {
 	tx.mu.Lock()
 	tx.sets = append(tx.sets, value)
+	tx.setRegs = append(tx.setRegs, reg)
 	err := tx.setErr
 	tx.mu.Unlock()
 	tx.setDone <- struct{}{}
@@ -186,12 +188,51 @@ func TestBridgeProvidesNilBeforeFirstGetCompletes(t *testing.T) {
 	if provided.initial != nil {
 		t.Fatalf("initial value = %v, want nil", provided.initial)
 	}
-	if provided.metadata["unit"] != "celsius" || provided.metadata["type"] != "float" || provided.metadata["device"] != "test" {
+	if provided.metadata["unit"] != "celsius" || provided.metadata["type"] != "float" || provided.metadata["device"] != "test" ||
+		provided.metadata["register"] != "temperature" || provided.metadata["tag"] != testRegA {
 		t.Fatalf("metadata = %v", provided.metadata)
 	}
 	answer(call, 1234)
 	if value := receive(t, provided.updates); value != 12.34 {
 		t.Fatalf("GET value = %v, want 12.34", value)
+	}
+}
+
+func TestBridgeUsesRemappedRegistryNameForUpdatesAndRequests(t *testing.T) {
+	tx := newFakeTx()
+	registry := newFakeRegistry()
+	bridge := newTestBridge(tx, registry, time.Hour, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	register := floatRegister(testRegA, "channel.1")
+	register.RegistryName = "zones.kitchen.valves.radiator"
+	bridge.ServeNode(ctx, testNode(t, "ssr5a", nodeAddr, register))
+
+	provided := registry.waitProvided(t, "zones.kitchen.valves.radiator")
+	if provided.metadata["device"] != "ssr5a" || provided.metadata["register"] != "channel.1" || provided.metadata["tag"] != testRegA {
+		t.Fatalf("metadata = %v", provided.metadata)
+	}
+	registry.mu.Lock()
+	defaultProvided := registry.provided["ssr5a.channel.1"]
+	registry.mu.Unlock()
+	if defaultProvided != nil {
+		t.Fatal("default Registry name was also provided")
+	}
+	call := nextGet(t, tx)
+	answer(call, 100)
+	if value := receive(t, provided.updates); value != 1.0 {
+		t.Fatalf("GET value = %v, want 1.0", value)
+	}
+	provided.requests <- 12.5
+	select {
+	case <-tx.setDone:
+	case <-time.After(time.Second):
+		t.Fatal("SET was not called")
+	}
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	if len(tx.setRegs) != 1 || tx.setRegs[0] != testRegA || len(tx.sets) != 1 || tx.sets[0] != 1250 {
+		t.Fatalf("SET calls = tags %v values %v, want [%#x]/[1250]", tx.setRegs, tx.sets, testRegA)
 	}
 }
 

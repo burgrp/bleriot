@@ -5,6 +5,7 @@
 // An Instance binds one physical device to:
 //   - its identity: the RF address, XTEA key, and RF channel;
 //   - its device type (a shared DeviceType describing the register table);
+//   - optional deployment-specific Registry names for selected registers;
 //   - its device-type-specific Config (any value, baked into the firmware image).
 //
 // Register identity on the wire is a stable, hand-assigned Tag (like a protobuf
@@ -40,6 +41,11 @@ type Conversion struct {
 	Encode func(value any) (int32, error)
 }
 
+// RegistryNames maps permanent register tags to deployment-specific Registry
+// names. Each value is a complete Registry name; omitted tags retain the
+// default "<instance>.<register>" name.
+type RegistryNames map[uint16]string
+
 // Register describes one register of a device type.
 type Register struct {
 	// Tag is the permanent wire identity of this register: unique and non-zero
@@ -47,7 +53,8 @@ type Register struct {
 	// a protobuf field number. The wire carries it as a uint16 (protocol REG
 	// field), so tags may span the full 1..65535 range.
 	Tag uint16
-	// Name is the register name exposed to the hub and Registry (e.g. "setpoint").
+	// Name is the driver-facing register name (e.g. "setpoint"). It supplies the
+	// default Registry name and remains unchanged by per-instance remapping.
 	Name string
 	// Type interprets the int32 wire value (int/float/bool).
 	Type RegType
@@ -128,10 +135,24 @@ type Instance struct {
 	Channel Channel
 	// Type is the device's type (register table).
 	Type DeviceType
+	// RegistryNames optionally replaces the complete Registry name for selected
+	// register tags. It is deployment-specific and does not alter the device
+	// type's register names or wire identities.
+	RegistryNames RegistryNames
 	// Config is the device-type-specific configuration baked into the device's
 	// firmware image by the "make" command. It may be any value the firmware's
 	// bleriotMain accepts; nil means no config.
 	Config any
+}
+
+// RegistryName returns the complete Registry name for register. An explicit
+// per-instance mapping wins; otherwise the device and register names are joined
+// using the historical "<instance>.<register>" convention.
+func (inst Instance) RegistryName(register Register) string {
+	if name, ok := inst.RegistryNames[register.Tag]; ok {
+		return name
+	}
+	return inst.Name + "." + register.Name
 }
 
 // Inventory is the full set of devices in a deployment.
@@ -173,12 +194,18 @@ func (dt DeviceType) Validate() error {
 }
 
 // Validate checks the whole inventory: every device type's register table is
-// valid; instance names and nonzero addresses are unique; channel numbers are
-// in 0..83; spread factors are S8 or S2 and uniform per channel; and channel
-// names and numbers form a one-to-one mapping.
+// valid; instance names, nonzero addresses, and resolved Registry names are
+// unique; Registry name mappings refer to existing tags and non-empty names;
+// channel numbers are in 0..83; spread factors are S8 or S2 and uniform per
+// channel; and channel names and numbers form a one-to-one mapping.
 func (inv Inventory) Validate() error {
 	seenName := make(map[string]bool, len(inv))
 	seenAddress := make(map[[config.AddrLen]byte]string, len(inv))
+	type registryOwner struct {
+		instance string
+		register string
+	}
+	seenRegistryName := make(map[string]registryOwner)
 	for i, inst := range inv {
 		if inst.Name == "" {
 			return fmt.Errorf("instance %d: name is required", i)
@@ -196,6 +223,26 @@ func (inv Inventory) Validate() error {
 		seenAddress[inst.Address] = inst.Name
 		if err := inst.Type.Validate(); err != nil {
 			return fmt.Errorf("instance %q: %w", inst.Name, err)
+		}
+		registerByTag := make(map[uint16]string, len(inst.Type.Registers))
+		for _, register := range inst.Type.Registers {
+			registerByTag[register.Tag] = register.Name
+		}
+		for tag, name := range inst.RegistryNames {
+			if _, ok := registerByTag[tag]; !ok {
+				return fmt.Errorf("instance %q: RegistryNames contains unknown register tag %d", inst.Name, tag)
+			}
+			if name == "" {
+				return fmt.Errorf("instance %q: RegistryNames tag %d has an empty Registry name", inst.Name, tag)
+			}
+		}
+		for _, register := range inst.Type.Registers {
+			name := inst.RegistryName(register)
+			if owner, ok := seenRegistryName[name]; ok {
+				return fmt.Errorf("Registry name %q is used by instance %q register %q and instance %q register %q",
+					name, owner.instance, owner.register, inst.Name, register.Name)
+			}
+			seenRegistryName[name] = registryOwner{instance: inst.Name, register: register.Name}
 		}
 	}
 	if err := inv.validateChannels(); err != nil {

@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
@@ -72,11 +73,24 @@ func TestDeviceTypeValidate_Errors(t *testing.T) {
 
 func TestInventoryValidate_OK(t *testing.T) {
 	inv := Inventory{
-		{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType()},
+		{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType(), RegistryNames: RegistryNames{1: "zones.kitchen.light.green"}},
 		{Name: "living", Address: [config.AddrLen]byte{2}, Channel: Channel{Name: "near", Number: 11}, Type: bobType()},
 	}
 	if err := inv.Validate(); err != nil {
 		t.Fatalf("expected valid, got %v", err)
+	}
+}
+
+func TestInstanceRegistryName(t *testing.T) {
+	inst := Instance{
+		Name:          "kitchen",
+		RegistryNames: RegistryNames{1: "zones.kitchen.light.green"},
+	}
+	if got := inst.RegistryName(Register{Tag: 1, Name: "green"}); got != "zones.kitchen.light.green" {
+		t.Fatalf("mapped RegistryName = %q", got)
+	}
+	if got := inst.RegistryName(Register{Tag: 2, Name: "red"}); got != "kitchen.red" {
+		t.Fatalf("default RegistryName = %q", got)
 	}
 }
 
@@ -117,6 +131,42 @@ func TestInventoryValidate_Errors(t *testing.T) {
 		}
 		if err := inv.Validate(); err == nil {
 			t.Fatal("expected error from invalid device type")
+		}
+	})
+	t.Run("unknown RegistryNames tag", func(t *testing.T) {
+		inv := Inventory{{
+			Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType(),
+			RegistryNames: RegistryNames{99: "zones.kitchen.unknown"},
+		}}
+		if err := inv.Validate(); err == nil || !strings.Contains(err.Error(), "unknown register tag 99") {
+			t.Fatalf("error = %v, want unknown register tag", err)
+		}
+	})
+	t.Run("empty RegistryNames value", func(t *testing.T) {
+		inv := Inventory{{
+			Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType(),
+			RegistryNames: RegistryNames{1: ""},
+		}}
+		if err := inv.Validate(); err == nil || !strings.Contains(err.Error(), "empty Registry name") {
+			t.Fatalf("error = %v, want empty Registry name", err)
+		}
+	})
+	t.Run("duplicate mapped Registry name within instance", func(t *testing.T) {
+		inv := Inventory{{
+			Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType(),
+			RegistryNames: RegistryNames{1: "zones.kitchen.light", 2: "zones.kitchen.light"},
+		}}
+		if err := inv.Validate(); err == nil || !strings.Contains(err.Error(), `Registry name "zones.kitchen.light" is used`) {
+			t.Fatalf("error = %v, want duplicate Registry name", err)
+		}
+	})
+	t.Run("mapped Registry name collides with another instance default", func(t *testing.T) {
+		inv := Inventory{
+			{Name: "kitchen", Address: [config.AddrLen]byte{1}, Channel: Channel{Name: "far", Number: 37}, Type: bobType(), RegistryNames: RegistryNames{1: "living.red"}},
+			{Name: "living", Address: [config.AddrLen]byte{2}, Channel: Channel{Name: "near", Number: 11}, Type: bobType()},
+		}
+		if err := inv.Validate(); err == nil || !strings.Contains(err.Error(), `Registry name "living.red" is used`) {
+			t.Fatalf("error = %v, want duplicate Registry name", err)
 		}
 	})
 	t.Run("missing channel name", func(t *testing.T) {
