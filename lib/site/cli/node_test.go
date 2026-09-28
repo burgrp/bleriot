@@ -70,9 +70,10 @@ func TestResolveFirmwareInstance(t *testing.T) {
 		t.Fatalf("unknown instance error = %v", err)
 	}
 
-	legacy := sampleInstance()
-	if _, err := resolveFirmwareInstance(inventory.Inventory{legacy}, ""); err == nil || !strings.Contains(err.Error(), "no importable firmware manifest") {
-		t.Fatalf("legacy instance error = %v", err)
+	withoutFirmware := sampleInstance()
+	withoutFirmware.Type.Firmware = firmware.Manifest{}
+	if _, err := resolveFirmwareInstance(inventory.Inventory{withoutFirmware}, ""); err == nil || !strings.Contains(err.Error(), "no importable firmware manifest") {
+		t.Fatalf("missing firmware error = %v", err)
 	}
 }
 

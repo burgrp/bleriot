@@ -83,8 +83,7 @@ type DeviceType struct {
 	// pack). The running hub ignores it.
 	Chip Chip
 	// Firmware identifies the importable node runtime and its board-owned build
-	// and flash policy. The zero value means the device type has not migrated to
-	// the generic firmware toolchain.
+	// and flash policy.
 	Firmware firmware.Manifest
 }
 

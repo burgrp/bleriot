@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
+	"github.com/burgrp/bleriot/lib/shared/firmware"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 	"github.com/burgrp/bleriot/lib/shared/puya"
 	"github.com/burgrp/bleriot/lib/site/bridge"
@@ -28,6 +29,9 @@ func sampleType() inventory.DeviceType {
 	return inventory.DeviceType{
 		Name: "bob",
 		Chip: puya.PY32F030x8,
+		Firmware: firmware.Manifest{
+			Package: "example.com/acme/board/fw",
+		},
 		Registers: []inventory.Register{
 			{Tag: 1, Name: "green", Type: inventory.TypeInt},
 			{Tag: 2, Name: "red", Type: inventory.TypeInt},

@@ -93,10 +93,13 @@ func instanceNames(inv inventory.Inventory) string {
 
 // renderProvisioning builds the gofmt'd source of the firmware's generated
 // main(): it constructs a node.Provisioning from the instance's baked identity
-// and calls either an importable firmware's Run function or the legacy
-// in-package bleriotMain function. The result is formatted (and thereby
-// parse-checked) before being returned.
+// and calls the board firmware's Run function. The result is formatted (and
+// thereby parse-checked) before being returned.
 func renderProvisioning(inst inventory.Instance) (string, error) {
+	packagePath := inst.Type.Firmware.Package
+	if packagePath == "" {
+		return "", fmt.Errorf("device type %q has no firmware package", inst.Type.Name)
+	}
 	prov := fmt.Sprintf(`node.Provisioning{
 	Address:      %s,
 	Key:          %s,
@@ -117,15 +120,12 @@ func renderProvisioning(inst inventory.Instance) (string, error) {
 		}
 	}
 
-	entrypoint := "bleriotMain"
-	if packagePath := inst.Type.Firmware.Package; packagePath != "" {
-		packageName, ok := imports[packagePath]
-		if !ok {
-			packageName = uniqueImportName("devicefw", imports)
-			imports[packagePath] = packageName
-		}
-		entrypoint = packageName + ".Run"
+	packageName, ok := imports[packagePath]
+	if !ok {
+		packageName = uniqueImportName("devicefw", imports)
+		imports[packagePath] = packageName
 	}
+	entrypoint := packageName + ".Run"
 
 	var call string
 	if inst.Config == nil {
