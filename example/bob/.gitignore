@@ -4,3 +4,4 @@ __pycache__
 disassembly.txt
 main_gen.go
 main_gen.go.tmp
+.bleriot/

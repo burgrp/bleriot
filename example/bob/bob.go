@@ -1,17 +1,15 @@
 //go:build tinygo
 
-// Command (firmware) main is the BleRiot node for the BOB breakout
+// Package bob is the BleRiot firmware for the BOB breakout
 // board (PY32F030 + PAN211x). It is a full protocol node: it owns the radio and
-// runs the BleRiot runtime (lib/node) over the bob device (the example
-// package).
+// runs the BleRiot runtime (lib/node) over the bob device.
 //
 // The device's identity (RF address, XTEA key, channel, spread factor) and its
 // config are compiled into the program image rather than loaded from a separate
-// provisioning flash page. This legacy example still expects main_gen.go to
-// call bleriotMain; it must migrate to an importable Run entry point and firmware
-// manifest before the `bleriot node build` command can build it.
+// provisioning flash page. The generated entry point calls Run with a
+// node.Provisioning value and spec.Config.
 //
-// On boot bleriotMain:
+// On boot Run:
 //   - initialises the PAN211x radio in BLE LongRange mode and applies the
 //     channel and receive address from the provisioning;
 //   - builds the bob device and the node runtime, then loops forever:
@@ -21,7 +19,7 @@
 //
 // All XTEA crypto and register dispatch live in lib/node; this file is only
 // hardware wiring. Debug logging uses println() over SEGGER RTT.
-package main
+package bob
 
 import (
 	"machine"
@@ -55,10 +53,8 @@ var gpioPins = [7]machine.Pin{
 	machine.PA6,
 }
 
-// bleriotMain is the firmware entry point the generated main() calls with the
-// device's baked-in identity and config. It is hand-written; only the trivial
-// main() that supplies prov and cfg is generated (main_gen.go).
-func bleriotMain(prov node.Provisioning, cfg spec.Config) {
+// Run starts the BOB firmware with baked provisioning and configuration.
+func Run(prov node.Provisioning, cfg spec.Config) {
 	println("BleRiot bob starting...")
 
 	pinLedGreen.Configure(machine.PinConfig{Mode: machine.PinOutput})

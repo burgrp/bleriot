@@ -74,9 +74,8 @@ for packet fields, pacing, retry, and register semantics.
 
 Register identity is a permanent, nonzero per-device-type `uint16` tag.
 Deployments are ordinary Go `inventory.Inventory` values; there is no JSON
-descriptor. `bleriot node build` generates only the TinyGo entry point that
-bakes one instance's address, key, channel, spread factor, and config into its
-firmware.
+descriptor. `bleriot node build` generates the TinyGo entry point that bakes one
+instance's address, key, channel, spread factor, and config into its firmware.
 
 ## Quick Start
 
@@ -84,7 +83,7 @@ Run the reference hub against a Registry service:
 
 ```sh
 cd example/bob
-go run . hub --registry http://localhost:8080 --sweep-interval 1s
+go run ./cmd/dev hub --registry http://localhost:8080 --sweep-interval 1s
 ```
 
 The hub discovers MCP2210 dongles and assigns them to inventory channels. It
@@ -97,25 +96,21 @@ Useful optional flags include `--timeout 50ms`, `--retries 3`,
 may appear before or after the subcommand:
 
 ```sh
-go run . --debug hub --registry http://localhost:8080 --diagnostics bleriot
+go run ./cmd/dev --debug hub --registry http://localhost:8080 --diagnostics bleriot
 ```
 
-Create an inventory identity from any site module:
+Create and flash an inventory identity from the reference module:
 
 ```sh
-go run . node new
+cd example/bob
+go run ./cmd/dev node new
+go run ./cmd/dev node build --name bob --flash --rtt
 ```
 
 `node new` works offline and prints an `inventory.Instance` stub with a random
-nonzero address and XTEA key. For an inventory node whose device type carries an
-importable firmware manifest, build and flash it with:
-
-```sh
-go run . node build --name NODE --flash --rtt
-```
-
-Omit `--name` when the inventory contains exactly one node. The reference Bob
-firmware still uses the pre-manifest layout and will migrate separately.
+nonzero address and XTEA key. `node build` selects the inventory instance,
+generates its baked firmware entry point, and follows the build and pyOCD policy
+declared by the device type's firmware manifest.
 
 The reference firmware exposes `bob.led` as the single writable LED register;
 it controls the green LED. The red LED is reserved for connection status: off

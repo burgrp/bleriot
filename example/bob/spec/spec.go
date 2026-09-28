@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"github.com/burgrp/bleriot/lib/shared/firmware"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 	"github.com/burgrp/bleriot/lib/shared/puya"
 )
@@ -21,6 +22,22 @@ func Type() inventory.DeviceType {
 	return inventory.DeviceType{
 		Name: "bob",
 		Chip: Chip,
+		Firmware: firmware.Manifest{
+			Package: "github.com/burgrp/bleriot/example/bob",
+			TinyGo: firmware.TinyGoProfile{
+				Scheduler:        firmware.SchedulerTasks,
+				StackSizeBytes:   1024,
+				GarbageCollector: firmware.GCLeaking,
+				Serial:           firmware.SerialRTT,
+				SizeReport:       firmware.SizeReportHTML,
+				PrintAllocs:      true,
+			},
+			PyOCD: firmware.PyOCDProfile{
+				RTTMode:                  firmware.ConnectUnderReset,
+				Reclaim:                  true,
+				ReclaimDelayMilliseconds: 1000,
+			},
+		},
 		Registers: []inventory.Register{
 			{
 				Tag:  RegLed,

@@ -3,11 +3,16 @@ package spec
 import (
 	"testing"
 
+	"github.com/burgrp/bleriot/lib/shared/firmware"
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 )
 
 func TestTypeExportsOneWritableLED(t *testing.T) {
-	registers := Type().Registers
+	deviceType := Type()
+	if err := deviceType.Validate(); err != nil {
+		t.Fatalf("Type.Validate: %v", err)
+	}
+	registers := deviceType.Registers
 	if len(registers) != 2 {
 		t.Fatalf("register count = %d, want 2", len(registers))
 	}
@@ -26,5 +31,18 @@ func TestTypeExportsOneWritableLED(t *testing.T) {
 		if register.Tag == 2 {
 			t.Fatal("retired register tag 2 was reused")
 		}
+	}
+}
+
+func TestFirmwareProfile(t *testing.T) {
+	profile := Type().Firmware
+	if profile.Package != "github.com/burgrp/bleriot/example/bob" {
+		t.Fatalf("firmware package = %q", profile.Package)
+	}
+	if profile.TinyGo.Scheduler != firmware.SchedulerTasks || profile.TinyGo.StackSizeBytes != 1024 {
+		t.Fatalf("TinyGo profile = %+v", profile.TinyGo)
+	}
+	if profile.PyOCD.RTTMode != firmware.ConnectUnderReset || !profile.PyOCD.Reclaim || profile.PyOCD.ReclaimDelayMilliseconds != 1000 {
+		t.Fatalf("pyOCD profile = %+v", profile.PyOCD)
 	}
 }

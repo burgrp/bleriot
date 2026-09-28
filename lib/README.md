@@ -324,9 +324,9 @@ tags are unique within the type.
 
 | Field      | Type                 | Description                                                  |
 |------------|----------------------|-------------------------------------------------------------|
-| name       | string               | Device-type name (e.g. `fan`)                               |
+| name       | string               | Device-type name (e.g. `bob`)                               |
 | registers  | list<Register>       | Register table (see §11.3)                                  |
-| chip       | `inventory.Chip`     | TinyGo/pyocd tool targets                                    |
+| chip       | `inventory.Chip`     | TinyGo/pyOCD tool targets                                    |
 | firmware   | `firmware.Manifest`  | Importable runtime and board-owned build/flash policy        |
 
 ### 11.3 Register
@@ -343,7 +343,7 @@ tags are unique within the type.
 All registers carry `int32` on the wire (§4). `type`, `readOnly`, and
 `conversion` are hub-side only: the node always sends and receives raw `int32`.
 They are ordinary Go values in the device type's `Type()` function; they are not
-serialized into the generated firmware entrypoint or sent over the radio.
+serialized into the generated firmware entry point or sent over the radio.
 
 `Conversion` contains two functions:
 
@@ -530,11 +530,11 @@ instance concept.
   Fill in the name, channel, type and config, and commit it to inventory.
 2. **Build + flash.** Run `bleriot node build --name <name> --flash`, or from a
   Go site binary use `go run . node build --name <name> --flash` (omit `--name`
-  when the inventory has one node). The host generates a private Go entrypoint
-  that bakes the node identity and config into the image, then builds the
-  importable board runtime and flashes it over SWD. Add `--rtt` to attach after
-  flashing and `--disassembly` to write a disassembly from the same build.
-  (`node gen` emits the generated source to stdout for inspection.)
+  when the inventory has one node). The host generates a private Go entry point
+  that bakes the node identity and config into the image, then builds the board
+  runtime and flashes it over SWD. Add `--rtt` to attach after flashing and
+  `--disassembly` to write a disassembly from the same build. (`node gen` emits
+  the generated source to stdout for inspection.)
 3. **Run.** Run `hub`: the host builds every inventory device's register
   descriptor and bridges its registers to the Registry.
 
