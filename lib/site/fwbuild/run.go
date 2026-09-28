@@ -4,7 +4,9 @@
 package fwbuild
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +86,9 @@ func Build(ctx context.Context, request Request, options BuildOptions) error {
 		if err := os.Chmod(dir, 0o700); err != nil {
 			return fmt.Errorf("securing firmware directory: %w", err)
 		}
+	}
+	if err := writeBuildModule(ctx, moduleRoot, buildDir); err != nil {
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(buildDir, "main.go"), []byte(request.Source), 0o600); err != nil {
 		return fmt.Errorf("writing generated firmware main: %w", err)
@@ -156,7 +162,7 @@ func InstallPack(ctx context.Context, request Request) error {
 }
 
 func (runner commandRunner) build(request Request) error {
-	if err := runner.commandEnv(moduleModeEnv(), "tinygo", tinyGoBuildArgs(request.Chip, request.Manifest.TinyGo)...); err != nil {
+	if err := runner.commandEnv(buildModuleEnv(), "tinygo", tinyGoBuildArgs(request.Chip, request.Manifest.TinyGo)...); err != nil {
 		return err
 	}
 	if err := os.Chmod(filepath.Join(runner.dir, imageName), 0o600); err != nil {
@@ -166,6 +172,13 @@ func (runner commandRunner) build(request Request) error {
 		if err := os.Chmod(filepath.Join(runner.dir, "size-report.html"), 0o600); err != nil {
 			return fmt.Errorf("securing firmware size report: %w", err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(runner.dir, "go.sum")); err == nil {
+		if err := os.Chmod(filepath.Join(runner.dir, "go.sum"), 0o600); err != nil {
+			return fmt.Errorf("securing firmware module sums: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking firmware module sums: %w", err)
 	}
 	return nil
 }
@@ -294,18 +307,28 @@ func appendPyocdOptions(args []string, frequencyHz uint32, mode firmware.Connect
 	return args
 }
 
-func moduleModeEnv() []string {
+func buildModuleEnv() []string {
 	env := os.Environ()
+	workFound := false
 	for index, value := range env {
 		if strings.HasPrefix(value, "GOFLAGS=") {
-			env[index] = "GOFLAGS=" + readonlyGoFlags(strings.TrimPrefix(value, "GOFLAGS="))
-			return env
+			env[index] = "GOFLAGS=" + buildModuleGoFlags(strings.TrimPrefix(value, "GOFLAGS="))
+		}
+		if strings.HasPrefix(value, "GOWORK=") {
+			env[index] = "GOWORK=off"
+			workFound = true
 		}
 	}
-	return append(env, "GOFLAGS=-mod=readonly")
+	if !containsEnv(env, "GOFLAGS=") {
+		env = append(env, "GOFLAGS=-mod=mod")
+	}
+	if !workFound {
+		env = append(env, "GOWORK=off")
+	}
+	return env
 }
 
-func readonlyGoFlags(value string) string {
+func buildModuleGoFlags(value string) string {
 	fields := strings.Fields(value)
 	result := make([]string, 0, len(fields)+1)
 	for index := 0; index < len(fields); index++ {
@@ -318,7 +341,138 @@ func readonlyGoFlags(value string) string {
 		}
 		result = append(result, fields[index])
 	}
-	return strings.Join(append(result, "-mod=readonly"), " ")
+	return strings.Join(append(result, "-mod=mod"), " ")
+}
+
+func containsEnv(env []string, prefix string) bool {
+	for _, value := range env {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+type selectedModule struct {
+	Path      string
+	Version   string
+	Main      bool
+	Dir       string
+	GoVersion string
+	Replace   *selectedModule
+}
+
+func writeBuildModule(ctx context.Context, moduleRoot, buildDir string) error {
+	modules, err := listSelectedModules(ctx, moduleRoot)
+	if err != nil {
+		return err
+	}
+	source, err := renderBuildModule(modules, moduleRoot)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(buildDir, "go.mod")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		return fmt.Errorf("writing firmware build module: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("securing firmware build module: %w", err)
+	}
+	if err := os.Remove(filepath.Join(buildDir, "go.sum")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("resetting firmware module sums: %w", err)
+	}
+	return nil
+}
+
+func listSelectedModules(ctx context.Context, moduleRoot string) ([]selectedModule, error) {
+	cmd := exec.CommandContext(ctx, "go", "list", "-mod=readonly", "-m", "-json", "all")
+	cmd.Dir = moduleRoot
+	cmd.Env = os.Environ()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if message := strings.TrimSpace(stderr.String()); message != "" {
+			return nil, fmt.Errorf("listing selected modules: %s", message)
+		}
+		return nil, fmt.Errorf("listing selected modules: %w", err)
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(out))
+	var modules []selectedModule
+	for {
+		var module selectedModule
+		if err := decoder.Decode(&module); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("decoding selected modules: %w", err)
+		}
+		modules = append(modules, module)
+	}
+	return modules, nil
+}
+
+func renderBuildModule(modules []selectedModule, moduleRoot string) (string, error) {
+	if len(modules) == 0 {
+		return "", fmt.Errorf("selected module graph is empty")
+	}
+	sort.Slice(modules, func(i, j int) bool { return modules[i].Path < modules[j].Path })
+
+	goVersion := "1.25.0"
+	for _, module := range modules {
+		if module.Main && sameDirectory(module.Dir, moduleRoot) && module.GoVersion != "" {
+			goVersion = module.GoVersion
+			break
+		}
+	}
+
+	var requires strings.Builder
+	var replaces strings.Builder
+	for _, module := range modules {
+		if module.Path == "" {
+			continue
+		}
+		version := module.Version
+		if version == "" {
+			version = "v0.0.0"
+		}
+		fmt.Fprintf(&requires, "\t%s %s\n", module.Path, version)
+
+		switch {
+		case module.Main && module.Dir != "":
+			fmt.Fprintf(&replaces, "replace %s => %s\n", module.Path, filepath.ToSlash(module.Dir))
+		case module.Replace != nil && module.Replace.Version != "":
+			fmt.Fprintf(&replaces, "replace %s => %s %s\n", module.Path, module.Replace.Path, module.Replace.Version)
+		case module.Replace != nil:
+			target := module.Replace.Dir
+			if target == "" {
+				target = module.Replace.Path
+			}
+			fmt.Fprintf(&replaces, "replace %s => %s\n", module.Path, filepath.ToSlash(target))
+		}
+	}
+
+	var source strings.Builder
+	source.WriteString("module bleriot.local/firmware\n\n")
+	fmt.Fprintf(&source, "go %s\n\n", goVersion)
+	source.WriteString("require (\n")
+	source.WriteString(requires.String())
+	source.WriteString(")\n")
+	if replaces.Len() != 0 {
+		source.WriteString("\n")
+		source.WriteString(replaces.String())
+	}
+	return source.String(), nil
+}
+
+func sameDirectory(left, right string) bool {
+	leftPath, leftErr := filepath.EvalSymlinks(left)
+	rightPath, rightErr := filepath.EvalSymlinks(right)
+	if leftErr == nil && rightErr == nil {
+		return filepath.Clean(leftPath) == filepath.Clean(rightPath)
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 func findModuleRoot(start string) (string, error) {
@@ -389,6 +543,9 @@ func preflightBuild(request Request, options BuildOptions) error {
 	}
 	if request.Chip.TinygoTarget == "" {
 		return fmt.Errorf("firmware chip has no TinyGo target")
+	}
+	if err := requireTool("go"); err != nil {
+		return err
 	}
 	if err := requireTool("tinygo"); err != nil {
 		return err

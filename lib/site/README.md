@@ -112,11 +112,12 @@ touches no hardware and emits to stdout, so it is mainly for inspection.
 `node build [--name NAME] [--disassembly] [--flash] [--rtt]` builds a node
 straight from the deployment inventory. It generates a private external `package main`
 under `.bleriot/firmware/<instance>`, imports the board runtime, and invokes its
-`Run` function with the baked identity and config. TinyGo resolves the complete
-firmware from the site's selected module graph in readonly module mode, including
-deliberate local replacements from an active Go workspace; the host's `vendor/`
-may remain optimized for host and Docker builds. Optional stages run in the
-fixed order disassembly, flash, then RTT; the image is built exactly once.
+`Run` function with the baked identity and config. BleRiot snapshots the site's
+selected module versions and deliberate local workspace replacements into a
+private build module, where TinyGo resolves tagged firmware dependencies without
+modifying the site's `go.mod` or `go.sum`; the host's `vendor/` may remain
+optimized for host and Docker builds. Optional stages run in the fixed order
+disassembly, flash, then RTT; the image is built exactly once.
 
 `node rtt`, `node gdb`, and `node install-pack` operate directly without
 building. Commands that select an existing node accept `--name`; it may be

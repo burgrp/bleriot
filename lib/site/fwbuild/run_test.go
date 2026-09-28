@@ -87,17 +87,17 @@ func TestSafeInstanceName(t *testing.T) {
 	}
 }
 
-func TestReadonlyGoFlags(t *testing.T) {
-	got := readonlyGoFlags("-trimpath -mod=vendor -tags=integration")
-	want := "-trimpath -tags=integration -mod=readonly"
+func TestBuildModuleGoFlags(t *testing.T) {
+	got := buildModuleGoFlags("-trimpath -mod=vendor -tags=integration")
+	want := "-trimpath -tags=integration -mod=mod"
 	if got != want {
-		t.Fatalf("readonlyGoFlags = %q, want %q", got, want)
+		t.Fatalf("buildModuleGoFlags = %q, want %q", got, want)
 	}
 
-	got = readonlyGoFlags("-mod vendor -trimpath")
-	want = "-trimpath -mod=readonly"
+	got = buildModuleGoFlags("-mod vendor -trimpath")
+	want = "-trimpath -mod=mod"
 	if got != want {
-		t.Fatalf("readonlyGoFlags split mod = %q, want %q", got, want)
+		t.Fatalf("buildModuleGoFlags split mod = %q, want %q", got, want)
 	}
 }
 
@@ -159,9 +159,45 @@ func TestBuildRunsEachRequestedStageOnceInOrder(t *testing.T) {
 	}
 	buildDir := filepath.Join(moduleDir, buildStateDir, "firmware", "test.node")
 	assertMode(t, buildDir, 0o700)
+	assertMode(t, filepath.Join(buildDir, "go.mod"), 0o600)
 	assertMode(t, filepath.Join(buildDir, "main.go"), 0o600)
 	assertMode(t, filepath.Join(buildDir, imageName), 0o600)
 	assertMode(t, filepath.Join(buildDir, "disassembly.txt"), 0o600)
+}
+
+func TestWriteBuildModuleSnapshotsVersionsAndWorkspaceReplacements(t *testing.T) {
+	root := t.TempDir()
+	dependency := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/site\n\ngo 1.25.2\n\nrequire example.com/dependency v0.0.0\n\nreplace example.com/dependency => "+filepath.ToSlash(dependency)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dependency, "go.mod"), []byte("module example.com/dependency\n\ngo 1.25.2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	buildDir := filepath.Join(root, ".bleriot", "firmware", "node")
+	if err := os.MkdirAll(buildDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOWORK", "off")
+	if err := writeBuildModule(context.Background(), root, buildDir); err != nil {
+		t.Fatalf("writeBuildModule: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(buildDir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	for _, want := range []string{
+		"example.com/site v0.0.0",
+		"example.com/dependency v0.0.0",
+		"replace example.com/site => " + filepath.ToSlash(root),
+		"replace example.com/dependency => " + filepath.ToSlash(dependency),
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("build module missing %q:\n%s", want, source)
+		}
+	}
+	assertMode(t, filepath.Join(buildDir, "go.mod"), 0o600)
 }
 
 func TestRTTDoesNotBuildOrCreateFirmwareState(t *testing.T) {
