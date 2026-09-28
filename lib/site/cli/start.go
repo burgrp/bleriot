@@ -15,9 +15,7 @@
 // Subcommands:
 //
 //	hub   bridge the inventory's nodes to the Registry
-//	gen   emit a device's baked-in identity + config as firmware source
-//	make  build/flash a device's firmware via GNU make, identity injected
-//	new   generate a random identity and print an Instance stub
+//	node  build, debug, and provision inventory nodes
 package cli
 
 import (
@@ -70,9 +68,7 @@ func newRootCmd(inv inventory.Inventory) *cobra.Command {
 	}
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug-level application logging")
 	root.AddCommand(newHubCmd(inv))
-	root.AddCommand(newGenCmd(inv))
-	root.AddCommand(newMakeCmd(inv))
-	root.AddCommand(newNewCmd(inv))
+	root.AddCommand(newNodeCmd(inv))
 	return root
 }
 

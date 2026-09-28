@@ -12,10 +12,10 @@ import (
 	"github.com/burgrp/bleriot/lib/shared/inventory"
 )
 
-// newNewCmd builds the "new" subcommand: generate a random address and key and
-// print a paste-ready inventory.Instance stub. It is entirely offline and does
-// not require an attached device or debug probe.
-func newNewCmd(inv inventory.Inventory) *cobra.Command {
+// newNodeNewCmd builds the "node new" subcommand: generate a random address and
+// key and print a paste-ready inventory.Instance stub. It is entirely offline
+// and does not require an attached device or debug probe.
+func newNodeNewCmd(inv inventory.Inventory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "new",
 		Short: "Print an inventory Instance stub with a new random identity",

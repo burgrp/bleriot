@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
+	"github.com/burgrp/bleriot/lib/shared/firmware"
 )
 
 func bobType() DeviceType {
@@ -45,6 +46,7 @@ func TestDeviceTypeValidate_Errors(t *testing.T) {
 		dt   DeviceType
 	}{
 		{"no name", DeviceType{Registers: []Register{{Tag: 1, Name: "a", Type: TypeBool}}}},
+		{"invalid firmware", DeviceType{Name: "t", Firmware: firmware.Manifest{Package: "invalid package"}}},
 		{"zero tag", DeviceType{Name: "t", Registers: []Register{{Tag: 0, Name: "a", Type: TypeBool}}}},
 		{"dup tag", DeviceType{Name: "t", Registers: []Register{
 			{Tag: 1, Name: "a", Type: TypeBool},

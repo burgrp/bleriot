@@ -3,9 +3,9 @@ package node
 import "github.com/burgrp/bleriot/lib/shared/config"
 
 // Provisioning is a node's per-device identity, baked into the firmware image by
-// the host "make" command; "gen" emits the same source for inspection (see
-// lib/site/cli). The generated main() constructs one of these and hands it to
-// the firmware's bleriotMain entry point together with the device config.
+// the host "node build" command; "node gen" emits the same source for inspection
+// (see lib/site/cli). The generated main() constructs one of these and hands it
+// to the firmware's Run entry point together with the device config.
 type Provisioning struct {
 	// Address is the node's random, nonzero 4-byte RF address (§3).
 	Address [config.AddrLen]byte

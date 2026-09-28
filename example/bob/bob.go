@@ -7,10 +7,9 @@
 //
 // The device's identity (RF address, XTEA key, channel, spread factor) and its
 // config are compiled into the program image rather than loaded from a separate
-// provisioning flash page. The host "bleriot make" command generates a tiny
-// main() that calls bleriotMain (this file) with a node.Provisioning value and a
-// spec.Config. That generated main lives in main_gen.go (gitignored, written by
-// "bleriot make" before each build).
+// provisioning flash page. This legacy example still expects main_gen.go to
+// call bleriotMain; it must migrate to an importable Run entry point and firmware
+// manifest before the `bleriot node build` command can build it.
 //
 // On boot bleriotMain:
 //   - initialises the PAN211x radio in BLE LongRange mode and applies the

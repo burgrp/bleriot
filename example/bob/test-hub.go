@@ -2,10 +2,10 @@
 
 // Command hub is the example BleRiot site binary. It declares the deployment as
 // inventory-as-code and hands it to the shared host runtime, which provides the
-// hub, gen, make and new subcommands.
+// hub and node subcommands.
 //
-//	go run . new
-//	go run . gen
+//	go run . node new
+//	go run . node gen --name bob
 //	go run . hub --registry http://localhost:8080
 package main
 

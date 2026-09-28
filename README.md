@@ -74,8 +74,9 @@ for packet fields, pacing, retry, and register semantics.
 
 Register identity is a permanent, nonzero per-device-type `uint16` tag.
 Deployments are ordinary Go `inventory.Inventory` values; there is no JSON
-descriptor. `bleriot make` generates only the TinyGo entry point that bakes one
-instance's address, key, channel, spread factor, and config into its firmware.
+descriptor. `bleriot node build` generates only the TinyGo entry point that
+bakes one instance's address, key, channel, spread factor, and config into its
+firmware.
 
 ## Quick Start
 
@@ -99,18 +100,22 @@ may appear before or after the subcommand:
 go run . --debug hub --registry http://localhost:8080 --diagnostics bleriot
 ```
 
-Create and flash an inventory identity from the reference module:
+Create an inventory identity from any site module:
 
 ```sh
-cd example/bob
-go run . new
-go run . make bob flash
+go run . node new
 ```
 
-`new` works offline and prints an `inventory.Instance` stub with a random
-nonzero address and XTEA key. `make` selects the inventory instance, generates
-its baked firmware entry point, injects the device type's TinyGo and pyocd
-targets, and invokes its Makefile.
+`node new` works offline and prints an `inventory.Instance` stub with a random
+nonzero address and XTEA key. For an inventory node whose device type carries an
+importable firmware manifest, build and flash it with:
+
+```sh
+go run . node build --name NODE --flash --rtt
+```
+
+Omit `--name` when the inventory contains exactly one node. The reference Bob
+firmware still uses the pre-manifest layout and will migrate separately.
 
 The reference firmware exposes `bob.led` as the single writable LED register;
 it controls the green LED. The red LED is reserved for connection status: off

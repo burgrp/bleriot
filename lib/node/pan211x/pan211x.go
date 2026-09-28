@@ -13,7 +13,7 @@ import (
 //
 // It takes the node's identity (RF channel, spread factor, address, and XTEA
 // key) as a node.Provisioning value baked into the firmware image by the host
-// "make" command (the "gen" command emits the same source for inspection),
+// "node build" command (the "node gen" command emits the same source for inspection),
 // initializes the radio over a 3-wire SPI interface on the given pins, tunes it
 // to the provisioned channel, and registers the node's receive address. On
 // success it returns the constructed node; any failure during radio setup is

@@ -46,29 +46,29 @@ func main() {
 }
 ```
 
-A complete, runnable site binary lives in [`../../example/bob`](../../example/bob),
-behind `//go:build !tinygo` in the same flat `package main` as the node firmware.
+A complete legacy site binary lives in [`../../example/bob`](../../example/bob).
+Importable firmware modules instead export a TinyGo `Run` entry point and carry
+their build profile on the device type; a site still imports only the board's
+host-facing spec.
 
 ---
 
 ## Commands
 
-`cli.Start` provides four BleRiot deployment subcommands (alongside Cobra's
+`cli.Start` provides two BleRiot deployment subcommands (alongside Cobra's
 built-in `help` and `completion` commands):
 
 ```
-hub  bridge the inventory's RF nodes to the Registry
-gen  emit a device's baked-in identity + config as firmware source
-make build/flash firmware with a device's identity + config baked in
-new  generate a random identity and print an Instance stub
+hub   bridge the inventory's RF nodes to the Registry
+node  build, debug, and provision inventory nodes
 ```
 
 ```sh
 cd ../../example/bob
 go run . hub --registry http://localhost:8080
 go run . --debug hub                           # enable debug-level application logs
-go run . gen                                  # generate the firmware provisioning source
-go run . new                                  # onboard a brand-new device
+go run . node gen --name bob                  # inspect the generated firmware entrypoint
+go run . node new                             # onboard a brand-new device
 ```
 
 The hub discovers the connected USB radio dongles automatically and assigns them
@@ -94,31 +94,37 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
 | `--diag-interval` | `1s` | How often changed diagnostics are coalesced into one Registry batch. |
 
-A `Chip` bundles the build and flash targets — `TinygoTarget` (tinygo
+A `Chip` bundles the MCU tool targets — `TinygoTarget` (tinygo
 `--target`), `PyocdTarget` (pyocd target name), and `CmsisPack` (pyocd CMSIS
 pack). The `puya` package
 provides built-in profiles for PY32F002A/B, every PY32F003 density, and every
 PY32F030 density; declare a `Chip{...}` on a device type to support other MCUs.
+An importable firmware's `firmware.Manifest` adds board-owned policy such as its
+runtime import path, scheduler, stack size, serial backend, size report, and
+pyOCD connection settings. Deployments do not duplicate those settings.
 
-`new` generates a random nonzero RF address and XTEA key and prints a paste-ready
+`node new` generates a random nonzero RF address and XTEA key and prints a paste-ready
 `inventory.Instance{}` stub. It is entirely offline and requires no device or
-probe. `gen` bakes an inventory instance's stored address, key, channel, spread
+probe. `node gen` bakes an inventory instance's stored address, key, channel, spread
 factor and `Config` into a generated Go file the firmware build compiles in; it
-touches no hardware and emits to stdout, so it is mainly for inspection —
-`bleriot make` (below) writes the same file as part of building.
+touches no hardware and emits to stdout, so it is mainly for inspection.
 
-`make [name] [make-args...]` builds or flashes a device straight from the hub: it
-locates the device type's firmware source (the nearest Makefile above its `Config`
-package, or `--root`), writes the baked-in identity + config into it as
-`main_gen.go`, then runs GNU make there with the chip's
-`TinygoTarget`/`PyocdTarget`/`CmsisPack` and a `BLERIOT_MAKE` sentinel injected as
-make variables. Name the instance, or omit it to use the sole one. So
-`bleriot make bob flash` bakes bob's hub-owned identity and flashes it, without
-the firmware directory needing its own inventory. The example Makefile also has a
-guard: running `make flash` directly (without the sentinel) bounces the goal back
-through `go run . make`, so a single-device dir builds correctly either way. It
-needs the firmware source and toolchain (make, tinygo, pyocd) present, so run it
-from a hub checkout.
+`node build [--name NAME] [--disassembly] [--flash] [--rtt]` builds a node
+straight from the deployment inventory. It generates a private external `package main`
+under `.bleriot/firmware/<instance>`, imports the board runtime, and invokes its
+`Run` function with the baked identity and config. TinyGo resolves the complete
+firmware from the site's selected module graph in readonly module mode, including
+deliberate local replacements from an active Go workspace; the host's `vendor/`
+may remain optimized for host and Docker builds. Optional stages run in the
+fixed order disassembly, flash, then RTT; the image is built exactly once.
+
+`node rtt`, `node gdb`, and `node install-pack` operate directly without
+building. Commands that select an existing node accept `--name`; it may be
+omitted only when the inventory contains exactly one node. Device types without
+an importable firmware manifest must be migrated before these build/debug
+commands can use them. Generated sources and artifacts never modify a board
+checkout, `vendor/`, or existing module-cache contents; normal Go resolution may
+download missing pinned modules into the cache.
 
 ### USB access
 
@@ -188,41 +194,40 @@ original register name. Empty destinations, unknown tags (including registers
 disabled from that instance's type), and collisions with any mapped or default
 name in the inventory are rejected before the hub starts.
 
-The RF address and key are generated by `new`, stored in inventory, and baked
-into firmware by `make` ([protocol §11.5](../README.md#115-node-identity)).
+The RF address and key are generated by `node new`, stored in inventory, and
+baked into firmware by `node build` ([protocol §11.5](../README.md#115-node-identity)).
 
 ### Device-type modules
 
-A device type (e.g. [`../../example/bob`](../../example/bob)) is its own,
-dual-target Go module:
+A device type is its own dual-target Go module:
 
 - `Config` is shared by host and firmware.
-- `Type() inventory.DeviceType` describes the register table. It is compiled into
+- `Type() inventory.DeviceType` describes the register table and, for migrated
+  boards, carries a typed `firmware.Manifest`. It is compiled into
   both targets, but the firmware never calls it, so TinyGo's dead-code
   elimination strips it (and the `inventory` package it references) from the
   image. Register conversion functions therefore execute on the hub only, even
   when they use floating-point sensor mathematics such as an NTC beta equation.
-- One flat `package main` holds both entry points, selected by build tag: the
-  firmware (`//go:build tinygo`) drives the shared [`lib/node`](../node) runtime
-  over the radio, and the example host hub (`//go:build !tinygo`) declares the
-  inventory and hands it to [`lib/site/cli`](cli). So a single module is both the
-  node firmware and its example hub.
+- Boards expose `Run(node.Provisioning, Config)` from an importable
+  TinyGo package. An optional local inventory lives under `cmd/dev`; deployment
+  sites use the same board module without copying its build policy.
 
 ### Generated provisioning file
 
 There is no provisioning page in flash. Instead, a small generated Go file
 (`//go:build tinygo`, gitignored) bakes one inventory instance's identity and
-config into the firmware image. `bleriot make` writes it as part of building, and
-`bleriot gen` emits the same source to stdout for inspection:
+config into the firmware image. `bleriot node build` writes it under the site's
+private `.bleriot` state directory, and `bleriot node gen` emits the same source
+to stdout for inspection:
 
 ```go
 //go:build tinygo
 
-// Code generated by "bleriot gen"; DO NOT EDIT.
+// Code generated by "bleriot node gen"; DO NOT EDIT.
 package main
 
 func main() {
-	bleriotMain(node.Provisioning{
+  devicefw.Run(node.Provisioning{
     Address:      [4]byte{ /* random RF address */ },
 		Key:          [16]byte{ /* XTEA key */ },
 		Channel:      37,
@@ -233,8 +238,8 @@ func main() {
 
 `node.Provisioning` (address, key, channel, spread factor) lives in the shared
 [`lib/node`](../node) package; the `Config` literal is rendered from the
-inventory value with `%#v`. The firmware's hand-written `bleriotMain` receives
-both.
+inventory value with `%#v`. The generated package imports the board runtime
+named by its manifest and passes both values to its hand-written `Run` function.
 
 ---
 
@@ -242,8 +247,10 @@ both.
 
 | Path | Responsibility |
 |------|----------------|
-| [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the `hub`, `gen`, `make` and offline `new` subcommands. |
+| [`cli`](cli) | The `bleriot` command tree (cobra): `cli.Start(Inventory)` plus the top-level `hub` and `node` subcommands. |
+| [`fwbuild`](fwbuild) | Generic importable-firmware source staging and structured TinyGo/pyOCD/objdump execution. |
 | [`../shared/inventory`](../shared/inventory) | The inventory-as-code model: `Register`/`DeviceType`/`Instance`/`Inventory` and `Validate`. Shared with the firmware. |
+| [`../shared/firmware`](../shared/firmware) | Typed, board-owned firmware build and flash profiles. |
 | [`../shared/conversion`](../shared/conversion) | Hub-side `Scale` and `Linear` factories for writable register conversions. The code is referenced by shared device specs but stripped from firmware as unreachable. |
 | [`../shared/conversion/ntc`](../shared/conversion/ntc) | Read-only raw-ADC to Celsius conversion using an NTC thermistor's beta model. |
 | [`../shared/puya`](../shared/puya) | Puya PY32 chip profiles and per-family memory-map constants. Shared with the firmware. |
