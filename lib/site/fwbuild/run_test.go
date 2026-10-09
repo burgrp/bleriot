@@ -200,6 +200,25 @@ func TestWriteBuildModuleSnapshotsVersionsAndWorkspaceReplacements(t *testing.T)
 	assertMode(t, filepath.Join(buildDir, "go.mod"), 0o600)
 }
 
+func TestLocalModuleVersion(t *testing.T) {
+	for _, test := range []struct {
+		path string
+		want string
+	}{
+		{path: "example.com/device", want: "v0.0.0"},
+		{path: "example.com/device/v1", want: "v0.0.0"},
+		{path: "example.com/device/v2", want: "v2.0.0"},
+		{path: "example.com/device/v12", want: "v12.0.0"},
+		{path: "example.com/device/version2", want: "v0.0.0"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			if got := localModuleVersion(test.path); got != test.want {
+				t.Fatalf("localModuleVersion(%q) = %q, want %q", test.path, got, test.want)
+			}
+		})
+	}
+}
+
 func TestRTTDoesNotBuildOrCreateFirmwareState(t *testing.T) {
 	moduleDir, logPath := fakeToolEnvironment(t, "pyocd")
 	request := Request{

@@ -435,7 +435,7 @@ func renderBuildModule(modules []selectedModule, moduleRoot string) (string, err
 		}
 		version := module.Version
 		if version == "" {
-			version = "v0.0.0"
+			version = localModuleVersion(module.Path)
 		}
 		fmt.Fprintf(&requires, "\t%s %s\n", module.Path, version)
 
@@ -464,6 +464,18 @@ func renderBuildModule(modules []selectedModule, moduleRoot string) (string, err
 		source.WriteString(replaces.String())
 	}
 	return source.String(), nil
+}
+
+func localModuleVersion(path string) string {
+	majorSuffix := path[strings.LastIndex(path, "/")+1:]
+	if len(majorSuffix) < 2 || majorSuffix[0] != 'v' {
+		return "v0.0.0"
+	}
+	major, err := strconv.Atoi(majorSuffix[1:])
+	if err != nil || major < 2 {
+		return "v0.0.0"
+	}
+	return fmt.Sprintf("v%d.0.0", major)
 }
 
 func sameDirectory(left, right string) bool {
