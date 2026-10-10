@@ -1,8 +1,10 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -101,20 +103,20 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 
 	batch := registry.waitBatch(t)
 	wants := map[string]any{
-		"diag.hub.main.schema.version":                                         9,
-		"diag.hub.main.latency.success.bucket.le_plus_Inf":                     uint64(8),
-		"diag.node.basement_dfan.transaction.get.outcome.success_first":        uint64(7),
-		"diag.node.basement_dfan.transaction.get.outcome.timeout":              uint64(2),
-		"diag.node.basement_dfan.transaction.get.attempt.retry":                uint64(3),
-		"diag.node.basement_dfan.transaction.get.latency.success.microseconds": uint64(140000),
-		"diag.node.basement_dfan.transaction.set.outcome.success_retry":        uint64(1),
-		"diag.node.basement_dfan.packet.value.matched":                         uint64(7),
-		"diag.node.basement_dfan.packet.value.orphan":                          uint64(2),
-		"diag.node.basement_dfan.packet.value.null":                            uint64(1),
-		"diag.node.basement_dfan.packet.ack.matched":                           uint64(1),
-		"diag.node.basement_dfan.packet.last.received":                         int64(1700000000),
-		"diag.channel.far.connection.open.attempt":                             uint64(3),
-		"diag.channel.far.packet.tx.error":                                     uint64(1),
+		"diag.hub.main.schema.version":                                        9,
+		"diag.hub.main.latency.success.bucket.le_plus_Inf":                    uint64(8),
+		"diag.node.basement_fan.transaction.get.outcome.success_first":        uint64(7),
+		"diag.node.basement_fan.transaction.get.outcome.timeout":              uint64(2),
+		"diag.node.basement_fan.transaction.get.attempt.retry":                uint64(3),
+		"diag.node.basement_fan.transaction.get.latency.success.microseconds": uint64(140000),
+		"diag.node.basement_fan.transaction.set.outcome.success_retry":        uint64(1),
+		"diag.node.basement_fan.packet.value.matched":                         uint64(7),
+		"diag.node.basement_fan.packet.value.orphan":                          uint64(2),
+		"diag.node.basement_fan.packet.value.null":                            uint64(1),
+		"diag.node.basement_fan.packet.ack.matched":                           uint64(1),
+		"diag.node.basement_fan.packet.last.received":                         int64(1700000000),
+		"diag.channel.far.connection.open.attempt":                            uint64(3),
+		"diag.channel.far.packet.tx.error":                                    uint64(1),
 	}
 	for name, want := range wants {
 		update, ok := batch[name]
@@ -129,7 +131,7 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 			t.Errorf("%s metadata/TTL = %v/%v", name, update.Metadata, update.TTL)
 		}
 	}
-	nodePrefix := "diag.node.basement_dfan."
+	nodePrefix := "diag.node.basement_fan."
 	nodeRegisters := 0
 	for name := range batch {
 		if strings.HasPrefix(name, nodePrefix) {
@@ -155,6 +157,49 @@ func TestPathComponentAvoidsDotUnderscoreCollisions(t *testing.T) {
 			t.Fatalf("names %q and %q collapse to %q", previous, name, encoded)
 		}
 		seen[encoded] = name
+	}
+}
+
+func TestPathComponentReadableNames(t *testing.T) {
+	for name, want := range map[string]string{
+		"cpg.floor": "cpg_floor",
+		"cpg_floor": "cpg_ufloor",
+		"cpg-floor": "cpg-floor",
+		"a.u":       "a_u",
+		"a_":        "a_u",
+	} {
+		if got := pathComponent(name); got != want {
+			t.Errorf("pathComponent(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestDiagnosticsRejectsNameCollisions(t *testing.T) {
+	for _, scope := range []string{"node", "channel"} {
+		t.Run(scope, func(t *testing.T) {
+			registry := newFakeBatchRegistry()
+			var logs bytes.Buffer
+			diagnostics := NewDiagnostics(&fakeSnap{}, registry, "diag", time.Hour, time.Hour,
+				WithDiagLogger(slog.New(slog.NewTextHandler(&logs, nil))))
+			var nodes []DiagNode
+			var dongles []DiagDongle
+			if scope == "node" {
+				nodes = []DiagNode{{Name: "a.u"}, {Name: "a_"}}
+			} else {
+				dongles = []DiagDongle{{Name: "a.u"}, {Name: "a_"}}
+			}
+			diagnostics.Serve(context.Background(), nodes, dongles)
+			if !strings.Contains(logs.String(), "level=ERROR") ||
+				!strings.Contains(logs.String(), "diagnostic name collision") ||
+				!strings.Contains(logs.String(), "diag."+scope+".a_u") {
+				t.Fatalf("missing collision error: %s", logs.String())
+			}
+			select {
+			case <-registry.notify:
+				t.Fatal("diagnostics published despite a name collision")
+			default:
+			}
+		})
 	}
 }
 

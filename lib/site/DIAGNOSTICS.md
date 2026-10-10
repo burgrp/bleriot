@@ -65,25 +65,34 @@ Paths have one of three forms:
 <prefix>.channel.<escaped-channel-name>.<metric>
 ```
 
-A node or channel name is kept in one path component. Each `_` becomes `_u`,
-and each `.` becomes `_d`; because the escape marker itself is encoded, this
-mapping is injective:
+A node or channel name is kept in one path component. Each `.` becomes `_`,
+and each literal `_` becomes `_u`. Other characters are unchanged:
 
 ```text
-basement.fan -> basement_dfan
+basement.fan -> basement_fan
 zone_1       -> zone_u1
+cpg.floor    -> cpg_floor
 ```
 
-This distinguishes `a.b` from `a_b`. The configured prefix itself is not
+This distinguishes `a.b` from `a_b`, but is not reversible for every possible
+name: `a.u` and `a_` both become `a_u`. Before starting publication, the hub
+checks for collisions within the node and channel namespaces separately. A
+collision logs an error and prevents the diagnostics publisher from starting;
+no diagnostic values are published. A node and a channel may share a name
+because their namespaces differ. The configured prefix itself is not
 component-escaped.
+
+Changing the mapping renames affected registers. Old names stop being refreshed
+and expire according to their Registry TTL. Update dashboards and selectors
+that reference those names.
 
 The Registry Prometheus exporter maps dots to colons and also exposes path
 components as positional labels. For example:
 
 ```text
-Registry:   bleriot.node.basement_dfan.transaction.get.outcome.timeout
-Prometheus: bleriot:node:basement_dfan:transaction:get:outcome:timeout
-Labels:     n1="bleriot", n2="node", n3="basement_dfan",
+Registry:   bleriot.node.basement_fan.transaction.get.outcome.timeout
+Prometheus: bleriot:node:basement_fan:transaction:get:outcome:timeout
+Labels:     n1="bleriot", n2="node", n3="basement_fan",
             n4="transaction", n5="get", n6="outcome", n7="timeout"
 ```
 

@@ -88,11 +88,32 @@ func NewDiagnostics(src DiagNodeSource, reg DiagnosticBatchRegistry, prefix stri
 }
 
 // Serve starts one publisher goroutine for the complete diagnostics catalog.
+// Conflicting diagnostic names are logged and prevent publication from starting.
 func (d *Diagnostics) Serve(ctx context.Context, nodes []DiagNode, dongles []DiagDongle) {
 	nodes = append([]DiagNode(nil), nodes...)
 	dongles = append([]DiagDongle(nil), dongles...)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
 	sort.Slice(dongles, func(i, j int) bool { return dongles[i].Name < dongles[j].Name })
+	names := make(map[string]string, len(nodes)+len(dongles))
+	checkName := func(scope, name string) bool {
+		path := d.prefix + "." + scope + "." + pathComponent(name)
+		if previous, exists := names[path]; exists {
+			d.log.Error("diagnostic name collision", "path", path, "first", previous, "second", name)
+			return false
+		}
+		names[path] = name
+		return true
+	}
+	for _, node := range nodes {
+		if !checkName("node", node.Name) {
+			return
+		}
+	}
+	for _, dongle := range dongles {
+		if !checkName("channel", dongle.Name) {
+			return
+		}
+	}
 	d.log.Info("serving batched diagnostics", "prefix", d.prefix, "nodes", len(nodes), "dongles", len(dongles), "interval", d.interval)
 	go d.run(ctx, nodes, dongles)
 }
@@ -288,7 +309,7 @@ func addDongleValues(values map[string]diagnosticValue, prefix, name string, sta
 func integer(value any) diagnosticValue { return diagnosticValue{value: value, typ: "int"} }
 
 func pathComponent(name string) string {
-	return strings.NewReplacer("_", "_u", ".", "_d").Replace(name)
+	return strings.NewReplacer("_", "_u", ".", "_").Replace(name)
 }
 
 func diagMeta(valueType string) map[string]any {
