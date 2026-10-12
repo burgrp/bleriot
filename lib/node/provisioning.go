@@ -1,11 +1,16 @@
 package node
 
-import "github.com/burgrp/bleriot/lib/shared/config"
+import (
+	"time"
 
-// Provisioning is a node's per-device identity, baked into the firmware image by
-// the host "node build" command; "node gen" emits the same source for inspection
-// (see lib/site/cli). The generated main() constructs one of these and hands it
-// to the firmware's Run entry point together with the device config.
+	"github.com/burgrp/bleriot/lib/shared/config"
+)
+
+// Provisioning is a node's per-device identity and runtime settings, baked into
+// the firmware image by the host "node build" command; "node gen" emits the same
+// source for inspection (see lib/site/cli). The generated main() constructs one
+// of these and hands it to the firmware's Run entry point together with the
+// device config.
 type Provisioning struct {
 	// Address is the node's random, nonzero 4-byte RF address (§3).
 	Address [config.AddrLen]byte
@@ -15,4 +20,7 @@ type Provisioning struct {
 	Channel uint8
 	// SpreadFactor is the BLE Coded PHY spreading factor for the channel.
 	SpreadFactor config.SpreadFactor
+	// OnlineTimeout controls how long the runtime reports online after receiving
+	// a valid packet. Zero uses DefaultOnlineTimeout.
+	OnlineTimeout time.Duration
 }

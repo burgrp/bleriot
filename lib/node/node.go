@@ -8,6 +8,7 @@
 package node
 
 import (
+	"errors"
 	_ "unsafe" // for go:linkname of runtime.nanotime
 
 	"time"
@@ -16,7 +17,10 @@ import (
 )
 
 const (
-	onlineTimeout   = 5 * time.Second
+	// DefaultOnlineTimeout is how long a node remains online after a valid
+	// received packet when Provisioning.OnlineTimeout is zero.
+	DefaultOnlineTimeout = 10 * time.Second
+
 	statusLEDPeriod = time.Second
 	statusLEDOn     = 200 * time.Millisecond
 )
@@ -69,17 +73,27 @@ type Node struct {
 	statusInitialized bool
 	statusOnline      bool
 	statusLED         bool
+	onlineTimeout     time.Duration
 }
 
-// New builds a Node for a device whose RF source address is self and whose shared
-// XTEA key is key. radio must already be configured for the device's channel and
-// receive address.
-func New(radio Radio, self [4]byte, key [16]byte, dev Device) (*Node, error) {
-	codec, err := protocol.NewCodec(key)
+// New builds a Node from its per-device provisioning. radio must already be
+// configured for the provisioned channel and receive address. A zero
+// OnlineTimeout selects DefaultOnlineTimeout.
+func New(radio Radio, prov Provisioning, dev Device) (*Node, error) {
+	if prov.OnlineTimeout < 0 {
+		return nil, errors.New("node: online timeout must not be negative")
+	}
+	timeout := prov.OnlineTimeout
+	if timeout == 0 {
+		timeout = DefaultOnlineTimeout
+	}
+	codec, err := protocol.NewCodec(prov.Key)
 	if err != nil {
 		return nil, err
 	}
-	return &Node{radio: radio, codec: codec, dev: dev, self: self}, nil
+	return &Node{
+		radio: radio, codec: codec, dev: dev, self: prov.Address, onlineTimeout: timeout,
+	}, nil
 }
 
 // Run drives the runtime forever: it polls the radio and dispatches each received
@@ -124,10 +138,11 @@ func (n *Node) Poll() bool {
 }
 
 // PollWithStatus performs one Poll and returns the node's connection and status
-// LED state. online remains true for five seconds after the most recent packet
-// handled by Poll. led follows a one-second heartbeat that is true for 200 ms
-// and false for 800 ms, independently of online. changed is true on the first
-// call and whenever online or led differs from the preceding call.
+// LED state. online remains true for the provisioned online timeout (10 seconds
+// by default) after the most recent packet handled by Poll. led follows a
+// one-second heartbeat that is true for 200 ms and false for 800 ms,
+// independently of online. changed is true on the first call and whenever
+// online or led differs from the preceding call.
 //
 // Callers should invoke PollWithStatus frequently enough to observe the LED
 // edges they need to drive.
@@ -141,7 +156,7 @@ func statusNow() time.Duration {
 }
 
 func (n *Node) receivedAt(now time.Duration) {
-	n.onlineUntil = now + onlineTimeout
+	n.onlineUntil = now + n.onlineTimeout
 }
 
 func (n *Node) statusAt(now time.Duration) (online, led, changed bool) {

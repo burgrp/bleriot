@@ -5,6 +5,7 @@
 // An Instance binds one physical device to:
 //   - its identity: the RF address, XTEA key, and RF channel;
 //   - its device type (a shared DeviceType describing the register table);
+//   - optional per-device firmware settings, including its online timeout;
 //   - optional deployment-specific Registry names for selected registers;
 //   - its device-type-specific Config (any value, baked into the firmware image).
 //
@@ -16,6 +17,7 @@ package inventory
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/firmware"
@@ -139,6 +141,10 @@ type Instance struct {
 	Channel Channel
 	// Type is the device's type (register table).
 	Type DeviceType
+
+	// OnlineTimeout is how long firmware continues to report online after
+	// receiving a valid packet. Zero uses node.DefaultOnlineTimeout (10 seconds).
+	OnlineTimeout time.Duration
 	// RegistryNames optionally replaces the complete Registry name for selected
 	// register tags. It is deployment-specific and does not alter the device
 	// type's register names or wire identities.
@@ -223,6 +229,9 @@ func (inv Inventory) Validate() error {
 			return fmt.Errorf("duplicate instance name %q", inst.Name)
 		}
 		seenName[inst.Name] = true
+		if inst.OnlineTimeout < 0 {
+			return fmt.Errorf("instance %q: online timeout must not be negative", inst.Name)
+		}
 		if inst.Address == ([config.AddrLen]byte{}) {
 			return fmt.Errorf("instance %q: address 0 is reserved", inst.Name)
 		}

@@ -3,6 +3,7 @@ package inventory
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/firmware"
@@ -97,6 +98,17 @@ func TestInstanceRegistryName(t *testing.T) {
 }
 
 func TestInventoryValidate_Errors(t *testing.T) {
+	t.Run("negative online timeout", func(t *testing.T) {
+		inv := Inventory{{
+			Name: "kitchen", Address: [config.AddrLen]byte{1},
+			Channel: Channel{Name: "far", Number: 37}, Type: bobType(),
+			OnlineTimeout: -time.Second,
+		}}
+		if err := inv.Validate(); err == nil || !strings.Contains(err.Error(), "online timeout") {
+			t.Fatalf("error = %v, want invalid online timeout", err)
+		}
+	})
+
 	t.Run("empty name", func(t *testing.T) {
 		inv := Inventory{{Name: "", Channel: Channel{Name: "far", Number: 37}, Type: bobType()}}
 		if err := inv.Validate(); err == nil {

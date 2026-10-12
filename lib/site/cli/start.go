@@ -8,9 +8,9 @@
 //
 // Start builds the "bleriot" command tree around that inventory and runs it. The
 // inventory is the single source of truth for which devices exist, their
-// identities, types and configuration; runtime/deploy concerns (registry URL,
-// hub RF address, timeouts) are command-line flags, not inventory
-// data.
+// identities, types, per-device firmware settings and configuration; hub
+// runtime/deploy concerns (Registry URL, hub RF address and reply timeout) are
+// command-line flags, not inventory data.
 //
 // Subcommands:
 //

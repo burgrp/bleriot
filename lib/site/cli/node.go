@@ -35,7 +35,8 @@ func newNodeBuildCmd(inv inventory.Inventory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Build firmware and optionally disassemble, flash, or open RTT",
-		Long: "Build the selected inventory node's firmware with its identity and config baked in. " +
+		Long: "Build the selected inventory node's firmware with its identity, per-device " +
+			"runtime settings and config baked in. " +
 			"Optional stages always run in the order disassembly, flash, then RTT.",
 		Args: cobra.NoArgs,
 	}

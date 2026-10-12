@@ -2,11 +2,12 @@
 // BleRiot firmware and host: the RF/identity field widths and the RF spreading
 // factor.
 //
-// A device's identity (RF address, XTEA key, channel, spread factor) and its
-// device-type Config are no longer serialized to a flash page; they are baked
-// into the per-device firmware image by the host "node build" command; "node
-// gen" emits the same source for inspection (see lib/site/cli). This package
-// therefore carries only the small primitives both sides must agree on.
+// A device's identity (RF address, XTEA key, channel, spread factor), runtime
+// settings such as its online timeout, and device-type Config are no longer
+// serialized to a flash page; they are baked into the per-device firmware image
+// by the host "node build" command; "node gen" emits the same source for
+// inspection (see lib/site/cli). This package therefore carries only the small
+// primitives both sides must agree on.
 package config
 
 // Field widths shared by firmware and host.

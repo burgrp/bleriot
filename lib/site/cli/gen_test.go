@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"path"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/burgrp/bleriot/lib/shared/config"
 	"github.com/burgrp/bleriot/lib/shared/firmware"
@@ -63,6 +65,7 @@ func TestResolveInstance(t *testing.T) {
 
 func TestRunGenOutput(t *testing.T) {
 	inst := sampleInstance() // Config: bobConfig{DefaultRedPeriod:500, DefaultGreenPeriod:100}
+	inst.OnlineTimeout = 15 * time.Second
 	var buf bytes.Buffer
 	if err := runGen(inventory.Inventory{inst}, "", &buf); err != nil {
 		t.Fatalf("runGen: %v", err)
@@ -85,9 +88,11 @@ func TestRunGenOutput(t *testing.T) {
 		"node.Provisioning{",
 		byteArrayLiteral(inst.Address[:]), // RF address
 		byteArrayLiteral(inst.Key[:]),     // XTEA key
-		"Channel:      37",                // channel number
-		"SpreadFactor: 1",                 // SpreadFactorS2
-		"DefaultRedPeriod",                // config field baked in
+		"Channel:       37",               // channel number
+		"SpreadFactor:  1",                // SpreadFactorS2
+		`"time"`,
+		"OnlineTimeout: 15 * time.Second",
+		"DefaultRedPeriod", // config field baked in
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {
@@ -198,6 +203,7 @@ func TestRunGenImportsNestedSliceMapPackage(t *testing.T) {
 func TestGeneratedSourceTypeChecks(t *testing.T) {
 	inst := sampleInstance()
 	inst.Config = []config.SpreadFactor{config.SpreadFactorS2}
+	inst.OnlineTimeout = 15 * time.Second
 	out, err := renderProvisioning(inst)
 	if err != nil {
 		t.Fatalf("renderProvisioning: %v", err)
@@ -212,6 +218,25 @@ func TestGeneratedSourceTypeChecks(t *testing.T) {
 	}
 }
 
+var generatedTimePackage = func() *types.Package {
+	pkg := types.NewPackage("time", "time")
+	durationName := types.NewTypeName(token.NoPos, pkg, "Duration", nil)
+	durationType := types.NewNamed(durationName, types.Typ[types.Int64], nil)
+	pkg.Scope().Insert(durationName)
+	for name, duration := range map[string]time.Duration{
+		"Hour":        time.Hour,
+		"Minute":      time.Minute,
+		"Second":      time.Second,
+		"Millisecond": time.Millisecond,
+		"Microsecond": time.Microsecond,
+		"Nanosecond":  time.Nanosecond,
+	} {
+		pkg.Scope().Insert(types.NewConst(token.NoPos, pkg, name, durationType, constant.MakeInt64(int64(duration))))
+	}
+	pkg.MarkComplete()
+	return pkg
+}()
+
 type generatedSourceImporter struct{}
 
 func (generatedSourceImporter) Import(importPath string) (*types.Package, error) {
@@ -223,6 +248,7 @@ func (generatedSourceImporter) Import(importPath string) (*types.Package, error)
 			types.NewField(token.NoPos, pkg, "Key", types.NewArray(types.Typ[types.Byte], config.KeyLen), false),
 			types.NewField(token.NoPos, pkg, "Channel", types.Typ[types.Uint8], false),
 			types.NewField(token.NoPos, pkg, "SpreadFactor", types.Typ[types.Uint8], false),
+			types.NewField(token.NoPos, pkg, "OnlineTimeout", generatedTimePackage.Scope().Lookup("Duration").Type(), false),
 		}
 		name := types.NewTypeName(token.NoPos, pkg, "Provisioning", nil)
 		types.NewNamed(name, types.NewStruct(fields, nil), nil)
@@ -231,6 +257,8 @@ func (generatedSourceImporter) Import(importPath string) (*types.Package, error)
 		name := types.NewTypeName(token.NoPos, pkg, "SpreadFactor", nil)
 		types.NewNamed(name, types.Typ[types.Uint8], nil)
 		pkg.Scope().Insert(name)
+	case "time":
+		return generatedTimePackage, nil
 	case "example.com/acme/board/fw":
 		anyType := types.NewInterfaceType(nil, nil)
 		anyType.Complete()
@@ -274,7 +302,7 @@ func TestRunGenImportsConfigPackage(t *testing.T) {
 }
 
 // TestRunGenNilConfig checks a nil config yields a Run call with only the
-// provisioning argument and no spurious config import.
+// provisioning argument and omits the optional default online timeout.
 func TestRunGenNilConfig(t *testing.T) {
 	inst := sampleInstance()
 	inst.Config = nil
@@ -289,6 +317,9 @@ func TestRunGenNilConfig(t *testing.T) {
 	}
 	if !strings.Contains(out, "devicefw.Run(node.Provisioning{") {
 		t.Errorf("expected single-argument Run call:\n%s", out)
+	}
+	if strings.Contains(out, "OnlineTimeout") {
+		t.Errorf("generated default provisioning should omit OnlineTimeout:\n%s", out)
 	}
 }
 

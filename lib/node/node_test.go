@@ -101,9 +101,17 @@ func decodeResponse(t *testing.T, packet []byte) (src [4]byte, typ, flags byte, 
 }
 
 func newTestNode(t *testing.T, dev Device) (*Node, *fakeRadio) {
+	return newTestNodeWithOnlineTimeout(t, dev, 0)
+}
+
+func newTestNodeWithOnlineTimeout(t *testing.T, dev Device, onlineTimeout time.Duration) (*Node, *fakeRadio) {
 	t.Helper()
 	radio := &fakeRadio{}
-	n, err := New(radio, nodeSelf, testKey, dev)
+	n, err := New(radio, Provisioning{
+		Address:       nodeSelf,
+		Key:           testKey,
+		OnlineTimeout: onlineTimeout,
+	}, dev)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -165,7 +173,7 @@ func TestSetAcksBeforeWriteAndEchoesFlags(t *testing.T) {
 	events := make([]string, 0, 2)
 	dev := &fakeDevice{events: &events}
 	radio := &fakeRadio{events: &events}
-	n, err := New(radio, nodeSelf, testKey, dev)
+	n, err := New(radio, Provisioning{Address: nodeSelf, Key: testKey}, dev)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -208,7 +216,7 @@ func TestSetWritesAfterAckSendFailure(t *testing.T) {
 	events := make([]string, 0, 2)
 	dev := &fakeDevice{events: &events}
 	radio := &fakeRadio{events: &events, sendErr: errors.New("radio unavailable")}
-	n, err := New(radio, nodeSelf, testKey, dev)
+	n, err := New(radio, Provisioning{Address: nodeSelf, Key: testKey}, dev)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -338,20 +346,62 @@ func TestPollWithStatusOnlineTimeoutAndRefresh(t *testing.T) {
 		t.Fatalf("refreshed status = %v/%v/%v, want true/true/false", online, led, changed)
 	}
 
-	online, led, changed = n.statusAt(8 * time.Second)
+	online, led, changed = n.statusAt(13 * time.Second)
 	if !online || !led || changed {
 		t.Fatalf("status before refreshed deadline = %v/%v/%v, want true/true/false", online, led, changed)
 	}
 
-	online, led, changed = n.statusAt(9 * time.Second)
+	online, led, changed = n.statusAt(14 * time.Second)
 	if online || !led || !changed {
 		t.Fatalf("status at refreshed deadline = %v/%v/%v, want false/true/true", online, led, changed)
 	}
 
-	n.receivedAt(10 * time.Second)
-	online, led, changed = n.statusAt(10 * time.Second)
+	n.receivedAt(15 * time.Second)
+	online, led, changed = n.statusAt(15 * time.Second)
 	if !online || !led || !changed {
 		t.Fatalf("recovered status = %v/%v/%v, want true/true/true", online, led, changed)
+	}
+}
+
+func TestPollWithStatusConfiguredOnlineTimeout(t *testing.T) {
+	n, _ := newTestNodeWithOnlineTimeout(t, &fakeDevice{}, 3*time.Second)
+	n.receivedAt(0)
+
+	online, _, _ := n.statusAt(3*time.Second - time.Nanosecond)
+	if !online {
+		t.Fatal("node went offline before its configured timeout")
+	}
+	online, _, _ = n.statusAt(3 * time.Second)
+	if online {
+		t.Fatal("node remained online at its configured timeout")
+	}
+}
+
+func TestPollWithStatusDefaultOnlineTimeout(t *testing.T) {
+	if DefaultOnlineTimeout != 10*time.Second {
+		t.Fatalf("DefaultOnlineTimeout = %v, want 10s", DefaultOnlineTimeout)
+	}
+	n, _ := newTestNode(t, &fakeDevice{})
+	n.receivedAt(0)
+
+	online, _, _ := n.statusAt(DefaultOnlineTimeout - time.Nanosecond)
+	if !online {
+		t.Fatal("node went offline before the default timeout")
+	}
+	online, _, _ = n.statusAt(DefaultOnlineTimeout)
+	if online {
+		t.Fatal("node remained online at the default timeout")
+	}
+}
+
+func TestNewRejectsNegativeOnlineTimeout(t *testing.T) {
+	_, err := New(&fakeRadio{}, Provisioning{
+		Address:       nodeSelf,
+		Key:           testKey,
+		OnlineTimeout: -time.Second,
+	}, &fakeDevice{})
+	if err == nil {
+		t.Fatal("New accepted a negative online timeout")
 	}
 }
 

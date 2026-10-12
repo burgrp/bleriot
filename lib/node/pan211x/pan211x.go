@@ -44,5 +44,5 @@ func StartNode(prov node.Provisioning, pinSpiSck, pinSpiData, pinSpiCsn machine.
 		return nil, err
 	}
 
-	return node.New(radio, prov.Address, prov.Key, device)
+	return node.New(radio, prov, device)
 }

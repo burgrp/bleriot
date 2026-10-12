@@ -239,7 +239,7 @@ func setup(tb testing.TB, sc spreadConfig) *harness {
 	}
 
 	dev := newMemDevice()
-	nrt, err := pnode.New(nodeRadio, nodeAddr, nodeKey, dev)
+	nrt, err := pnode.New(nodeRadio, pnode.Provisioning{Address: nodeAddr, Key: nodeKey}, dev)
 	if err != nil {
 		tb.Fatalf("node runtime: %v", err)
 	}
