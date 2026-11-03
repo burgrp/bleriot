@@ -1,5 +1,5 @@
 // Package bridge connects the BleRiot polling engine to the external Registry.
-// One scheduler per RF channel performs serialized, complete node sweeps; SET
+// One scheduler per RF channel interleaves register reads between nodes; SET
 // acknowledgements are not reflected optimistically, so Registry values always
 // come from a subsequent GET.
 package bridge
@@ -54,8 +54,8 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithSweepInterval sets the target period between complete channel sweeps.
-// Overloaded sweeps slip naturally and never overlap.
+// WithSweepInterval sets the minimum start-to-start period of each node's full
+// register sweep. Ready nodes take turns one register at a time.
 func WithSweepInterval(interval time.Duration) Option {
 	return func(bridge *Bridge) {
 		if interval > 0 {
@@ -111,11 +111,33 @@ type polledNode struct {
 	mu        sync.Mutex
 	failures  int
 	offline   bool
+
+	nextRegister int
+	nextSweep    time.Time
+	sweepStarted time.Time
+	startedWith  uint64
+	lastPoll     time.Time
+	pollStats    PollStats
+}
+
+// PollStats describes actual polling cadence rather than transaction success.
+type PollStats struct {
+	LastStarted         int64
+	LastGapMicros       int64
+	MaxGapMicros        int64
+	Sweeps              uint64
+	LastCompleted       int64
+	LastDurationMicros  int64
+	ConsecutiveFailures int
 }
 
 // ServeNode registers n with its channel scheduler and returns immediately.
 // Registry providers start at nil; the first sweep follows immediately.
 func (bridge *Bridge) ServeNode(ctx context.Context, n *node.Node) {
+	if len(n.Registers) == 0 {
+		bridge.log.Warn("node has no registers to poll", "device", n.Name)
+		return
+	}
 	job := &polledNode{ctx: ctx, bridge: bridge, node: n, registers: make([]bridgedRegister, len(n.Registers))}
 	for index := range n.Registers {
 		register := &n.Registers[index]
@@ -175,26 +197,18 @@ func (poller *channelPoller) signal() {
 
 func (poller *channelPoller) run() {
 	for {
-		started := time.Now()
-		nodes, start := poller.round()
-		if len(nodes) == 0 {
+		job, wait := poller.next(time.Now())
+		if wait < 0 {
 			if poller.retireIfEmpty() {
 				return
 			}
 			continue
 		}
-		for offset := range nodes {
-			job := nodes[(start+offset)%len(nodes)]
-			if job.ctx.Err() == nil {
-				job.sweep()
-			}
-		}
-
-		remaining := poller.bridge.sweepInterval - time.Since(started)
-		if remaining <= 0 {
+		if job != nil {
+			job.pollNext()
 			continue
 		}
-		timer := time.NewTimer(remaining)
+		timer := time.NewTimer(wait)
 		select {
 		case <-poller.wake:
 			if !timer.Stop() {
@@ -205,9 +219,9 @@ func (poller *channelPoller) run() {
 	}
 }
 
-// round rotates the first node. Every snapshotted node completes before any is
-// repeated, including when the channel cannot meet the target interval.
-func (poller *channelPoller) round() ([]*polledNode, int) {
+// next gives each ready node one GET before visiting it again, including nodes
+// with fewer registers. Completed sweeps wait without delaying other nodes.
+func (poller *channelPoller) next(now time.Time) (*polledNode, time.Duration) {
 	poller.mu.Lock()
 	defer poller.mu.Unlock()
 	active := poller.nodes[:0]
@@ -217,13 +231,23 @@ func (poller *channelPoller) round() ([]*polledNode, int) {
 		}
 	}
 	poller.nodes = active
-	nodes := append([]*polledNode(nil), poller.nodes...)
-	if len(nodes) == 0 {
-		return nodes, 0
+	if len(poller.nodes) == 0 {
+		return nil, -1
 	}
-	start := poller.cursor % len(nodes)
-	poller.cursor = start + 1
-	return nodes, start
+	var wait time.Duration
+	for offset := range poller.nodes {
+		index := (poller.cursor + offset) % len(poller.nodes)
+		job := poller.nodes[index]
+		remaining := job.nextSweep.Sub(now)
+		if remaining <= 0 {
+			poller.cursor = index + 1
+			return job, 0
+		}
+		if wait == 0 || remaining < wait {
+			wait = remaining
+		}
+	}
+	return nil, wait
 }
 
 func (poller *channelPoller) retireIfEmpty() bool {
@@ -238,17 +262,27 @@ func (poller *channelPoller) retireIfEmpty() bool {
 	return retired
 }
 
-func (job *polledNode) sweep() {
-	startedWith := job.successCount()
-	for index := range job.registers {
-		if job.ctx.Err() != nil {
-			return
-		}
-		bridged := &job.registers[index]
-		update, err := job.bridge.tx.Get(job.ctx, job.node.Address, bridged.register.ID)
-		if err != nil {
-			continue
-		}
+func (job *polledNode) pollNext() {
+	if job.ctx.Err() != nil {
+		return
+	}
+	started := time.Now()
+	if job.nextRegister == 0 {
+		job.sweepStarted = started
+		job.startedWith = job.successCount()
+	}
+	job.mu.Lock()
+	if !job.lastPoll.IsZero() {
+		job.pollStats.LastGapMicros = started.Sub(job.lastPoll).Microseconds()
+		job.pollStats.MaxGapMicros = max(job.pollStats.MaxGapMicros, job.pollStats.LastGapMicros)
+	}
+	job.lastPoll = started
+	job.pollStats.LastStarted = started.Unix()
+	job.mu.Unlock()
+
+	bridged := &job.registers[job.nextRegister]
+	update, err := job.bridge.tx.Get(job.ctx, job.node.Address, bridged.register.ID)
+	if err == nil {
 		job.noteSuccess()
 		value, err := regValue(bridged.register, update)
 		if err != nil {
@@ -257,9 +291,48 @@ func (job *polledNode) sweep() {
 		}
 		deliverLatest(bridged.values, value)
 	}
-	if job.ctx.Err() == nil {
-		job.noteFailedSweep(startedWith)
+	if job.ctx.Err() != nil {
+		return
 	}
+	job.nextRegister++
+	if job.nextRegister == len(job.registers) {
+		job.nextRegister = 0
+		job.nextSweep = job.sweepStarted.Add(job.bridge.sweepInterval)
+		job.noteFailedSweep(job.startedWith)
+		job.mu.Lock()
+		job.pollStats.Sweeps++
+		job.pollStats.LastCompleted = time.Now().Unix()
+		job.pollStats.LastDurationMicros = time.Since(job.sweepStarted).Microseconds()
+		job.mu.Unlock()
+	}
+}
+
+// SnapshotPolling returns cadence and full-sweep failure statistics for a node.
+func (bridge *Bridge) SnapshotPolling(addr [node.AddrLen]byte) PollStats {
+	var found *polledNode
+	bridge.mu.Lock()
+	for _, poller := range bridge.channels {
+		poller.mu.Lock()
+		for _, job := range poller.nodes {
+			if job.node.Address == addr {
+				found = job
+				break
+			}
+		}
+		poller.mu.Unlock()
+		if found != nil {
+			break
+		}
+	}
+	bridge.mu.Unlock()
+	if found == nil {
+		return PollStats{}
+	}
+	found.mu.Lock()
+	defer found.mu.Unlock()
+	stats := found.pollStats
+	stats.ConsecutiveFailures = found.failures
+	return stats
 }
 
 func (job *polledNode) noteSuccess() {

@@ -16,7 +16,7 @@ import (
 
 const (
 	DefaultDiagnosticInterval = time.Second
-	diagnosticSchemaVersion   = 9
+	diagnosticSchemaVersion   = 10
 )
 
 // DiagnosticBatchRegistry is the Registry wire operation needed by the
@@ -31,8 +31,9 @@ type DiagNodeSource interface {
 }
 
 type DiagNode struct {
-	Name string
-	Addr [node.AddrLen]byte
+	Name    string
+	Addr    [node.AddrLen]byte
+	Polling func() PollStats
 }
 
 type DiagDongle struct {
@@ -227,6 +228,18 @@ func (d *Diagnostics) snapshot(nodes []DiagNode, dongles []DiagDongle, now time.
 	for _, diagNode := range nodes {
 		stats := d.src.SnapshotNode(diagNode.Addr)
 		addNodeValues(values, d.prefix, diagNode.Name, stats)
+		var polling PollStats
+		if diagNode.Polling != nil {
+			polling = diagNode.Polling()
+		}
+		base := d.prefix + ".node." + pathComponent(diagNode.Name) + "."
+		values[base+"poll.last.started"] = integer(polling.LastStarted)
+		values[base+"poll.gap.last.microseconds"] = integer(polling.LastGapMicros)
+		values[base+"poll.gap.max.microseconds"] = integer(polling.MaxGapMicros)
+		values[base+"sweep.completed"] = integer(polling.Sweeps)
+		values[base+"sweep.last.completed"] = integer(polling.LastCompleted)
+		values[base+"sweep.duration.last.microseconds"] = integer(polling.LastDurationMicros)
+		values[base+"sweep.failures.consecutive"] = integer(polling.ConsecutiveFailures)
 		fleetLatency.Count += stats.Latency.Count
 		fleetLatency.SumMicros += stats.Latency.SumMicros
 		for index, count := range stats.Latency.Buckets {

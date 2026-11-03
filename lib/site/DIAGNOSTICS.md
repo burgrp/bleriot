@@ -1,6 +1,6 @@
 # BleRiot Diagnostic Metrics
 
-This is the standalone reference for BleRiot diagnostics schema **9**. It
+This is the standalone reference for BleRiot diagnostics schema **10**. It
 describes every Registry path published by the hub, the accounting rules behind
 each value, and the corresponding Prometheus names. The implementation is in
 `site/bridge/diag.go`; source counters come from the transaction engine and the
@@ -27,7 +27,7 @@ trailing `.` from the configured prefix before appending its paths.
 Every diagnostic register has Registry type `int` and initial metadata:
 
 ```text
-type=int, readOnly=true, diagnostic=true, schema=9
+type=int, readOnly=true, diagnostic=true, schema=10
 ```
 
 Metadata is sent when a path is first published by this process. Later updates
@@ -101,17 +101,17 @@ Labels:     n1="bleriot", n2="node", n3="basement_fan",
 | Scope | Paths |
 |---|---:|
 | Hub | 19 |
-| Each configured node | 33 |
+| Each configured node | 40 |
 | Each configured RF channel | 18 |
 
 For $N$ nodes and $C$ channels, the complete catalog contains:
 
 $$
-19 + 33N + 18C
+19 + 40N + 18C
 $$
 
 The 19 hub paths are 3 schema/process, 6 publisher, 2 latency totals, and 8
-histogram buckets. Each node has 24 transaction paths and 9 packet paths. Each
+histogram buckets. Each node has 24 transaction paths, 9 packet paths and 7 polling paths. Each
 channel has 12 state/connection paths and 6 packet paths.
 
 ## Hub Catalog
@@ -122,7 +122,7 @@ Hub paths use `bleriot.hub.main.`.
 
 | Suffix | Kind | Meaning |
 |---|---|---|
-| `schema.version` | Gauge | Active diagnostic schema, exactly `9`. |
+| `schema.version` | Gauge | Active diagnostic schema, exactly `10`. |
 | `process.started` | Timestamp | Time this diagnostics publisher was constructed. |
 | `process.heartbeat` | Timestamp | Time of the latest in-memory catalog snapshot. |
 
@@ -308,7 +308,34 @@ $$
 Unknown plaintext sources are discarded without a node metric. A known
 register is not required for packet validity: a VALUE or ACK for an unknown
 register can still be valid and orphaned. The engine tracks unknown-register
-and raw receive totals internally, but schema 9 does not publish them.
+and raw receive totals internally, but schema 10 does not publish them.
+
+### Skutečná frekvence pollingu
+
+Od schématu 10 hub publikuje také následující hodnoty pro každý nod.
+Samotný vysoký podíl úspěšných transakcí neprokazuje, že nod navštěvuje
+dostatečně často. Scheduler předává sdílené RF frontě po jednom GETu
+od každého připraveného nodu; následující metriky zahrnují i čekání na
+ostatní transakce.
+
+| Suffix | Druh | Význam |
+|---|---|---|
+| `poll.last.started` | Čas | Unix sekundy posledního předání GETu enginu; `0` před prvním čtením. |
+| `poll.gap.last.microseconds` | Gauge | Odstup posledních dvou zahájených GETů daného nodu; `0` před druhým čtením. |
+| `poll.gap.max.microseconds` | Maximum od startu | Největší dosud pozorovaný odstup GETů; po restartu hubu se vynuluje. |
+| `sweep.completed` | Čítač | Dokončené úplné průchody všemi registry nodu, včetně neúspěšných. |
+| `sweep.last.completed` | Čas | Unix sekundy dokončení posledního úplného průchodu; `0` před prvním dokončením. |
+| `sweep.duration.last.microseconds` | Gauge | Doba posledního úplného průchodu od zahájení prvního GETu do konce posledního, včetně prokládání jinými nody a SETy. |
+| `sweep.failures.consecutive` | Gauge | Počet úplných průchodů bez úspěšného GETu či potvrzeného SETu; úspěšný kontakt ho vynuluje. |
+
+`poll.last.started` znamená zahájení volání enginu, nikoliv potvrzení
+přijetí nodem. Pro aktuální stáří potvrzené komunikace používej
+`time() - bleriot:node:cpg_main:packet:last:valid`; nejprve ověř,
+že timestamp není `0` a že je aktuální heartbeat hubu. Pro mezery ve
+čtení sleduj také `poll.gap.max.microseconds / 1e6` a pro úplnost čtení
+postup `sweep.completed`. Při přímém použití diagnostiky mimo CLI lze
+callback `DiagNode.Polling` vynechat; pollingové hodnoty pak zůstávají
+`0` a neprokazují běžící scheduler.
 
 ## Per-Channel Catalog
 

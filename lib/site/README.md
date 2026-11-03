@@ -88,7 +88,7 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--hub-address` | `FFFFFF01` | 4-byte hub source address (hex), used as SRC in outgoing packets. |
 | `--timeout` | `50ms` | Hub per-attempt response wait (protocol §9), separate from each node's provisioned online timeout. |
 | `--retries` | `3` | Retransmissions after the first attempt (§9). |
-| `--sweep-interval` | `1s` | Target period for a complete polling round on each RF channel. Slow rounds slip and never overlap. |
+| `--sweep-interval` | `1s` | Minimální odstup začátků úplných průchodů registry jednoho nodu; připravené nody se střídají po jednom GETu. |
 | `--ttl` | `30s` | Registry provider TTL. |
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
 | `--diag-interval` | `1s` | How often changed diagnostics are coalesced into one Registry batch. |
@@ -256,7 +256,7 @@ board runtime and passes both values to `Run`.
 | [`radio/mcpdongle`](radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |
 | [`mcp2210`](mcp2210) | Low-level MCP2210 USB-HID-to-SPI driver (open by `/dev/hidraw*` path or USB serial, chip/GPIO/SPI config, SPI transfers), self-healing against stale/desynced HID responses. |
 | [`node`](node) | Host-side node model: a register descriptor (wire ID → name/type/access/conversion) built from a device type, plus the provisioned identity (address + key). |
-| [`bridge`](bridge) | Connects the engine to the Registry: each register becomes a provider updated by complete per-channel polling sweeps, and writable consumer requests become `SET`. Decode failures publish `nil`; read-only writes are ignored. Generic — no per-register knowledge beyond the descriptor. |
+| [`bridge`](bridge) | Propojuje engine s registry, střídá připravené nody po jednom GETu a požadavky převádí na SET. Úplné průchody zůstávají samostatné pro každý nod. Chyby dekódování publikují `nil`, zápisy do read-only registrů se ignorují. |
 
 ---
 
@@ -285,16 +285,22 @@ and that guard-plus-headroom window.
 
 ### Polling scheduler and fairness
 
-The bridge starts one scheduler worker per channel. A round visits every node
-on that channel and polls all of each node's registers in descriptor order. The
-`--sweep-interval` is the target period for the complete round: a faster round
-waits out the remainder, while an overloaded round makes the next start slip
-and never overlaps itself.
+Bridge spouští jeden scheduler pro každý RF kanál. Připravené nody se
+střídají po jednom GETu, nikoliv po celých sadách registrů. Registry
+uvnitř nodu se stále čtou v pořadí descriptoru; nod s jedním registrem
+nemusí čekat na dokončení osmnácti registrů jiného nodu.
 
-The first node rotates each round. Every snapshotted node completes before any
-is repeated, preventing the same node from always leading an overloaded
-channel. Registry-originated `SET` transactions share the channel lane with
-polls.
+`--sweep-interval` nově určuje minimální odstup začátků úplných průchodů
+jednoho nodu. Pokud se průchod dokončí dříve, čeká pouze tento nod;
+ostatní připravené nody pokračují. Pokud trvá déle, další může začít
+hned při příští návštěvě. Počet registrů jiného nodu proto neprodlužuje
+jedno střídací kolo; prodlevu však stále ovlivňují transakční časy,
+retries a sdílené SETy. Nejde o garanci časového limitu při poruše RF.
+
+Přidání nebo zrušení nodu probudí scheduler; kanály zůstávají nezávislé.
+Selhání celého průchodu se nadále vyhodnocuje až po návštěvě všech
+registrů konkrétního nodu. Diagnostické schéma 10 ukazuje mezery GETů
+a úplné průchody odděleně od úspěšnosti transakcí.
 
 ### Registry publication and liveness
 
@@ -351,6 +357,6 @@ Hot paths update atomics without Registry I/O. Every `--diag-interval` (default
 containing changed values plus a distributed TTL-refresh cohort. A failed batch
 is retried on the next interval.
 
-See [BleRiot Diagnostic Metrics](DIAGNOSTICS.md) for the complete schema 9 path
+See [BleRiot Diagnostic Metrics](DIAGNOSTICS.md) for the complete schema 10 path
 catalog, accounting identities and examples, latency formulas, escaping,
 cardinality, Prometheus queries, and restart semantics.

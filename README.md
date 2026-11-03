@@ -123,6 +123,5 @@ seconds without a packet.
   transactions, reliability, register model, and identity.
 - [Host library](lib/site/README.md): inventory, commands, polling scheduler,
   Registry behavior, USB access, and diagnostics.
-- [Diagnostic metrics](lib/site/DIAGNOSTICS.md): schema 9 catalog, accounting
+- [Diagnostic metrics](lib/site/DIAGNOSTICS.md): schema 10 catalog, accounting
   rules, and Prometheus examples.
-

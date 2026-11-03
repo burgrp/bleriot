@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/burgrp/bleriot/lib/site/engine"
@@ -303,7 +304,7 @@ func TestBridgeFirstSweepDoesNotLeavePendingWake(t *testing.T) {
 	}
 }
 
-func TestBridgeChannelSweepsAreSerializedCompleteAndRotating(t *testing.T) {
+func TestBridgeChannelReadsAreSerializedAndInterleaved(t *testing.T) {
 	tx := newFakeTx()
 	registry := newFakeRegistry()
 	bridge := newTestBridge(tx, registry, 20*time.Millisecond, 3)
@@ -320,13 +321,13 @@ func TestBridgeChannelSweepsAreSerializedCompleteAndRotating(t *testing.T) {
 	}
 	answer(first, 1)
 	second := nextGet(t, tx)
-	if second.addr != firstAddr || second.reg != testRegB {
-		t.Fatalf("first sweep incomplete: addr=%v reg=%#x", second.addr, second.reg)
+	if second.addr != secondAddr || second.reg != testRegA {
+		t.Fatalf("new node did not get its turn: addr=%v reg=%#x", second.addr, second.reg)
 	}
 	answer(second, 2)
 	third := nextGet(t, tx)
-	if third.addr != secondAddr || third.reg != testRegA {
-		t.Fatalf("round did not rotate: addr=%v reg=%#x", third.addr, third.reg)
+	if third.addr != firstAddr || third.reg != testRegB {
+		t.Fatalf("first node did not resume its sweep: addr=%v reg=%#x", third.addr, third.reg)
 	}
 	answer(third, 3)
 	fourth := nextGet(t, tx)
@@ -339,6 +340,154 @@ func TestBridgeChannelSweepsAreSerializedCompleteAndRotating(t *testing.T) {
 		t.Fatalf("node repeated before complete round: addr=%v reg=%#x", fifth.addr, fifth.reg)
 	}
 	answer(fifth, 5)
+}
+
+func TestPollingBoundsQuietNodeGapsRegardlessOfRegisterCounts(t *testing.T) {
+	tx := newFakeTx()
+	bridge := newTestBridge(tx, newFakeRegistry(), time.Nanosecond, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	poller := &channelPoller{bridge: bridge, channel: testChannel, wake: make(chan struct{}, 1)}
+	bridge.channels[testChannel] = poller
+	for index, count := range []int{1, 4, 18} {
+		var registers []node.Register
+		for tag := 1; tag <= count; tag++ {
+			registers = append(registers, floatRegister(uint16(tag), fmt.Sprintf("r%d", tag)))
+		}
+		n := testNode(t, fmt.Sprintf("node%d", index), [4]byte{byte(index + 1)}, registers...)
+		job := &polledNode{ctx: ctx, bridge: bridge, node: n, registers: make([]bridgedRegister, count)}
+		for register := range n.Registers {
+			job.registers[register] = bridgedRegister{register: &n.Registers[register], values: make(chan any, 1)}
+		}
+		poller.nodes = append(poller.nodes, job)
+	}
+	poller.watch(poller.nodes[0])
+	go poller.run()
+	counts := []int{1, 4, 18}
+	for visit := 0; visit < 108; visit++ {
+		call := nextGet(t, tx)
+		index := visit % len(counts)
+		if call.addr != ([4]byte{byte(index + 1)}) {
+			t.Fatalf("GET %d addressed %v: quiet node skipped", visit, call.addr)
+		}
+		wantTag := uint16((visit/len(counts))%counts[index] + 1)
+		if call.reg != wantTag {
+			t.Fatalf("GET %d tag %d, want %d", visit, call.reg, wantTag)
+		}
+		answer(call, 1234)
+	}
+	// Receiving the next call ensures the preceding sweep's metrics are complete.
+	nextGet(t, tx)
+	for index, count := range counts {
+		stats := bridge.SnapshotPolling([4]byte{byte(index + 1)})
+		if stats.Sweeps != uint64(36/count) || stats.LastStarted == 0 || stats.LastCompleted == 0 {
+			t.Fatalf("node %d polling stats = %+v", index, stats)
+		}
+		if stats.MaxGapMicros < stats.LastGapMicros || stats.ConsecutiveFailures != 0 {
+			t.Fatalf("node %d invalid gap/failure stats = %+v", index, stats)
+		}
+	}
+	if stats := bridge.SnapshotPolling([4]byte{99}); stats != (PollStats{}) {
+		t.Fatalf("unknown node stats = %+v", stats)
+	}
+}
+
+func TestCompletedSweepWaitDoesNotBlockAnotherReadyNode(t *testing.T) {
+	ctx := context.Background()
+	ready := &polledNode{ctx: ctx}
+	waiting := &polledNode{ctx: ctx, nextSweep: time.Now().Add(time.Hour)}
+	poller := &channelPoller{nodes: []*polledNode{waiting, ready}}
+	job, wait := poller.next(time.Now())
+	if job != ready || wait != 0 {
+		t.Fatalf("selected %p/%v, want ready node %p", job, wait, ready)
+	}
+	ready.nextSweep = time.Now().Add(time.Minute)
+	job, wait = poller.next(time.Now())
+	if job != nil || wait <= 0 || wait > time.Minute {
+		t.Fatalf("pending sweep selected %p/%v", job, wait)
+	}
+}
+
+type busyChannel struct {
+	gate chan struct{}
+	mu   sync.Mutex
+	gets map[[4]byte][]time.Time
+	sets int
+}
+
+func (channel *busyChannel) transact(ctx context.Context, addr [4]byte, get bool) error {
+	select {
+	case channel.gate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-channel.gate }()
+	timer := time.NewTimer(20 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	channel.mu.Lock()
+	if get {
+		channel.gets[addr] = append(channel.gets[addr], time.Now())
+	} else {
+		channel.sets++
+	}
+	channel.mu.Unlock()
+	return nil
+}
+
+func (channel *busyChannel) Get(ctx context.Context, addr [4]byte, _ uint16) (engine.Update, error) {
+	err := channel.transact(ctx, addr, true)
+	return engine.Update{Value: 1}, err
+}
+func (channel *busyChannel) Set(ctx context.Context, addr [4]byte, _ uint16, _ int32) error {
+	return channel.transact(ctx, addr, false)
+}
+func (channel *busyChannel) SetNull(ctx context.Context, addr [4]byte, _ uint16) error {
+	return channel.transact(ctx, addr, false)
+}
+
+func TestQuietNodeCadenceUnderContinuousSetTraffic(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		channel := &busyChannel{gate: make(chan struct{}, 1), gets: make(map[[4]byte][]time.Time)}
+		bridge := newTestBridge(channel, newFakeRegistry(), time.Second, 3)
+		for index, count := range []int{1, 4, 18} {
+			var registers []node.Register
+			for tag := 1; tag <= count; tag++ {
+				registers = append(registers, floatRegister(uint16(tag), fmt.Sprintf("r%d", tag)))
+			}
+			bridge.ServeNode(ctx, testNode(t, fmt.Sprintf("node%d", index), [4]byte{byte(index + 1)}, registers...))
+		}
+		for range 4 {
+			go func() {
+				for ctx.Err() == nil {
+					_ = channel.Set(ctx, nodeAddr, testRegA, 0)
+				}
+			}()
+		}
+		time.Sleep(20 * time.Second)
+		cancel()
+		synctest.Wait()
+		channel.mu.Lock()
+		defer channel.mu.Unlock()
+		if channel.sets < 100 {
+			t.Fatalf("insufficient competing SET traffic: %d", channel.sets)
+		}
+		for addr, visits := range channel.gets {
+			if len(visits) < 15 {
+				t.Fatalf("node %v polled only %d times", addr, len(visits))
+			}
+			for index := 1; index < len(visits); index++ {
+				if gap := visits[index].Sub(visits[index-1]); gap > 1500*time.Millisecond {
+					t.Fatalf("node %v communication gap %v exceeds 1.5s under SET load", addr, gap)
+				}
+			}
+		}
+	})
 }
 
 func TestBridgeCancelFirstNodeDoesNotStopSharedChannel(t *testing.T) {

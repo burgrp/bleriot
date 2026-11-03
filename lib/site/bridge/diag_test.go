@@ -71,8 +71,8 @@ type fakeSnap struct{ stats engine.NodeStats }
 func (source *fakeSnap) SnapshotNode([4]byte) engine.NodeStats { return source.stats }
 
 func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
-	if diagnosticSchemaVersion != 9 {
-		t.Fatalf("diagnostic schema = %d, want 9", diagnosticSchemaVersion)
+	if diagnosticSchemaVersion != 10 {
+		t.Fatalf("diagnostic schema = %d, want 10", diagnosticSchemaVersion)
 	}
 	source := &fakeSnap{}
 	get := &source.stats.Transactions[engine.TransactionGet]
@@ -95,7 +95,12 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	diagnostics.Serve(ctx,
-		[]DiagNode{{Name: "basement.fan", Addr: [4]byte{1, 2, 3, 4}}},
+		[]DiagNode{{Name: "basement.fan", Addr: [4]byte{1, 2, 3, 4}, Polling: func() PollStats {
+			return PollStats{
+				LastStarted: 1700000002, LastGapMicros: 123000, MaxGapMicros: 456000,
+				Sweeps: 3, LastCompleted: 1700000001, LastDurationMicros: 789000, ConsecutiveFailures: 1,
+			}
+		}}},
 		[]DiagDongle{{Name: "far", Stats: func() radio.DongleStats {
 			return radio.DongleStats{State: radio.DongleConnected, OpenAttempts: 3, TxErrors: 1}
 		}}},
@@ -103,7 +108,7 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 
 	batch := registry.waitBatch(t)
 	wants := map[string]any{
-		"diag.hub.main.schema.version":                                        9,
+		"diag.hub.main.schema.version":                                        10,
 		"diag.hub.main.latency.success.bucket.le_plus_Inf":                    uint64(8),
 		"diag.node.basement_fan.transaction.get.outcome.success_first":        uint64(7),
 		"diag.node.basement_fan.transaction.get.outcome.timeout":              uint64(2),
@@ -115,6 +120,13 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 		"diag.node.basement_fan.packet.value.null":                            uint64(1),
 		"diag.node.basement_fan.packet.ack.matched":                           uint64(1),
 		"diag.node.basement_fan.packet.last.received":                         int64(1700000000),
+		"diag.node.basement_fan.poll.last.started":                            int64(1700000002),
+		"diag.node.basement_fan.poll.gap.last.microseconds":                   int64(123000),
+		"diag.node.basement_fan.poll.gap.max.microseconds":                    int64(456000),
+		"diag.node.basement_fan.sweep.completed":                              uint64(3),
+		"diag.node.basement_fan.sweep.last.completed":                         int64(1700000001),
+		"diag.node.basement_fan.sweep.duration.last.microseconds":             int64(789000),
+		"diag.node.basement_fan.sweep.failures.consecutive":                   1,
 		"diag.channel.far.connection.open.attempt":                            uint64(3),
 		"diag.channel.far.packet.tx.error":                                    uint64(1),
 	}
@@ -127,7 +139,7 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 		if update.Value != want {
 			t.Errorf("%s = %v (%T), want %v (%T)", name, update.Value, update.Value, want, want)
 		}
-		if update.Metadata["schema"] != 9 || update.TTL != 30*time.Second {
+		if update.Metadata["schema"] != 10 || update.TTL != 30*time.Second {
 			t.Errorf("%s metadata/TTL = %v/%v", name, update.Metadata, update.TTL)
 		}
 	}
@@ -143,8 +155,8 @@ func TestDiagnosticsPublishesPollingSchema(t *testing.T) {
 			}
 		}
 	}
-	if nodeRegisters != 33 {
-		t.Errorf("node register count = %d, want 33", nodeRegisters)
+	if nodeRegisters != 40 {
+		t.Errorf("node register count = %d, want 40", nodeRegisters)
 	}
 }
 
@@ -256,7 +268,7 @@ func TestDiagnosticsRetriesFailedRefreshCohort(t *testing.T) {
 
 func TestDiagMetaMarksRegisterReadOnly(t *testing.T) {
 	metadata := diagMeta("int")
-	if metadata["type"] != "int" || metadata["diagnostic"] != true || metadata["readOnly"] != true || metadata["schema"] != 9 {
+	if metadata["type"] != "int" || metadata["diagnostic"] != true || metadata["readOnly"] != true || metadata["schema"] != 10 {
 		t.Fatalf("metadata = %v", metadata)
 	}
 }

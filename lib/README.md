@@ -246,16 +246,16 @@ register, and type.
 
 ## 10. Host Polling, Liveness, and Registry Publication
 
-The host bridge runs one scheduler worker per RF channel. Each round polls every
-register of every node assigned to that channel, serially through the channel's
-transaction lane. The configurable sweep interval is a target period for a
-complete channel round and defaults to one second. If a round takes longer, the
-next starts immediately; rounds never overlap.
+Hub používá jeden scheduler na RF kanál a připravené nody střídá po
+jednom registru. Pořadí registrů uvnitř nodu zachovává descriptor.
+Nod se nevrací do fronty až po celé sadě registrů ostatních zařízení;
+každý připravený nod dostane jednu příležitost před dalším GETem téhož nodu.
 
-Each round rotates which node starts first. Every node in the round's snapshot
-completes before any node is repeated, so an overloaded channel does not always
-favor the same first node. Registers within a node are polled in descriptor
-order. Registry-originated `SET` calls use the same channel lane.
+Konfigurovatelný sweep interval, výchozí jedna sekunda, určuje minimální
+odstup začátků úplných průchodů jednoho nodu. Při dřívějším dokončení
+čeká jen příslušný nod. Při pomalejším provozu pokračují připravené nody
+bez dodatečné pauzy. Registry-originované SETy sdílejí tutéž transakční
+frontu; tato změna plánování nemění RF protokol ani firmware nodů.
 
 Each Registry provider starts with `nil`. A successful `GET` is converted and
 published; protocol `NULL` bypasses conversion and publishes `nil`. A decode

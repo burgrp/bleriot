@@ -63,7 +63,7 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 	f.StringVar(&o.hubAddress, "hub-address", "FFFFFF01", "hub RF address (8 hex digits)")
 	f.DurationVar(&o.timeout, "timeout", 50*time.Millisecond, "per-attempt response wait")
 	f.IntVar(&o.retries, "retries", engine.DefaultRetries, "retransmissions after the first attempt")
-	f.DurationVar(&o.sweepInterval, "sweep-interval", bridge.DefaultSweepInterval, "target interval between complete channel sweeps")
+	f.DurationVar(&o.sweepInterval, "sweep-interval", bridge.DefaultSweepInterval, "minimum start-to-start interval of each node's full sweep")
 	f.DurationVar(&o.ttl, "ttl", 30*time.Second, "Registry provider TTL for each register")
 	f.StringVar(&o.diagnostics, "diagnostics", "", "publish hub-synthesised diagnostic registers under this "+
 		"registry namespace prefix (e.g. \"diag\"); empty disables them")
@@ -127,7 +127,10 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 		diag := bridge.NewDiagnostics(eng, diagRegistry, o.diagnostics, o.diagInterval, o.ttl, bridge.WithDiagLogger(logger))
 		diagNodes := make([]bridge.DiagNode, len(nodes))
 		for i, n := range nodes {
-			diagNodes[i] = bridge.DiagNode{Name: n.Name, Addr: n.Address}
+			diagNodes[i] = bridge.DiagNode{
+				Name: n.Name, Addr: n.Address,
+				Polling: func() bridge.PollStats { return br.SnapshotPolling(n.Address) },
+			}
 		}
 		diag.Serve(ctx, diagNodes, dongles)
 	}
