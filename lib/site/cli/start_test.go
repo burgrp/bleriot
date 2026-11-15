@@ -6,6 +6,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +121,86 @@ func TestBuildNode(t *testing.T) {
 	}
 	if inst.Type.Registers[0].Name != "green" {
 		t.Fatalf("device type register mutated to %q", inst.Type.Registers[0].Name)
+	}
+}
+
+func TestBuildNodesFromEnabledInventory(t *testing.T) {
+	enabled := sampleInstance()
+	disabled := sampleInstance()
+	disabled.Name = "disabled"
+	disabled.Address = [config.AddrLen]byte{0x99}
+	disabled.Disabled = true
+	other := sampleInstance()
+	other.Name = "other"
+	other.Address = [config.AddrLen]byte{0x98}
+	eng := engine.New(engine.Options{Timeout: time.Second})
+
+	nodes, err := buildNodes(inventory.Inventory{disabled, enabled, other}.Enabled(), eng)
+	if err != nil {
+		t.Fatalf("buildNodes: %v", err)
+	}
+	var names []string
+	for _, n := range nodes {
+		names = append(names, n.Name)
+	}
+	if !slices.Equal(names, []string{enabled.Name, other.Name}) {
+		t.Fatalf("node names = %v, want [%s %s]", names, enabled.Name, other.Name)
+	}
+	if _, err := eng.Get(context.Background(), disabled.Address, 1); !errors.Is(err, engine.ErrUnknownNode) {
+		t.Fatalf("disabled node GET error = %v, want unknown node", err)
+	}
+	if err := eng.Set(context.Background(), disabled.Address, 1, 1); !errors.Is(err, engine.ErrUnknownNode) {
+		t.Fatalf("disabled node SET error = %v, want unknown node", err)
+	}
+	if _, err := eng.Get(context.Background(), enabled.Address, 1); !errors.Is(err, engine.ErrNoRadio) {
+		t.Fatalf("enabled node GET error = %v, want registered node without radio", err)
+	}
+}
+
+func TestRunHubDisabledChannels(t *testing.T) {
+	for _, allDisabled := range []bool{false, true} {
+		name := "mixed"
+		if allDisabled {
+			name = "all disabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			withFakeDongleType(t, nil)
+			var guards []config.SpreadFactor
+			dongleTypes[0].guard = func(sf config.SpreadFactor) time.Duration {
+				guards = append(guards, sf)
+				return time.Millisecond
+			}
+			enabled := sampleInstance()
+			enabled.Disabled = allDisabled
+			disabled := sampleInstance()
+			disabled.Name = "disabled"
+			disabled.Address = [config.AddrLen]byte{0x99}
+			disabled.Channel = inventory.Channel{Name: "disabled", Number: 38}
+			disabled.Disabled = true
+			inv := inventory.Inventory{disabled, enabled}
+			server := httptest.NewServer(http.NotFoundHandler())
+			defer server.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			err := runHub(ctx, inv, hubOptions{
+				registry: server.URL, hubAddress: "FFFFFF01",
+				timeout: time.Second, ttl: 30 * time.Second,
+			}, discardLogger())
+			if err != nil {
+				t.Fatalf("runHub: %v", err)
+			}
+			var want []config.SpreadFactor
+			if !allDisabled {
+				want = []config.SpreadFactor{enabled.Channel.SpreadFactor}
+			}
+			if !slices.Equal(guards, want) {
+				t.Fatalf("radio channel spreading factors = %v, want %v", guards, want)
+			}
+			if len(inv) != 2 || inv[0].Name != disabled.Name || inv[1].Name != enabled.Name {
+				t.Fatal("runHub modified the original inventory")
+			}
+		})
 	}
 }
 

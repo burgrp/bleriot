@@ -77,6 +77,26 @@ func TestResolveFirmwareInstance(t *testing.T) {
 	}
 }
 
+func TestResolveFirmwareInstanceDisabled(t *testing.T) {
+	disabled := sampleFirmwareInstance()
+	disabled.Disabled = true
+	enabled := sampleFirmwareInstance()
+	enabled.Name = "other"
+	enabled.Address = [config.AddrLen]byte{0x99}
+	for _, c := range []struct {
+		name string
+		inv  inventory.Inventory
+	}{
+		{"", inventory.Inventory{disabled}},
+		{disabled.Name, inventory.Inventory{enabled, disabled}},
+	} {
+		got, err := resolveFirmwareInstance(c.inv, c.name)
+		if err != nil || got.Name != disabled.Name || !got.Disabled {
+			t.Fatalf("disabled firmware instance = %q, %v; want %q", got.Name, err, disabled.Name)
+		}
+	}
+}
+
 func sampleFirmwareInstance() inventory.Instance {
 	inst := sampleInstance()
 	inst.Type.Firmware = firmware.Manifest{

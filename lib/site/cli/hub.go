@@ -51,8 +51,8 @@ func newHubCmd(inv inventory.Inventory) *cobra.Command {
 		Short: "Bridge the inventory's RF nodes to the Registry",
 		Long: "Run the BleRiot host hub: discover the connected USB radio dongles " +
 			"(each an MCP2210 USB-to-SPI bridge driving a single PAN211x radio), assign " +
-			"them automatically to the RF channels the inventory uses, and bridge every " +
-			"node in the inventory to the external Registry service.",
+			"them automatically to the RF channels enabled inventory nodes use, and bridge " +
+			"those nodes to the external Registry service. Disabled nodes remain available to node commands.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runHub(cmd.Context(), inv, o, slog.Default())
@@ -78,6 +78,7 @@ func runHub(ctx context.Context, inv inventory.Inventory, o hubOptions, logger *
 	if err := inv.Validate(); err != nil {
 		return fmt.Errorf("inventory: %w", err)
 	}
+	inv = inv.Enabled()
 	hubAddr, err := node.ParseAddress(o.hubAddress)
 	if err != nil {
 		return fmt.Errorf("hub-address: %w", err)

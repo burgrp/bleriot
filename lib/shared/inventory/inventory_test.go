@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +82,65 @@ func TestInventoryValidate_OK(t *testing.T) {
 	}
 	if err := inv.Validate(); err != nil {
 		t.Fatalf("expected valid, got %v", err)
+	}
+}
+
+func TestInventoryEnabled(t *testing.T) {
+	cases := []struct {
+		name string
+		inv  Inventory
+		want []string
+	}{
+		{"nil", nil, nil},
+		{"empty", Inventory{}, nil},
+		{"default enabled", Inventory{{Name: "first"}}, []string{"first"}},
+		{"explicit enabled", Inventory{{Name: "first", Disabled: false}}, []string{"first"}},
+		{"all disabled", Inventory{{Name: "first", Disabled: true}}, nil},
+		{"mixed", Inventory{
+			{Name: "first", Disabled: true},
+			{Name: "second"},
+			{Name: "third", Disabled: true},
+			{Name: "fourth", Disabled: false},
+			{Name: "fifth", Disabled: true},
+		}, []string{"second", "fourth"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			original := slices.Clone(c.inv)
+			enabled := c.inv.Enabled()
+			var names []string
+			for _, inst := range enabled {
+				if inst.Disabled {
+					t.Fatalf("disabled instance %q retained", inst.Name)
+				}
+				names = append(names, inst.Name)
+			}
+			if !slices.Equal(names, c.want) {
+				t.Fatalf("enabled names = %v, want %v", names, c.want)
+			}
+			if len(enabled) > 0 {
+				enabled[0].Name = "changed"
+			}
+			if !slices.EqualFunc(c.inv, original, func(a, b Instance) bool {
+				return a.Name == b.Name && a.Disabled == b.Disabled
+			}) {
+				t.Fatal("Enabled modified the original inventory")
+			}
+		})
+	}
+}
+
+func TestInventoryValidateDisabledInstance(t *testing.T) {
+	inv := Inventory{{
+		Name: "kitchen", Disabled: true, Address: [config.AddrLen]byte{1},
+		Channel: Channel{Name: "far", Number: 37}, Type: bobType(),
+	}}
+	if err := inv.Validate(); err != nil {
+		t.Fatalf("valid disabled instance: %v", err)
+	}
+	inv[0].Address = [config.AddrLen]byte{}
+	if err := inv.Validate(); err == nil {
+		t.Fatal("disabled instance bypassed validation")
 	}
 }
 

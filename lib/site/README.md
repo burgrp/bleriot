@@ -50,6 +50,22 @@ A complete, runnable site binary lives in
 [`../../example/bob/cmd/dev`](../../example/bob/cmd/dev). The firmware itself is
 the importable `bob` package.
 
+### Vyřazení zařízení z hubu
+
+Na úrovni `inventory.Instance`, vedle `Name`, lze nastavit jedinou vlastnost
+`Disabled: true`. Vynechaná vlastnost nebo `false` zachovává dosavadní chování.
+Hub takové zařízení neobsluhuje: neprovádí pro něj GET ani SET, neposkytuje
+jeho běžné ani diagnostické registry a nealokuje radio pro kanál, na kterém
+jsou pouze vyřazená zařízení. Ostatní zařízení na sdíleném kanálu zůstávají aktivní.
+
+Celý inventář se stále validuje, včetně vyřazených záznamů. Metoda
+`Inventory.Enabled()` vrací nový seznam povolených zařízení v původním pořadí;
+nemění inventář předaný ostatním příkazům. Výběr přes `node build --name`, generování,
+sestavení, flashování i ladění proto zůstávají dostupné také pro vyřazené zařízení.
+`Disabled` není zapečené do firmware a nezmění generovaný zdroj.
+Změna vyžaduje nové sestavení a restart hubu, nikoliv přeflashování nodu.
+Nejde o příkaz k fyzickému vypnutí zařízení ani o bezpečnostní blokaci jeho výstupů.
+
 ---
 
 ## Commands

@@ -101,6 +101,21 @@ func TestRunGenOutput(t *testing.T) {
 	}
 }
 
+func TestRunGenDisabledInstance(t *testing.T) {
+	inst := sampleInstance()
+	var enabled, disabled bytes.Buffer
+	if err := runGen(inventory.Inventory{inst}, "", &enabled); err != nil {
+		t.Fatalf("enabled runGen: %v", err)
+	}
+	inst.Disabled = true
+	if err := runGen(inventory.Inventory{inst}, "", &disabled); err != nil {
+		t.Fatalf("disabled runGen: %v", err)
+	}
+	if disabled.String() != enabled.String() {
+		t.Fatal("Disabled changed the generated firmware source")
+	}
+}
+
 func TestRunGenImportableFirmware(t *testing.T) {
 	inst := sampleInstance()
 	inst.Type.Firmware = firmware.Manifest{Package: "example.com/acme/board/fw"}

@@ -450,6 +450,7 @@ times.
 | Field         | Type             | Description                                                       |
 |---------------|------------------|-------------------------------------------------------------------|
 | name          | string           | Device name, unique within the inventory; scopes default register names |
+| disabled      | bool             | `Disabled: true` vyřadí zařízení z hubu; výchozí `false` jej ponechá aktivní |
 | address       | [4]byte          | Random, nonzero RF address; unique within the inventory (§3)      |
 | key           | [16]byte         | XTEA shared key (§5)                                              |
 | channel       | Channel          | RF channel (number + spread factor) the device uses (§2); declared once and shared across instances |
@@ -466,6 +467,12 @@ The host validates the inventory at startup: tags are unique and non-zero within
 each device type, instance names and nonzero addresses are unique, each channel
 uses a single spreading factor, and every resolved Registry name is non-empty,
 unambiguous, and unique.
+
+`Disabled` je nastavení hostitelského hubu, nikoliv firmware. Vyřazený záznam
+se stále validuje a zůstává dostupný pro příkazy `node`, ale hub pro něj
+nekomunikuje po RF ani neposkytuje běžné či diagnostické registry.
+Kanál obsahující pouze vyřazená zařízení nepoužívá radio. Podrobnosti jsou
+v [hostitelské dokumentaci](site/README.md#vyřazení-zařízení-z-hubu).
 
 ### 11.5 Node Identity
 
@@ -535,8 +542,8 @@ instance concept.
   runtime and flashes it over SWD. Add `--rtt` to attach after flashing and
   `--disassembly` to write a disassembly from the same build. (`node gen` emits
   the generated source to stdout for inspection.)
-3. **Run.** Run `hub`: the host builds every inventory device's register
-  descriptor and bridges its registers to the Registry.
+3. **Spuštění.** Příkaz `hub` sestaví popis registrů pouze povolených zařízení
+  inventáře a propojí jejich registry s Registry.
 
 Adding or updating a device is an edit to the inventory **source**, type-checked
 by the Go compiler — there are no JSON files to hand-edit and no descriptor pool
