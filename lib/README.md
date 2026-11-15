@@ -246,16 +246,17 @@ register, and type.
 
 ## 10. Host Polling, Liveness, and Registry Publication
 
-Hub používá jeden scheduler na RF kanál a připravené nody střídá po
-jednom registru. Pořadí registrů uvnitř nodu zachovává descriptor.
-Nod se nevrací do fronty až po celé sadě registrů ostatních zařízení;
-každý připravený nod dostane jednu příležitost před dalším GETem téhož nodu.
+The hub runs one scheduler per RF channel and interleaves ready nodes one
+register at a time. Registers within a node retain descriptor order. A node
+does not wait for every other device's full register sweep before being polled
+again; each ready node gets one turn before the next GET for the same node.
 
-Konfigurovatelný sweep interval, výchozí jedna sekunda, určuje minimální
-odstup začátků úplných průchodů jednoho nodu. Při dřívějším dokončení
-čeká jen příslušný nod. Při pomalejším provozu pokračují připravené nody
-bez dodatečné pauzy. Registry-originované SETy sdílejí tutéž transakční
-frontu; tato změna plánování nemění RF protokol ani firmware nodů.
+The configurable sweep interval defaults to one second and sets the minimum
+start-to-start interval between a node's full register sweeps. If a sweep
+finishes early, only that node waits. With slower polling, ready nodes continue
+without an additional pause. Registry-originated SETs share the same
+transaction queue; this scheduling policy changes neither the RF protocol nor
+node firmware.
 
 Each Registry provider starts with `nil`. A successful `GET` is converted and
 published; protocol `NULL` bypasses conversion and publishes `nil`. A decode
@@ -450,7 +451,7 @@ times.
 | Field         | Type             | Description                                                       |
 |---------------|------------------|-------------------------------------------------------------------|
 | name          | string           | Device name, unique within the inventory; scopes default register names |
-| disabled      | bool             | `Disabled: true` vyřadí zařízení z hubu; výchozí `false` jej ponechá aktivní |
+| disabled      | bool             | `Disabled: true` excludes the device from the hub; defaults to `false` (enabled) |
 | address       | [4]byte          | Random, nonzero RF address; unique within the inventory (§3)      |
 | key           | [16]byte         | XTEA shared key (§5)                                              |
 | channel       | Channel          | RF channel (number + spread factor) the device uses (§2); declared once and shared across instances |
@@ -468,11 +469,11 @@ each device type, instance names and nonzero addresses are unique, each channel
 uses a single spreading factor, and every resolved Registry name is non-empty,
 unambiguous, and unique.
 
-`Disabled` je nastavení hostitelského hubu, nikoliv firmware. Vyřazený záznam
-se stále validuje a zůstává dostupný pro příkazy `node`, ale hub pro něj
-nekomunikuje po RF ani neposkytuje běžné či diagnostické registry.
-Kanál obsahující pouze vyřazená zařízení nepoužívá radio. Podrobnosti jsou
-v [hostitelské dokumentaci](site/README.md#vyřazení-zařízení-z-hubu).
+`Disabled` is a host hub setting, not a firmware setting. Disabled entries are
+still validated and remain available to `node` commands, but the hub neither
+communicates with them over RF nor publishes their regular or diagnostic
+registers. A channel containing only disabled devices uses no radio. See the
+[host documentation](site/README.md#disabling-a-device-in-the-hub) for details.
 
 ### 11.5 Node Identity
 
@@ -542,8 +543,8 @@ instance concept.
   runtime and flashes it over SWD. Add `--rtt` to attach after flashing and
   `--disassembly` to write a disassembly from the same build. (`node gen` emits
   the generated source to stdout for inspection.)
-3. **Spuštění.** Příkaz `hub` sestaví popis registrů pouze povolených zařízení
-  inventáře a propojí jejich registry s Registry.
+3. **Run.** Run `hub`: the host builds register descriptors only for enabled
+  inventory devices and bridges their registers to the Registry.
 
 Adding or updating a device is an edit to the inventory **source**, type-checked
 by the Go compiler — there are no JSON files to hand-edit and no descriptor pool

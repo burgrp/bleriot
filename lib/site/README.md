@@ -50,21 +50,24 @@ A complete, runnable site binary lives in
 [`../../example/bob/cmd/dev`](../../example/bob/cmd/dev). The firmware itself is
 the importable `bob` package.
 
-### Vyřazení zařízení z hubu
+### Disabling a device in the hub
 
-Na úrovni `inventory.Instance`, vedle `Name`, lze nastavit jedinou vlastnost
-`Disabled: true`. Vynechaná vlastnost nebo `false` zachovává dosavadní chování.
-Hub takové zařízení neobsluhuje: neprovádí pro něj GET ani SET, neposkytuje
-jeho běžné ani diagnostické registry a nealokuje radio pro kanál, na kterém
-jsou pouze vyřazená zařízení. Ostatní zařízení na sdíleném kanálu zůstávají aktivní.
+Set the single property `Disabled: true` on `inventory.Instance`, alongside
+`Name`. Omitting it or setting it to `false` preserves existing behavior.
+The hub does not serve a disabled device: it issues no GET or SET for it,
+publishes none of its regular or diagnostic registers, and allocates no radio
+for a channel containing only disabled devices. Other devices sharing the
+channel remain active.
 
-Celý inventář se stále validuje, včetně vyřazených záznamů. Metoda
-`Inventory.Enabled()` vrací nový seznam povolených zařízení v původním pořadí;
-nemění inventář předaný ostatním příkazům. Výběr přes `node build --name`, generování,
-sestavení, flashování i ladění proto zůstávají dostupné také pro vyřazené zařízení.
-`Disabled` není zapečené do firmware a nezmění generovaný zdroj.
-Změna vyžaduje nové sestavení a restart hubu, nikoliv přeflashování nodu.
-Nejde o příkaz k fyzickému vypnutí zařízení ani o bezpečnostní blokaci jeho výstupů.
+The full inventory is still validated, including disabled entries.
+`Inventory.Enabled()` returns a new slice of enabled devices in their original
+order without modifying the inventory passed to other commands. Explicit
+selection with `node build --name`, generation, builds, flashing, and debugging
+therefore remain available for disabled devices.
+`Disabled` is not baked into firmware and does not change the generated source.
+Changing it requires rebuilding and restarting the hub, not reflashing the node.
+It is neither a physical power-off command nor a safety interlock for device
+outputs.
 
 ---
 
@@ -104,7 +107,7 @@ Runtime/deploy settings are command-line flags, not inventory data:
 | `--hub-address` | `FFFFFF01` | 4-byte hub source address (hex), used as SRC in outgoing packets. |
 | `--timeout` | `50ms` | Hub per-attempt response wait (protocol §9), separate from each node's provisioned online timeout. |
 | `--retries` | `3` | Retransmissions after the first attempt (§9). |
-| `--sweep-interval` | `1s` | Minimální odstup začátků úplných průchodů registry jednoho nodu; připravené nody se střídají po jednom GETu. |
+| `--sweep-interval` | `1s` | Minimum start-to-start interval between a node's full register sweeps; ready nodes take turns one GET at a time. |
 | `--ttl` | `30s` | Registry provider TTL. |
 | `--diagnostics` | — (off) | Publish hub-synthesised diagnostic registers under this Registry namespace prefix (e.g. `diag`). Empty disables them. See [Diagnostics](#diagnostics). |
 | `--diag-interval` | `1s` | How often changed diagnostics are coalesced into one Registry batch. |
@@ -272,7 +275,7 @@ board runtime and passes both values to `Run`.
 | [`radio/mcpdongle`](radio/mcpdongle) | The `Dongle` implementation over an MCP2210 + PAN211x: brings up the radio, runs the per-packet PAN211x register sequence over USB-HID, and drives the status LEDs. |
 | [`mcp2210`](mcp2210) | Low-level MCP2210 USB-HID-to-SPI driver (open by `/dev/hidraw*` path or USB serial, chip/GPIO/SPI config, SPI transfers), self-healing against stale/desynced HID responses. |
 | [`node`](node) | Host-side node model: a register descriptor (wire ID → name/type/access/conversion) built from a device type, plus the provisioned identity (address + key). |
-| [`bridge`](bridge) | Propojuje engine s registry, střídá připravené nody po jednom GETu a požadavky převádí na SET. Úplné průchody zůstávají samostatné pro každý nod. Chyby dekódování publikují `nil`, zápisy do read-only registrů se ignorují. |
+| [`bridge`](bridge) | Connects the engine to the Registry, interleaves ready nodes one GET at a time, and converts change requests into SETs. Full sweeps remain separate for each node. Decode errors publish `nil`; writes to read-only registers are ignored. |
 
 ---
 
@@ -301,22 +304,22 @@ and that guard-plus-headroom window.
 
 ### Polling scheduler and fairness
 
-Bridge spouští jeden scheduler pro každý RF kanál. Připravené nody se
-střídají po jednom GETu, nikoliv po celých sadách registrů. Registry
-uvnitř nodu se stále čtou v pořadí descriptoru; nod s jedním registrem
-nemusí čekat na dokončení osmnácti registrů jiného nodu.
+The bridge runs one scheduler per RF channel. Ready nodes take turns one GET
+at a time, rather than one full register sweep at a time. Registers within a
+node are still read in descriptor order; a node with one register need not
+wait for another node's eighteen-register sweep to finish.
 
-`--sweep-interval` nově určuje minimální odstup začátků úplných průchodů
-jednoho nodu. Pokud se průchod dokončí dříve, čeká pouze tento nod;
-ostatní připravené nody pokračují. Pokud trvá déle, další může začít
-hned při příští návštěvě. Počet registrů jiného nodu proto neprodlužuje
-jedno střídací kolo; prodlevu však stále ovlivňují transakční časy,
-retries a sdílené SETy. Nejde o garanci časového limitu při poruše RF.
+`--sweep-interval` sets the minimum start-to-start interval between a node's
+full sweeps. If a sweep finishes early, only that node waits while other ready
+nodes continue. If it takes longer, the next sweep can start on that node's
+next turn. Another node's register count therefore does not lengthen a single
+round of turns, though transaction times, retries, and shared SETs still affect
+delays. This is not a latency guarantee during RF failures.
 
-Přidání nebo zrušení nodu probudí scheduler; kanály zůstávají nezávislé.
-Selhání celého průchodu se nadále vyhodnocuje až po návštěvě všech
-registrů konkrétního nodu. Diagnostické schéma 10 ukazuje mezery GETů
-a úplné průchody odděleně od úspěšnosti transakcí.
+Adding or removing a node wakes the scheduler; channels remain independent.
+A full sweep is still assessed as failed only after all registers of that node
+have been visited. Diagnostic schema 10 reports GET gaps and full sweeps
+separately from transaction success rates.
 
 ### Registry publication and liveness
 

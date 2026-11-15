@@ -310,32 +310,31 @@ register is not required for packet validity: a VALUE or ACK for an unknown
 register can still be valid and orphaned. The engine tracks unknown-register
 and raw receive totals internally, but schema 10 does not publish them.
 
-### Skutečná frekvence pollingu
+### Actual polling cadence
 
-Od schématu 10 hub publikuje také následující hodnoty pro každý nod.
-Samotný vysoký podíl úspěšných transakcí neprokazuje, že nod navštěvuje
-dostatečně často. Scheduler předává sdílené RF frontě po jednom GETu
-od každého připraveného nodu; následující metriky zahrnují i čekání na
-ostatní transakce.
+Starting with schema 10, the hub also publishes the following values for each
+node. A high transaction success rate alone does not prove that the node is
+polled often enough. The scheduler submits one GET per ready node to the shared
+RF queue; these metrics also include time spent waiting for other transactions.
 
-| Suffix | Druh | Význam |
+| Suffix | Kind | Meaning |
 |---|---|---|
-| `poll.last.started` | Čas | Unix sekundy posledního předání GETu enginu; `0` před prvním čtením. |
-| `poll.gap.last.microseconds` | Gauge | Odstup posledních dvou zahájených GETů daného nodu; `0` před druhým čtením. |
-| `poll.gap.max.microseconds` | Maximum od startu | Největší dosud pozorovaný odstup GETů; po restartu hubu se vynuluje. |
-| `sweep.completed` | Čítač | Dokončené úplné průchody všemi registry nodu, včetně neúspěšných. |
-| `sweep.last.completed` | Čas | Unix sekundy dokončení posledního úplného průchodu; `0` před prvním dokončením. |
-| `sweep.duration.last.microseconds` | Gauge | Doba posledního úplného průchodu od zahájení prvního GETu do konce posledního, včetně prokládání jinými nody a SETy. |
-| `sweep.failures.consecutive` | Gauge | Počet úplných průchodů bez úspěšného GETu či potvrzeného SETu; úspěšný kontakt ho vynuluje. |
+| `poll.last.started` | Timestamp | Unix seconds when the most recent GET was submitted to the engine; `0` before the first read. |
+| `poll.gap.last.microseconds` | Gauge | Gap between the two most recent GET starts for this node; `0` before the second read. |
+| `poll.gap.max.microseconds` | Maximum since startup | Largest observed GET gap; resets when the hub restarts. |
+| `sweep.completed` | Counter | Completed full sweeps of all node registers, including failed sweeps. |
+| `sweep.last.completed` | Timestamp | Unix seconds when the most recent full sweep completed; `0` before the first completion. |
+| `sweep.duration.last.microseconds` | Gauge | Duration of the most recent full sweep, from its first GET start to its last GET completion, including interleaved operations on other nodes and SETs. |
+| `sweep.failures.consecutive` | Gauge | Full sweeps with no successful GET or acknowledged SET; successful contact resets the count. |
 
-`poll.last.started` znamená zahájení volání enginu, nikoliv potvrzení
-přijetí nodem. Pro aktuální stáří potvrzené komunikace používej
-`time() - bleriot:node:cpg_main:packet:last:valid`; nejprve ověř,
-že timestamp není `0` a že je aktuální heartbeat hubu. Pro mezery ve
-čtení sleduj také `poll.gap.max.microseconds / 1e6` a pro úplnost čtení
-postup `sweep.completed`. Při přímém použití diagnostiky mimo CLI lze
-callback `DiagNode.Polling` vynechat; pollingové hodnoty pak zůstávají
-`0` a neprokazují běžící scheduler.
+`poll.last.started` marks the start of an engine call, not confirmed receipt
+by the node. To measure the current age of confirmed communication, use
+`time() - bleriot:node:cpg_main:packet:last:valid`; first check that the
+timestamp is not `0` and the hub heartbeat is current. Also monitor
+`poll.gap.max.microseconds / 1e6` for read gaps and progress in `sweep.completed`
+for full-sweep completion. When using diagnostics directly outside the CLI,
+the `DiagNode.Polling` callback can be omitted; polling values then remain `0`
+and do not demonstrate that a scheduler is running.
 
 ## Per-Channel Catalog
 
